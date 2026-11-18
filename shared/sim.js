@@ -283,7 +283,7 @@ export const DEFAULT_SETTINGS = {
   size: 0, // 팀당 인원 제한 (0=자유, 1·2·3 = 1:1·2:2·3:3)
   lineup: 'humans', // humans: 사람만 돌아가며 타격 · nine: 9인 타순(빈 타순은 CPU)
   pitRot: 'inning', // inning: 이닝마다 투수 교대 · batter: 타자마다 교대 · fixed: 고정 · cpu: CPU 투수
-  fieldCtl: 'pos', // auto: 공 가까운 수비수로 자동 전환 · pos: 내 포지션만
+  fieldCtl: 'auto', // auto: 공 가까운 수비수로 자동 전환(기본, 11-19: 'pos' 기본이면 혼자하기 수비 때 투수만 잡혀 아무것도 못 함) · pos: 내 포지션만
   clubs: [0, 1],
   tod: 'night', // 경기 시간대: night | day
   hitEase: 1, // 사람 타격 난이도 0 쉬움 1 보통 2 어려움

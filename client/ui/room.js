@@ -51,7 +51,7 @@ export function renderRoom(lobby, myId, send) {
   $('rRules').textContent = RULES_KO[rules] + ' 모드';
   // 설정 값
   setSeg('sRules', rules);
-  setSeg('sSize', st.size || 0); setSeg('sPit', st.pitRot || 'inning'); setSeg('sLine', st.lineup || 'humans'); setSeg('sFld', st.fieldCtl || 'pos');
+  setSeg('sSize', st.size || 0); setSeg('sPit', st.pitRot || 'inning'); setSeg('sLine', st.lineup || 'humans'); setSeg('sFld', st.fieldCtl || 'auto');
   setSeg('sTod', st.tod || 'night'); setSeg('sHit', st.hitEase ?? 1); setSeg('sTime', st.timeLim || 0);
   setSeg('sMode', st.practice ? 'derby' : st.mode); setSeg('sInn', st.innings); setSeg('sOuts', st.derbyOuts); setSeg('sDiff', st.diff); setSeg('sPub', st.pub ? 1 : 0);
   show('sMaxWrap', !st.size);
