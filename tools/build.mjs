@@ -10,6 +10,8 @@ if (entries.length) {
   for (const e of entries) { const [src, out] = e.split(':'); await build({ ...common, entryPoints: [root + src], outfile: out }); }
 } else {
   await build({ ...common, entryPoints: [root + 'client/main.js'], outfile: root + 'public/app.js' });
+  // [audio] 효과음 샘플 목록 → public/assets/sfx/index.json (사운드 매니저가 읽음, 없으면 합성음)
+  { const d = root + 'public/assets/sfx/'; if (existsSync(d)) writeFileSync(d + 'index.json', JSON.stringify(readdirSync(d).filter((f) => /\.(ogg|mp3|m4a|wav)$/i.test(f)).sort())); }
   // 혼자 연습판 (서버 없이 단일 HTML)
   const js = readFileSync(root + 'public/app.js', 'utf8');
   let html = readFileSync(root + 'public/index.html', 'utf8');
