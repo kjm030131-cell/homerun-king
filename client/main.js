@@ -13,7 +13,7 @@ import { TEX_AVG, FACE_SKINS } from './texinfo.js';
 import { Animator, PITCH_DUR, PITCH_RELEASE_K, THROW_DUR, swingTrack, pitchK } from './anim.js';
 import { buildStadium, glowTex, createLook } from './stadium.js'; // [stadium] 구장 + 조명·톤매핑·블룸(look)
 import { FX } from './fx.js';
-import { sfx, audio, setVolume, crowdAmbience } from './audio.js';
+import { initAudio, setVolume, unlock as audio } from './audio/index.js'; // [audio] 사운드 매니저 (서버 이벤트 + cue:* 로만 소리)
 // [ui] 화면·HUD·설정은 client/ui/ (createUI 하나로 연결)
 import { createUI, cfg, store, TOUCH, banner, feedback, toast, castLine, addChat, sysChat, myDuty, paintClubs, swingReport, saveLocalCareer } from './ui/index.js';
 import { bus } from './core/bus.js'; // [gameplay] 게임 이벤트 → bus
@@ -25,6 +25,7 @@ const nowP = () => performance.now() / 1000;
 // [ui] 설정·localStorage·TOUCH 는 client/ui/settings.js 로 옮김 (cfg/store 는 위 import)
 const fcam = { yawOff: 0, pitchOff: 0, dragT: 0, yaw: null };
 setVolume(cfg.vol / 100);
+initAudio(); // [audio]
 
 // ═════════════ 렌더러 ═════════════
 const canvas = $('c');
@@ -214,7 +215,7 @@ function buildTeams(s) {
 // ═════════════ 네트워크 ═════════════
 function startLocal(name, o) {
   const game = new Game({ emit: (m) => handleMsg(m), sendTo: (id, m) => handleMsg(m), onGameOver: (sum) => saveLocalCareer(sum, name) });
-  myId = 'me'; myName = name;
+  myId = 'me'; myName = name; bus.emit('ui:me', { id: myId }); // [audio] 내 타석 오르간(batterUp)용
   game.addPlayer('me', name);
   const me = game.players.get('me'); me.team = o.team; me.pos = o.pos;
   game.applySettings({ mode: o.mode, innings: o.inn, derbyOuts: o.mode === 'derby' ? Math.max(5, o.inn * 3) : 10, diff: o.diff, clubs: o.clubs || [0, 1], pitRot: 'fixed', fieldCtl: o.fld || 'pos', tod: o.tod || 'night', hitEase: o.hitEase ?? 1, rules: o.rules }); // [gameplay] rules: 'real' | 'casual' (ui가 메뉴에서 넘겨줄 것)
@@ -274,7 +275,7 @@ function connectWS(code, name, pw = '') {
 let rtt = 0, pgList = null, pingDrawT = 0, curFps = 0;
 function handleMsg(m) {
   switch (m.t) {
-    case 'welcome': myId = m.id; myToken = m.token; if (m.code) sessionStorage.setItem('hr_tok_' + m.code, m.token); break;
+    case 'welcome': myId = m.id; bus.emit('ui:me', { id: myId }); /* [audio] */ myToken = m.token; if (m.code) sessionStorage.setItem('hr_tok_' + m.code, m.token); break;
     case 'pong': rtt = Math.round(performance.now() - m.c); net && net.send({ t: 'rtt', ms: rtt }); break;
     case 'lobby': lobby = m; ui.renderLobby(); break;
     case 'chat': addChat(m.name, m.text, m.team); break;
@@ -293,7 +294,6 @@ function toTitle() {
   setScreen(myName ? 'lobby' : 'title'); // [ui] 나가면 닉네임이 있으면 로비로
   history.replaceState(null, '', location.pathname);
   clearActors();
-  crowdAmbience(0.05);
 }
 // 구단 → 유니폼 (스코어버그 엠블럼은 ui/hud.js paintClubs)
 let clubsKey = '';
@@ -314,7 +314,7 @@ const ui = createUI({
   setMyName: (n) => { myName = n; }, getRole: () => getRole(), myTeam: () => myTeam(), nameOf: (id) => nameOf(id), simNow: () => simNow(),
   startLocal: (name, o) => startLocal(name, o), connect: (code, name, pw) => connectWS(code, name, pw), leave: () => toTitle(),
   applyQuality: () => applyQuality(), applyTimeOfDay: (t) => applyTimeOfDay(t), applyClubs: (cl) => applyClubs(cl),
-  setVolume: (v) => setVolume(v), stopReplay: () => replay.stop(), sound: (n) => sfx[n] && sfx[n](), unlockAudio: () => audio(),
+  setVolume: (v) => setVolume(v), stopReplay: () => replay.stop(), sound: () => { }, /* [audio] 오르간은 사운드가 batterUp 으로 직접 냄 → ui 쪽 호출은 지워도 됨 */ unlockAudio: () => audio(),
   setPitchType: (k) => setPitchType(k),
   setPaused: (on) => { if (net && net.local) { net.paused = on; if (!on) offset = null; } },
   onScreen: (sc) => { screen = sc; },
@@ -371,30 +371,30 @@ function onSnap(s) {
     const t = s.msg[1];
     banner(t, !!s.msg[2], /홈런!|만루 홈런|점 홈런|홈런왕/.test(t));
     castLine(t, s);
-    if (/끝내기/.test(t)) { sfx.cheer(6, 0.65); sfx.organ(); fx.show(18); excite = 1; startCelebration(); }
-    else if (/득점/.test(t)) { sfx.cheer(1.8, 0.35); excite = Math.max(excite, 0.6); }
-    else if (/안타|2루타|3루타|번트 안타/.test(t)) { sfx.cheer(1.6, 0.28); excite = Math.max(excite, 0.45); }
-    else if (/삼진/.test(t)) { sfx.ump(true); umpCall = nowP(); }
-    else if (/스트라이크$/.test(t)) { sfx.ump(true); umpCall = nowP(); }
-    else if (/강탈|다이빙 캐치|도루 저지/.test(t)) { sfx.cheer(2.2, 0.4); excite = Math.max(excite, 0.7); }
-    else if (/실책/.test(t)) sfx.groan();
+    bus.emit('ui:msg', { text: t, s }); // [audio] 배너 문구 → 캐스터(caster:line 으로 자막)
+    // [audio] 소리는 서버 이벤트(ev)로 — 여기선 화면 연출만
+    if (/끝내기/.test(t)) { fx.show(18); excite = 1; startCelebration(); }
+    else if (/득점/.test(t)) excite = Math.max(excite, 0.6);
+    else if (/안타|2루타|3루타|번트 안타/.test(t)) excite = Math.max(excite, 0.45);
+    else if (/삼진|스트라이크$/.test(t)) umpCall = nowP();
+    else if (/강탈|다이빙 캐치|도루 저지/.test(t)) excite = Math.max(excite, 0.7);
     if (/관전 입장|퇴장|재접속|끊김|강퇴/.test(t)) sysChat(t);
   }
   // 홈런 이벤트
   if (s.hr && s.hr.id !== seen.hr) {
-    { hrCine = 1; hrCineStart = nowP(); sfx.cheer(5, 0.6); sfx.organ(); excite = 1; setTimeout(() => { fx.show(12, [0, 0, 165]); for (let i = 0; i < 6; i++) sfx.firework(0.3 + i * 0.35); }, 900); bigBoard = { t: nowP(), big: '홈런!', sub: `${s.hr.name} · ${s.hr.dist}m` }; }
+    { hrCine = 1; hrCineStart = nowP(); excite = 1; setTimeout(() => { fx.show(12, [0, 0, 165]); }, 900); /* [audio] 소리는 서버 hr */ bigBoard = { t: nowP(), big: '홈런!', sub: `${s.hr.name} · ${s.hr.dist}m` }; }
     seen.hr = s.hr.id;
     if (cfg.replay && lastContactT && nowP() - lastContactT < 8) replay.schedule(nowP() + 2.6, { tEvent: lastContactT, pre: 0.8, post: 1.6, speed: 0.42, cam: 'hr', scene });
   }
   // 송구/포구/펜스 이벤트
-  if (s.te && s.te.id !== seen.te) { if (fielders[s.te.i]) { fielders[s.te.i].throwT = nowP(); sfx.throwWhoosh(); } seen.te = s.te.id; }
-  if (s.ce && s.ce.id !== seen.ce) { if (fielders[s.ce.i]) { fielders[s.ce.i].catchT = nowP(); sfx.catch(); if (s.ce.i === getRole().fi && getRole().defense) { feedback(s.ce.dive ? '다이빙 캐치!! 나이스!' : s.ce.jump ? '점프 캐치!! 나이스!' : '나이스 캐치!', '#4fd18b'); if (s.ce.dive || s.ce.jump) sfx.perfect(); }
+  if (s.te && s.te.id !== seen.te) { if (fielders[s.te.i]) { fielders[s.te.i].throwT = nowP(); } seen.te = s.te.id; }
+  if (s.ce && s.ce.id !== seen.ce) { if (fielders[s.ce.i]) { fielders[s.ce.i].catchT = nowP(); if (s.ce.i === getRole().fi && getRole().defense) { feedback(s.ce.dive ? '다이빙 캐치!! 나이스!' : s.ce.jump ? '점프 캐치!! 나이스!' : '나이스 캐치!', '#4fd18b'); if (s.ce.dive || s.ce.jump) bus.emit('ui:perfect'); }
     if ((s.ce.dive || s.ce.jump) && cfg.replay !== 0) replay.schedule(nowP() + 1.0, { tEvent: nowP(), pre: 1.2, post: 0.5, speed: 0.45, cam: 'catch', focus: fielders[s.ce.i].p, scene }); if (s.ce.dive) { fx.dustPuff(fielders[s.ce.i].p.root.position.x, fielders[s.ce.i].p.root.position.z, 2, 2); } } seen.ce = s.ce.id; }
   if (s.ce2 && s.ce2.id !== seen.ce2) {
     if (seen.ce2 !== undefined) showCall(s.ce2);
     seen.ce2 = s.ce2.id;
   }
-  if (s.we && s.we.id !== seen.we) { { sfx.wall(); shake = Math.max(shake, 0.15); } seen.we = s.we.id; }
+  if (s.we && s.we.id !== seen.we) { { shake = Math.max(shake, 0.15); } seen.we = s.we.id; }
   // 공
   if (s.b) {
     const [x, y, z, vx, vy, vz, h, st, sx, sy, sz] = s.b;
@@ -411,7 +411,6 @@ function onSnap(s) {
       ballL.x = lerp(ballL.x, sb.x, k); ballL.y = lerp(ballL.y, sb.y, k); ballL.z = lerp(ballL.z, sb.z, k);
       ballL.vx = sb.vx; ballL.vy = sb.vy; ballL.vz = sb.vz; ballL.sx = sb.sx; ballL.sy = sb.sy; ballL.sz = sb.sz; ballL.h = h; ballL.state = sb.state;
     }
-    if (st === 'held' && h !== lastHolder) sfx.catch();
     lastHolder = h; lastBallSt = st;
   } else { ballL = null; lastBallSt = ''; lastHolder = -1; }
   // 새 타구
@@ -425,7 +424,7 @@ function onSnap(s) {
   if (s.ph === 'pitch') droppedBat.visible = false;
   if (prevS && prevS.bat && s.bat && (prevS.bat.name !== s.bat.name || prevS.bat.id !== s.bat.id || prevS.bat.n !== s.bat.n)) { buntOn = false; if (s.mode !== 'derby') startIntro(s); }
   if (s.p && s.p.id !== seen.pitch) { seen.pitch = s.p.id; pitchFb = false; fx.trailClear(); tracerId = null; }
-  if (s.ph === 'over' && screen !== 'over' && ui.showOver(s)) { fx.show(8, [0, 0, 160]); sfx.cheer(4, 0.5); } // [ui]
+  if (s.ph === 'over' && screen !== 'over' && ui.showOver(s)) { fx.show(8, [0, 0, 160]); } // [ui] (환호는 서버 gameEnd)
   if (s.ph !== 'over' && screen === 'over') setScreen('game');
 }
 let umpCall = 0, bigBoard = null, pitchFb = false;
@@ -448,7 +447,6 @@ function showCall(ev) {
   const sp = callSprite(ev.out ? 'OUT' : 'SAFE', ev.out ? '#ff5050' : '#5be08f');
   sp.position.set(ev.x, 2.6, ev.z); scene.add(sp);
   calls.push({ sp, t0: nowP() });
-  if (ev.out) sfx.ump(true);
   // 가장 가까운 심판이 판정 동작
   let best = null, bd = 1e9;
   for (const U of umps) { const d = Math.hypot(U.p.root.position.x - ev.x, U.p.root.position.z - ev.z); if (d < bd) { bd = d; best = U; } }
@@ -472,7 +470,6 @@ function updateCalls() {
 function onContact(p, q, bunt) {
   lastContactT = nowP();
   const cp = new THREE.Vector3(p.tx, p.ty, 0);
-  if (bunt) sfx.bunt(); else sfx.crack(q);
   fx.impact(cp, bunt ? 0.3 : 0.5 + q * 1.1);
   if (!bunt && q > 0.3) {
     shake = Math.max(shake, 0.06 + q * 0.22);
@@ -658,10 +655,9 @@ function doSwing(mode) {
     onContact(p, q, mode === 'bunt');
     if (mode === 'bunt') feedback('번트!', '#9fd0ff');
     else if (q < 0.1) feedback(`${tm} · 빗맞은 파울`, '#ffcf3f');
-    else if (q > 0.82) { sfx.perfect(); feedback(`퍼펙트! · ${tm}`, '#4fd18b'); perfectHit = nowP(); }
+    else if (q > 0.82) { bus.emit('ui:perfect'); feedback(`퍼펙트! · ${tm}`, '#4fd18b'); perfectHit = nowP(); }
     else feedback(`${tm} · ${d < 0.08 ? '정타' : a[1] - p.ty > 0.07 ? '공 윗부분 → 땅볼' : a[1] - p.ty < -0.07 ? '공 아랫부분 → 뜬공' : '빗맞음'}`, q > 0.5 ? '#4fd18b' : '#ffcf3f');
   } else {
-    sfx.whiff();
     feedback(Math.abs(dt) > M.W ? (dt < 0 ? `너무 빨라 (${-ms}ms)` : `늦었어 (${ms}ms)`) : '공이랑 안 맞았어', '#ff8a80');
   }
 }
@@ -682,7 +678,7 @@ function pitchClick() {
   if (!gauge) {
     const a = (camMode !== 'intro' && aimPoint()) || [0, 0.8];
     gauge = { t0: nowP(), aim: a, type: pitchType };
-    sfx.ui();
+    bus.emit('ui:click'); // [audio]
   } else {
     const lv = gaugeLevel(nowP() - gauge.t0);
     sendPitch(lv);
@@ -693,7 +689,7 @@ function sendPitch(lv) {
   const [pb0, pb1] = pBand(), pf = lv >= pb0 && lv <= pb1; // [gameplay] 모드별 퍼펙트 구간
   const txt = lv > 1.0 ? '과투구! 제구 흔들림' : pf ? '퍼펙트 투구! 공 끝 살아있다' : lv < 0.6 ? '힘 빠진 공' : '좋아';
   feedback(`${txt} (${Math.round(lv * 100)}%)`, pf ? '#4fd18b' : lv > 1 ? '#ff8a80' : '#ffcf3f');
-  if (pf) sfx.perfect();
+  if (pf) bus.emit('ui:perfect'); // [audio]
   gauge = null;
 }
 $('buntBtn').onpointerdown = (e) => { e.stopPropagation(); toggleBunt(); };
@@ -893,7 +889,7 @@ function updateWorld(dt) {
       if (!bunt && swingK >= 0.3 && swingK <= 0.78) {
         batter.p.root.updateMatrixWorld(true);
         fx.batPush(batter.p.batPoint(0.42, _w), batter.p.batPoint(0.86, _u));
-        if (!batter.swSfx) { batter.swSfx = true; sfx.swing(0.8); }
+        if (!batter.swSfx) { batter.swSfx = true; bus.emit('cue:swing', { pid: s.p && s.p.id, power: s.p && s.p.mode === 'power' ? 1 : 0.8 }); } // [audio] 화면 스윙 순간
       }
       if (swingK < 0) batter.swSfx = false;
     }
@@ -923,7 +919,7 @@ function updateWorld(dt) {
     const dBase = Math.hypot(tb[0] - x, tb[1] - z);
     let slideK = -1;
     // 슬라이딩은 서버 판정과 같게 (flags 4)
-    if ((flags & 4) && s.ph === 'live') { if (!A.slideT) { A.slideT = tp; sfx.slide(); fx.dustPuff(x, z, 2, 1.5); } }
+    if ((flags & 4) && s.ph === 'live') { if (!A.slideT) { A.slideT = tp; bus.emit('cue:slide', { rid, x, z }); /* [audio] */ fx.dustPuff(x, z, 2, 1.5); } }
     if (A.slideT) { slideK = (tp - A.slideT) / 0.6; if (slideK > 1.6 || (sp < 0.3 && slideK > 1)) { A.slideT = 0; slideK = -1; } }
     const nm = nameOf(pid);
     setTag(A, nm || '', pid === myId ? '#ffcf3f' : '#fff');
@@ -1116,7 +1112,7 @@ function updateBall(dt, t, role, pitchPhase) {
       if (sv >= 1.0 && tracerId !== p.id && p.res !== 'hit') showTracer(p);
       if (sv >= 1 && !pitchFb && p.res !== 'hit') {
         pitchFb = true;
-        if (!(contactFreeze && contactFreeze.pid === p.id)) sfx.mitt(p.kmh > 140 ? 1 : 0.7);
+        if (!(contactFreeze && contactFreeze.pid === p.id)) bus.emit('cue:mitt', { pid: p.id, kmh: p.kmh }); // [audio] 화면에서 공이 미트에 닿는 순간
       }
       if (sv > 1.0 && (role.batter || role.pitcher || camMode === 'tv')) { crossMark.visible = true; crossMark.position.set(p.tx, p.ty, 0.02); crossMark.material.color.set(p.res === 'take' || p.res === 'miss' || true ? '#ff3b3b' : '#fff'); }
     }
@@ -1129,7 +1125,7 @@ function updateBall(dt, t, role, pitchPhase) {
       const prevY = ballL.y, prevVy = ballL.vy;
       for (let i = 0; i < steps; i++) {
         const ev = integrate(ballL, dt / steps);
-        if (ev.landed && ev.impact > 2.5) { sfx.bounce(ev.impact); if (ev.surf === 'dirt' && ev.impact > 3) fx.dustPuff(ballL.x, ballL.z, 0.8, 0.8); }
+        if (ev.landed && ev.impact > 2.5) { bus.emit('cue:bounce', { impact: ev.impact, surf: ev.surf, x: ballL.x, z: ballL.z }); /* [audio] */ if (ev.surf === 'dirt' && ev.impact > 3) fx.dustPuff(ballL.x, ballL.z, 0.8, 0.8); }
       }
       ballPos.set(ballL.x, ballL.y, ballL.z);
       fx.trailPush(ballPos, ballL.state === 'thrown' ? '#9fd0ff' : '#ffe6b0');
@@ -1374,7 +1370,7 @@ function updateHUD() {
   const s = S;
   const pitchPhase = s.ph === 'pitch' || s.ph === 'pitching';
   // 릴리스 순간 손끝 반짝 + 소리 (타자 와인드업 신호 '온다!'와 같은 순간)
-  if (role.batter && s.ph === 'pitching' && s.p && s.mode !== 'derby' && simNow() >= s.p.t0 && seen.rel !== s.p.id) { seen.rel = s.p.id; sfx.ui(); fx.impact(new THREE.Vector3(RELEASE[0] - 0.15, RELEASE[1], RELEASE[2]), 0.22); }
+  if (role.batter && s.ph === 'pitching' && s.p && s.mode !== 'derby' && simNow() >= s.p.t0 && seen.rel !== s.p.id) { seen.rel = s.p.id; bus.emit('cue:release', { pid: s.p.id, kmh: s.p.kmh }); /* [audio] */ fx.impact(new THREE.Vector3(RELEASE[0] - 0.15, RELEASE[1], RELEASE[2]), 0.22); }
   // 존/커서
   zoneGroup.visible = pitchPhase && camMode !== 'intro' && (role.batter || role.pitcher || camMode === 'tv' || camMode === 'catch');
   if (zoneGroup.visible && zoneMesh) { // 타석일 땐 진하게, 와인드업~투구 중엔 살짝 더 밝게
@@ -1500,7 +1496,6 @@ function frame(now, manual) {
   if (frameN % 2 === 0) drawMinimap();
   excite = Math.max(0, excite - dt * 0.18);
   stadium.update(time, inGame ? excite : 0.15);
-  crowdAmbience(inGame ? 0.06 + excite * 0.25 : 0.03);
   // 전광판
   if (inGame) {
     const lp = S.lp ? { id: S.lp.id, kmh: S.lp.kmh, name: PITCHES[S.lp.type]?.name } : null;
