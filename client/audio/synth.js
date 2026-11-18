@@ -16,8 +16,10 @@ export function estEV(q, mode = 'contact', kmh = 145) {
   return clamp(((31.5 + 20.2 * q) * pow + 0.1 * (kmh / 3.6 - 35)) * 3.6, 60, 190);
 }
 // 종류: barrel(홈런성 정타) / solid(정타) / weak(빗맞음) / jam(먹힘) / tip(파울팁) / bunt
+const GRADE = { tip: 'tip', bunt: 'bunt', weak: 'jam', ok: 'weak', good: 'solid', perfect: 'barrel' };
 export function batKind(q, ev, o = {}) {
-  if (o.bunt) return 'bunt';
+  if (o.bunt || o.grade === 'bunt') return 'bunt';
+  if (o.grade && GRADE[o.grade]) return o.grade === 'good' && ev >= 168 && q >= 0.65 ? 'barrel' : GRADE[o.grade];
   if (q < 0.12 || (o.foul && q < 0.25)) return 'tip';
   if (q < 0.3) return 'jam';
   if (q < 0.55) return 'weak';
@@ -28,7 +30,7 @@ export function batKind(q, ev, o = {}) {
 export function bat(d, prof = {}) {
   const q = clamp(d.q ?? 0.6, 0, 1), mode = d.mode || 'contact';
   const ev = d.ev || estEV(q, mode, d.kmh);
-  const kind = batKind(q, ev, { bunt: d.bunt || mode === 'bunt', foul: d.foul });
+  const kind = batKind(q, ev, { bunt: d.bunt || mode === 'bunt', foul: d.foul, grade: d.grade });
   const b = clamp((ev - 90) / 90, 0, 1) * 0.6 + q * 0.4; // 밝기·세기
   const pl = place(0, 0.3, 1);
   const big = kind === 'barrel';

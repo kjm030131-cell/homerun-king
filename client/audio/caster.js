@@ -56,8 +56,9 @@ const SITU = [
 ];
 
 export function situation(d = {}) {
-  const s = d.s || d;
-  const cnt = s.cnt || d.cnt || [0, 0, 0], occ = s.occ || d.occ || [false, false, false], sc = s.sc || d.sc || [0, 0];
+  const s = d.s && typeof d.s === 'object' ? d.s : d;
+  // 서버 windup 이벤트: b·s·o·on·sc / 스냅샷: cnt·occ·sc
+  const cnt = s.cnt || d.cnt || [d.b || 0, d.s || 0, d.o || 0], occ = (s.occ || d.occ || d.on || [0, 0, 0]).map(Boolean), sc = s.sc || d.sc || [0, 0];
   const inn = s.inn || d.inn || 1, half = s.half ?? d.half ?? 0;
   const diff = Math.abs((sc[0] || 0) - (sc[1] || 0));
   return {

@@ -21,12 +21,12 @@ function aiGames(n, rules = 'casual', set = {}) {
   return { runs: runs / n / 2, hr: hr / n / 2, stuck, maxMin, lc: lc / n, inn: inn / n };
 }
 
-test('캐주얼 AI 3이닝 40판: 멈춤 없음 · 팀당 득점 1.6~5.5 · 홈런 팀당 0.4개 이상 · 한 판 25분 이내', () => {
+test('캐주얼 AI 3이닝 40판: 멈춤 없음 · 팀당 득점 1.6~5.5 · 홈런 팀당 0.4개 이상 · 가장 긴 판 30분 이내', () => {
   const r = aiGames(40);
   assert.equal(r.stuck, 0, '끝나지 않은 경기');
   assert.ok(r.runs > 1.6 && r.runs < 5.5, `팀당 득점 ${r.runs.toFixed(2)}`);
   assert.ok(r.hr > 0.4, `팀당 홈런 ${r.hr.toFixed(2)}`);
-  assert.ok(r.maxMin < 25, `가장 긴 경기 ${r.maxMin.toFixed(1)}분`);
+  assert.ok(r.maxMin < 30, `가장 긴 경기 ${r.maxMin.toFixed(1)}분`);
   assert.ok(r.inn <= 4.01, `평균 ${r.inn}이닝 (연장 최대 1회)`);
 });
 

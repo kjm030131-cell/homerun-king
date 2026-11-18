@@ -4,6 +4,7 @@
 import * as THREE from 'three';
 import * as SkeletonUtils from 'three/addons/utils/SkeletonUtils.js';
 import { BONES, BIND_POS } from './rig.js';
+import { Character } from './anim/character.js';
 
 const MAP = { // driver 관절 → 스킨 뼈
   hips: 'Hips', spine: 'Spine', chest: 'Spine2', neck: 'Neck', head: 'Head',
@@ -66,7 +67,7 @@ export function loadSkin(url, urlLo) {
 
 // 등번호/이름/워드마크 데칼 (왼쪽 절반 = 앞, 오른쪽 절반 = 등)
 const decalCache = new Map();
-function decalTex(u, num, name) {
+export function decalTex(u, num, name) {
   const key = JSON.stringify([u.word, u.num, u.accent, u.jersey, num, name]);
   if (decalCache.has(key)) return decalCache.get(key);
   const c = document.createElement('canvas'); c.width = 1024; c.height = 512;
@@ -330,6 +331,7 @@ function syncSkin(P) {
 
 const _cp = new THREE.Vector3();
 export function syncAllSkins(camera) {
+  Character.frame(camera); // 새 캐릭터: 다음 프레임 화면 밖·먼 거리 판단(애니메이션 갱신 건너뛰기, LOD)
   if (camera) camera.getWorldPosition(_cp);
   for (const P of live) {
     if (!P.root.parent) { live.delete(P); continue; }

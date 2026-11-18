@@ -7,7 +7,7 @@ const store = {
 };
 // 볼륨(0~100). master 는 기존 설정 키 'vol' 을 그대로 쓴다.
 export const VOL_KEYS = { master: 'vol', sfx: 'volSfx', crowd: 'volCrowd', cast: 'volCast' };
-const VOL_DEF = { master: 80, sfx: 100, crowd: 85, cast: 100 };
+const VOL_DEF = { master: 80, sfx: 100, crowd: 100, cast: 100 }; // ui/settings.js 기본값과 같게
 const vols = {};
 for (const k in VOL_KEYS) vols[k] = store.get(VOL_KEYS[k], VOL_DEF[k]);
 export const readStore = store.get;
@@ -24,9 +24,9 @@ const cap = (v) => Math.max(0, Math.min(1, v / 100));
 const curve = (v) => cap(v) ** 1.6;
 
 export function getVol(k) { return vols[k]; }
-export function setVol(k, v) {
+export function setVol(k, v, save = true) {
   vols[k] = Math.max(0, Math.min(100, Math.round(v)));
-  store.set(VOL_KEYS[k], vols[k]);
+  if (save) store.set(VOL_KEYS[k], vols[k]);
   applyVols();
 }
 function applyVols() {

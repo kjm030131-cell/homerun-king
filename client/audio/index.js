@@ -1,15 +1,15 @@
 // audio/index.js — 사운드 매니저. bus 이벤트(REBUILD.md 4-1)를 듣고 소리를 낸다. 게임 상태는 절대 바꾸지 않는다.
 // main.js 에서 initAudio() 한 번만 부르면 끝. 다른 파트는 sfx 를 직접 부르지 말고 bus.emit 만 한다.
 //
-// 듣는 이벤트 (데이터 필드는 아직 gameplay 확정 전 — 있으면 쓰고 없으면 기본값):
-//   windup{s|cnt,occ,sc,inn,mode}  release{cue,kmh}  swing{power,bunt}  miss{local}
-//   contact{pid,q,ev,la,mode,bunt,foul,kmh}  foul{}  ballCall{walk}  strikeCall{k,swinging,looking}
-//   catch{x,z,pitch,kmh,dive,jump,held}  throw{x,z,p}  tag{x,z}  out{x,z,call,big,robbed,dp,k}
-//   safe{x,z,call,hit,error}  hr{dist,n,walkoff}  score{walkoff,n}  steal{ok}  slide{x,z}  dive{x,z}
-//   inningEnd{start}  gameEnd{king}  modeChange{rules:'real'|'casual'}
-// 클라 전용 보조 이벤트 (sim 이벤트가 아닌 연출용):
-//   ui:click  ui:perfect  ui:tick{p}  ui:walkup{me}  ui:screen{screen}  ui:msg{text,s}
-//   ball:bounce{x,z,impact,surf}  ball:wall{x,z}
+// 기준은 서버 이벤트(sim → 스냅샷 ev → bus, 필드는 docs/rebuild/events.md).
+// 화면 시각에 맞춰야 하는 소리만 클라 신호(cue:*)·localSwing 으로 내고, 같은 순간의 서버 이벤트는 걸러서 한 번만 낸다.
+//   localSwing{pid,mode,contact,q}  내 스윙 즉시 타격음/헛스윙 → 같은 pid 의 서버 contact 는 관중 반응만
+//   cue:mitt{pid,kmh}               화면에서 공이 미트에 닿는 순간 → 1.5초 안 서버 catch{pitch:1} 무시
+//   cue:swing{pid,power}            화면 스윙 순간 바람소리 (서버 swing/miss 는 소리 안 냄)
+//   cue:release{pid}                타자용 '온다' 신호음 (서버 release 는 소리 안 냄)
+//   cue:slide{rid,x,z}              화면 슬라이딩 시작 (서버 slide 는 위치가 없어 소리 안 냄)
+//   cue:bounce{x,z,impact,surf}     클라 공 물리의 바운드 (서버엔 없음)
+// UI 보조: ui:click  ui:perfect  ui:tick{p}  ui:walkup{me}  ui:screen{screen}  ui:msg{text,s}(배너 → 캐스터)
 // 내보내는 이벤트: caster:line{text,pri}  (자막은 UI 가 그린다)
 import { bus } from '../core/bus.js';
 import { ctx, installUnlock, whenReady, setVol, getVol, VOL_KEYS, E, stats } from './engine.js';
@@ -24,11 +24,13 @@ const now = () => performance.now() / 1000;
 export const crowd = new Crowd();
 let caster = null, rules = 'real', inited = false;
 const seenContact = new Map(); // pid → 처리 시각 (내 스윙 즉시 소리 + 나중에 서버 정보 도착해도 두 번 안 냄)
-let lastCatch = 0, lastCall = 0, lastGameEnd = 0, lastHr = 0;
+const game = { inn: 1, innings: 9, mode: 'game' }; // windup 에 없는 상황(이닝·모드)은 다른 이벤트에서 모아 둠
+let myId = null, lastDive = -9, lastMitt = -9, lastGameEnd = 0, lastHr = 0, lastSitu = null;
+const UMP_OUT = new Set(['force', 'tag', 'pick', 'cs']); // 누심이 소리 내 외치는 아웃 (뜬공·삼진은 제외)
 
 // 타구 기대치(0~1): 관중이 얼마나 들썩일지. 타구 속도·발사각이 있으면 그걸로, 없으면 q 로
 export function expectOf(d) {
-  if (d.bunt || d.mode === 'bunt') return 0.05;
+  if (d.bunt || d.mode === 'bunt' || d.grade === 'bunt') return 0.05;
   const q = clamp(d.q ?? 0.5, 0, 1);
   // 서버 타구 속도가 아직 없으면 보수적으로(q 로만) — 실제 값이 오면 다시 맞춘다
   let e = d.ev ? clamp((d.ev - 110) / 60, 0, 1) * 0.7 + q * 0.3 : clamp((q - 0.3) / 0.6, 0, 1) ** 1.3 * (d.mode === 'power' ? 1.1 : 0.95);
@@ -47,61 +49,71 @@ export function initAudio() {
   caster = new Caster((text, pri) => bus.emit('caster:line', { text, pri }), (k) => crowd.setDuck(k));
 
   // ── 투구 ──
-  on('windup', (d) => { const v = situation(d); const t = tension(v); crowd.prePitch(t); caster.situ(d); });
-  on('release', (d) => { if (d.cue) S.ui.cue(); });
-  on('swing', (d) => { if (!d.bunt) S.swing(d); });
-  on('miss', (d) => { if (d.local) S.whiff(); });
+  on('windup', (d) => { d = { ...d, inn: game.inn, innings: game.innings, mode: game.mode }; lastSitu = situation(d); crowd.prePitch(tension(lastSitu)); caster.situ(d); });
+  on('cue:release', () => S.ui.cue());
+  on('cue:swing', (d) => { if (!d.bunt) S.swing(d); }); // main.js·anim 둘 다 낼 수 있음 → synth 쪽 key/gap(0.15초)로 한 번만
+  on('cue:mitt', (d) => { lastMitt = now(); S.mitt(d.kmh || 140); });
 
   // ── 타격 ──
+  // 내 스윙: 서버 응답(핑만큼 늦음) 전에 바로 타격음
+  on('localSwing', (d) => {
+    if (!d.contact) { S.whiff(); return; }
+    if (d.pid != null) seenContact.set(d.pid, now());
+    const kind = S.bat(d, { casual: rules === 'casual' });
+    if (kind !== 'tip' && kind !== 'bunt') crowd.rise(expectOf(d));
+  });
   on('contact', (d) => {
-    const t = now(), key = d.pid ?? 'x' + t;
+    const t = now();
     for (const [k, at] of seenContact) if (t - at > 10) seenContact.delete(k);
-    if (seenContact.has(key)) { // 이미 소리 냄 → 서버가 준 실제 타구 속도·각도로 관중 반응만 다듬기
-      if (d.ev && !d.bunt) { const e = expectOf(d), p = crowd.pending(); if (p && Math.abs(e - p) > 0.15) crowd.rise(e); else if (!p && e > 0.3) crowd.rise(e); }
+    if (d.pid != null && seenContact.has(d.pid)) { // 이미 소리 냄 → 실제 타구 속도·각도로 관중 반응만 다듬기
+      if (!d.foul && d.grade !== 'bunt') { const e = expectOf(d), p = crowd.pending(); if (Math.abs(e - p) > 0.15) crowd.rise(e); }
       return;
     }
-    seenContact.set(key, t);
+    if (d.pid != null) seenContact.set(d.pid, t);
     const kind = S.bat(d, { casual: rules === 'casual' });
-    if (kind !== 'tip' && kind !== 'bunt') crowd.rise(expectOf({ ...d, foul: d.foul || kind === 'jam' && d.q < 0.2 }));
+    if (kind !== 'tip' && kind !== 'bunt') crowd.rise(expectOf(d));
   });
-  on('foul', () => { const e = crowd.pending(); if (e > 0.4) crowd.ooh(e); else crowd.settle(0.8); });
+  on('foul', (d) => { if (d.kind === 'tip') return; const e = crowd.pending(); if (e > 0.4) crowd.ooh(e); else crowd.settle(0.8); });
 
   // ── 판정 ──
   on('strikeCall', (d) => {
     if (d.k) { S.ump('strike3', { big: true }); crowd.cheer(0.32, 1.6); }
-    else if (!d.swinging) S.ump('strike', {});
-    lastCall = now(); afterPitch(d);
+    else if (d.looking) S.ump('strike', {});
+    afterPitch(d);
   });
-  on('ballCall', (d) => { if (d.walk) crowd.applause(0.3, 1.5); afterPitch(d); });
+  on('ballCall', (d) => { if (d.hbp) crowd.ooh(0.35); else if (d.walk) crowd.applause(0.3, 1.5); afterPitch(d); });
   on('out', (d) => {
-    if (d.call) { S.ump('out', d); lastCall = now(); }
+    if (UMP_OUT.has(d.kind)) S.ump('out', d);
+    if (d.kind === 'k') return; // 삼진은 strikeCall 에서
     const pend = crowd.pending();
-    if (d.robbed) crowd.cheer(1.0, 4);
-    else if (d.big || d.dp) crowd.cheer(d.dp ? 0.6 : 0.75, 2.6);
+    if ((d.dp || 0) >= 2) crowd.cheer(0.6, 2.6);
+    else if (d.kind === 'cs' || d.kind === 'pick') crowd.cheer(0.5, 2);
     else if (pend > 0.45) crowd.groan(pend);
     else if (pend > 0) crowd.settle(1);
   });
   on('safe', (d) => {
-    if (d.call) { S.ump('safe', d); lastCall = now(); return; }
-    if (d.error) { crowd.groan(0.45); return; }
-    const a = { '1B': 0.42, bunt: 0.4, '2B': 0.6, '3B': 0.72 }[d.hit] ?? 0.4;
-    crowd.cheer(a, 1.6 + a * 1.6);
+    if (d.close || d.steal || d.pick) S.ump('safe', d);
+    if (d.steal) crowd.cheer(0.35, 1.4);
   });
+  on('hit', (d) => { const a = d.bunt ? 0.4 : ({ 1: 0.42, 2: 0.6, 3: 0.72 }[d.bases]); if (a) crowd.cheer(a, 1.6 + a * 1.6); });
+  on('error', () => crowd.groan(0.45));
   on('tag', (d) => S.glove(d));
 
   // ── 수비 ──
   on('catch', (d) => {
-    if (d.pitch) { S.mitt(d.kmh || 140); return; }
-    const t = now(); if (t - lastCatch < 0.12) return; lastCatch = t;
+    if (d.pitch) { if (now() - lastMitt > 1.5) S.mitt(d.kmh || 140); return; } // 화면 신호(cue:mitt)가 이미 냈으면 건너뜀
     S.glove(d);
-    if (d.dive) S.dive(d);
+    if (d.robbed) crowd.cheer(1.0, 4);
+    else if (d.fly && (d.dive || d.jump)) crowd.cheer(0.75, 2.6);
   });
-  on('throw', (d) => S.throwWhoosh(d));
-  on('slide', (d) => S.slide(d));
-  on('dive', (d) => S.dive(d));
-  on('ball:bounce', (d) => S.bounce(d));
-  on('ball:wall', (d) => { S.wall(d); if (crowd.pending() > 0.4) crowd.ooh(0.6); });
-  on('steal', (d) => { if (d.ok) crowd.cheer(0.35, 1.4); else crowd.rise(0.3); });
+  on('throw', (d) => S.throwWhoosh({ x: d.from && d.from[0], z: d.from && d.from[1], p: d.pw }));
+  on('cue:slide', (d) => S.slide(d)); // 서버 slide 는 위치가 없어 소리 안 냄. main.js·anim 중복은 key/gap(0.3초)
+  on('cue:dive', (d) => { lastDive = now(); S.dive(d); });
+  on('dive', (d) => { setTimeout(() => { if (now() - lastDive > 0.6) S.dive(d); }, 250); }); // 화면 신호(cue:dive)가 없을 때만
+  on('cue:bounce', (d) => S.bounce(d));
+  on('wall', (d) => { S.wall(d); if (crowd.pending() > 0.4) crowd.ooh(0.6); });
+  on('steal', () => crowd.rise(0.3));
+  on('wildPitch', () => crowd.ooh(0.35));
 
   // ── 큰 장면 ──
   on('hr', (d) => {
@@ -111,11 +123,14 @@ export function initAudio() {
     for (let i = 0; i < 6; i++) S.firework(0.9 + i * 0.35);
   });
   on('score', (d) => {
+    if (now() - lastHr < 4) return; // 홈런 득점은 이미 터짐
     if (d.walkoff) { crowd.explode(true); S.music.walkup(); return; }
-    if (now() - lastHr < 3) return; // 홈런 득점은 이미 터짐
-    crowd.cheer(0.55, 2.4);
+    crowd.cheer(d.go || d.tie ? 0.75 : 0.55, 2.4);
   });
-  on('inningEnd', (d) => { crowd.applause(0.35, 2.5); if (d.start && Math.random() < (rules === 'casual' ? 0.8 : 0.4)) S.music.inning(); });
+  on('inningEnd', () => crowd.applause(0.35, 2.5));
+  bus.on('inningStart', (d) => { if (d && d.inning) game.inn = d.inning; });
+  bus.on('modeChange', (d) => { if (d && d.mode) game.mode = d.mode; if (d && d.innings) game.innings = d.innings; });
+  on('inningStart', () => { if (Math.random() < (rules === 'casual' ? 0.8 : 0.4)) S.music.inning(); });
   on('gameEnd', () => { const t = now(); if (t - lastGameEnd < 4) return; lastGameEnd = t; crowd.cheer(0.7, 4); crowd.applause(0.8, 5); });
   on('modeChange', (d) => { if (d.rules) { rules = d.rules === 'casual' ? 'casual' : 'real'; crowd.setProfile(rules); } });
 
@@ -124,14 +139,19 @@ export function initAudio() {
   on('ui:perfect', () => S.ui.perfect());
   on('ui:tick', (d) => S.ui.tick(d.p));
   on('ui:walkup', (d) => { if (d.me) S.music.walkup(); });
-  bus.on('ui:screen', (d) => { const g = d && (d.screen === 'game' || d.screen === 'over'); crowd.setScene(!!g); if (!g && caster) caster.stop(); });
+  bus.on('ui:me', (d) => { myId = d && d.id; });
+  on('batterUp', (d) => { if (d.id && d.id === myId) S.music.walkup(); }); // 내 타석 오르간
+  bus.on('ui:screen', (d) => { const n = d && (d.name || d.screen); const g = n === 'game' || n === 'over'; crowd.setScene(!!g); if (!g && caster) caster.stop(); });
+  bus.on('ui:volume', (d) => { if (!d) return; for (const k of ['master', 'sfx', 'crowd', 'cast']) if (d[k] != null) setVol(k, d[k] * 100, false); });
   bus.on('ui:msg', (d) => { if (caster && d) caster.msg(d.text, d.s); }); // 자막은 소리가 막혀 있어도 나오게
   window.__audio = { E, stats, sampleInfo, crowd, SLOTS, expectOf, rules: () => rules };
 }
 
 // 투구 사이: 접전이면 응원 박수
 function afterPitch(d) {
-  const v = situation(d); const t = tension(v);
+  const v = lastSitu ? { ...lastSitu, balls: d.b ?? lastSitu.balls, strikes: d.s ?? lastSitu.strikes } : situation(d);
+  v.twoK = v.strikes === 2; v.full = v.balls === 3 && v.strikes === 2;
+  const t = tension(v);
   if (t > 0.55) setTimeout(() => crowd.chant(), 900);
 }
 // 긴장도 0~1
