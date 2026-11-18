@@ -129,7 +129,8 @@ export class ClipAnimator {
     if (st === 'sprint') { if (speed < 5.4) st = speed > 0.35 ? 'run' : base; }
     else if (st === 'run') { if (speed > 6.2 && C.has('sprint')) st = 'sprint'; else if (speed < 0.35) st = base; }
     else st = speed > 0.6 ? 'run' : base;
-    if (st === 'run' || st === 'sprint') C.play(st, { fade: 0.22, speed: clamp(speed / (CLIPS[st].speed || 4), 0.55, 1.7), sync: true });
+    // 재생 속도 = 실제 속도/클립 원래 속도. 너무 느리게 돌리면 슬로모션처럼 보여서(조깅도 발 구르는 템포는 빠름) 최소 0.8
+    if (st === 'run' || st === 'sprint') C.play(st, { fade: 0.22, speed: clamp(speed / (CLIPS[st].speed || 4), 0.8, 1.7), sync: true });
     else C.play(st, { fade: 0.3 });
     this.loco = st;
   }
