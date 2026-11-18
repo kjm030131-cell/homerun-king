@@ -2,6 +2,8 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { Game, inZone } from '../shared/sim.js';
+// 결정적 난수 (CI에서 운에 따라 깨지지 않게)
+const seeded = (s) => () => { s |= 0; s = (s + 0x6D2B79F5) | 0; let t = Math.imul(s ^ (s >>> 15), 1 | s); t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t; return ((t ^ (t >>> 14)) >>> 0) / 4294967296; };
 
 function pickoffOdds(steal, trials = 150) {
   let out = 0, stuck = 0;
@@ -44,7 +46,8 @@ test('타격 연습 모드: 아웃 없이 계속 진행 + 구종 고정', () => 
   assert.deepEqual([...types], ['SL']);
 });
 
-test('사람 타자(초보 흉내) 타율이 너무 낮거나 높지 않음 (.18~.45)', () => {
+test('사람 타자(초보 흉내) 타율이 너무 낮거나 높지 않음 (.12~.32)', () => {
+  const rnd0 = Math.random; Math.random = seeded(31);
   const gs = (s) => { let u = 0, v = 0; while (!u) u = Math.random(); while (!v) v = Math.random(); return s * Math.sqrt(-2 * Math.log(u)) * Math.cos(2 * Math.PI * v); };
   let h = 0, ab = 0;
   for (let n = 0; n < 4; n++) {
@@ -52,15 +55,18 @@ test('사람 타자(초보 흉내) 타율이 너무 낮거나 높지 않음 (.18
     game.applySettings({ innings: 9, diff: 1, hitEase: 1 }); game.start();
     let steps = 0;
     while (game.phase !== 'over' && steps < 30 * 60 * 90) {
-      game.tick(1 / 30); steps++;
+      game.tick(game.phase === 'pitching' ? 1 / 120 : 1 / 30); steps++;
       const p = game.pitch;
-      if (game.phase === 'pitching' && game.batter.id === 'me' && !p.swung && game.now >= p.arrive - 0.03) {
+      if (p && p._sw && !p.swung && game.phase === 'pitching' && game.now >= p.arrive + p._sw.dt) { const w = p._sw; p._sw = null; game.handle('me', { ...w.m, dt: game.now - p.arrive }); }
+      if (game.phase === 'pitching' && game.batter.id === 'me' && !p.swung && !p._d && game.now >= p.arrive - 0.3) {
+        p._d = 1; // 공마다 한 번만 결정 (예전 테스트는 매 틱 다시 굴려서 사실상 모든 공에 스윙)
         const z = inZone(p.tx, p.ty), brk = !['FB', 'TS'].includes(p.type);
-        if ((z && Math.random() < 0.8) || (!z && Math.random() < 0.35)) game.handle('me', { t: 'swing', pid: p.id, dt: gs(0.1 * (brk ? 1.25 : 1)), ax: gs(0.14), ay: gs(0.14 * (brk ? 1.3 : 1)), mode: 'contact' });
+        if ((z && Math.random() < 0.8) || (!z && Math.random() < 0.35)) p._sw = { dt: gs(0.14 * (brk ? 1.25 : 1)), m: { t: 'swing', pid: p.id, ax: gs(0.2), ay: gs(0.2 * (brk ? 1.25 : 1)), mode: 'contact' } };
       }
     }
     const st = game.stats.get('me'); if (st) { h += st.h; ab += st.pa - st.bb; }
   }
+  Math.random = rnd0;
   const avg = h / ab;
-  assert.ok(avg > 0.18 && avg < 0.45, `타율 ${avg.toFixed(3)}`);
+  assert.ok(avg > 0.12 && avg < 0.32, `타율 ${avg.toFixed(3)}`);
 });

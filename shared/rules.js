@@ -11,9 +11,9 @@ export const RULES = {
     ghost: null, // 연장 승부치기 주자 (null = 없음)
     startCount: [0, 0], // 타석 시작 볼카운트 [볼, 스트라이크]
     // ── 타격 (사람 타자) ──
-    hitEase: 1.0, // HIT_EASE(난이도별 판정 폭) 위에 곱하는 배율
-    humanQ: 0.85, // 맞힌 공 질 보정: q = 1-(1-q)·humanQ (작을수록 후함)
-    sweetPull: 0.35, // 잘 맞힌 공 발사각을 10~25° 쪽으로 모으는 최대 비율
+    hitEase: 1.0, // HIT_EASE(난이도별) 위에 곱하는 PCI 크기·타이밍 창 배율 (sim.js PCI)
+    humanQ: 1.0, // 맞힌 공 질 보정: q = 1-(1-q)·humanQ (작을수록 후함, 1 = 보정 없음)
+    sweetPull: 0.25, // 잘 맞힌 공 발사각을 10~25° 쪽으로 모으는 최대 비율
     evMul: 1.0, // 타구 속도 배율 (모든 타자)
     foulTipK: 0.22, // 2스트라이크 파울 → 파울팁 삼진 확률
     cpuPower: 0.2, // CPU 타자 강공(파워 스윙) 비율 (2스트라이크 전)
@@ -39,9 +39,9 @@ export const RULES = {
     maxExtra: 1, // 연장 1회까지(승부치기), 그래도 같으면 무승부
     ghost: [1, 2], // 연장 무사 1·2루에서 시작 (WBC·KBO 승부치기 방식)
     startCount: [0, 0], // 1-1 시작은 AI 경기에서 삼진만 늘어 기각(docs 참고). 1-0 시작은 사용자 결정 사항
-    hitEase: 1.22,
-    humanQ: 0.7,
-    sweetPull: 0.5,
+    hitEase: 1.06, // PCI 크기·타이밍 창 ×1.06 (보통 사람 흉내 타율 리얼 .28 → 캐주얼 .35, docs 4절)
+    humanQ: 1.0,
+    sweetPull: 0.35,
     evMul: 1.06, // 장타↑ (펜스는 그대로 — 물리 모델은 공통)
     foulTipK: 0.12,
     cpuPower: 0.4,

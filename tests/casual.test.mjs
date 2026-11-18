@@ -3,6 +3,10 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { Game, RULES, inZone } from '../shared/sim.js';
 
+// 결정적 난수 (사람 흉내 테스트가 CI에서 운에 따라 깨지지 않게)
+const seeded = (s) => () => { s |= 0; s = (s + 0x6D2B79F5) | 0; let t = Math.imul(s ^ (s >>> 15), 1 | s); t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t; return ((t ^ (t >>> 14)) >>> 0) / 4294967296; };
+const withSeed = (seed, fn) => { const r = Math.random; Math.random = seeded(seed); try { return fn(); } finally { Math.random = r; } };
+
 function aiGames(n, rules = 'casual', set = {}) {
   let runs = 0, hr = 0, stuck = 0, maxMin = 0, lc = 0, inn = 0;
   for (let g = 0; g < n; g++) {
@@ -40,7 +44,7 @@ test('캐주얼 설정: 기본 3이닝 · 수비 자동 전환 · 판정 폭(hx)
   const s = g.snapshot();
   assert.equal(s.ru, 'casual');
   const g2 = new Game({}); g2.addPlayer('a', 'A'); g2.applySettings({ rules: 'real', innings: 3 }); g2.start(); g2.tick(1 / 60);
-  assert.ok(s.hx > g2.snapshot().hx * 1.15, `casual ${s.hx} vs real ${g2.snapshot().hx}`);
+  assert.ok(s.hx > g2.snapshot().hx * 1.04, `casual ${s.hx} vs real ${g2.snapshot().hx}`);
   void real;
 });
 
@@ -70,6 +74,7 @@ test('시간제: 제한 시간이 지나면 다음 이닝이 마지막 이닝', 
 });
 
 test('같은 스윙 실력이면 캐주얼 타율이 리얼보다 높음', () => {
+  // 서툰 사람 흉내(타이밍 σ 140ms, 커서 오차 σ 20cm) — 공마다 한 번만 스윙 여부 결정
   const gs = (s) => { let u = 0, v = 0; while (!u) u = Math.random(); while (!v) v = Math.random(); return s * Math.sqrt(-2 * Math.log(u)) * Math.cos(2 * Math.PI * v); };
   const avg = (rules, games, innings) => {
     let h = 0, ab = 0;
@@ -78,11 +83,13 @@ test('같은 스윙 실력이면 캐주얼 타율이 리얼보다 높음', () =>
       game.applySettings({ innings, diff: 1, hitEase: 1 }); game.start();
       let steps = 0;
       while (game.phase !== 'over' && steps < 30 * 60 * 90) {
-        game.tick(1 / 30); steps++;
+        game.tick(game.phase === 'pitching' ? 1 / 120 : 1 / 30); steps++;
         const p = game.pitch;
-        if (game.phase === 'pitching' && game.batter.id === 'me' && !p.swung && game.now >= p.arrive - 0.03) {
+        if (p && p._sw && !p.swung && game.phase === 'pitching' && game.now >= p.arrive + p._sw.dt) { const w = p._sw; p._sw = null; game.handle('me', { ...w.m, dt: game.now - p.arrive }); }
+        if (game.phase === 'pitching' && game.batter.id === 'me' && !p.swung && !p._d && game.now >= p.arrive - 0.3) {
+          p._d = 1;
           const z = inZone(p.tx, p.ty);
-          if ((z && Math.random() < 0.8) || (!z && Math.random() < 0.35)) game.handle('me', { t: 'swing', pid: p.id, dt: gs(0.14), ax: gs(0.19), ay: gs(0.2), mode: 'contact' });
+          if ((z && Math.random() < 0.8) || (!z && Math.random() < 0.3)) p._sw = { dt: gs(0.14), m: { t: 'swing', pid: p.id, ax: gs(0.2), ay: gs(0.2), mode: 'contact' } };
         }
         game.events.length = 0;
       }
@@ -90,7 +97,7 @@ test('같은 스윙 실력이면 캐주얼 타율이 리얼보다 높음', () =>
     }
     return h / ab;
   };
-  const r = avg('real', 3, 9), c = avg('casual', 9, 3);
-  assert.ok(c > r + 0.04, `캐주얼 ${c.toFixed(3)} vs 리얼 ${r.toFixed(3)}`);
-  assert.ok(c > 0.22 && c < 0.65, `캐주얼 타율 ${c.toFixed(3)}`);
+  const r = withSeed(11, () => avg('real', 6, 9)), c = withSeed(12, () => avg('casual', 15, 3));
+  assert.ok(c > r + 0.03, `캐주얼 ${c.toFixed(3)} vs 리얼 ${r.toFixed(3)}`);
+  assert.ok(c > 0.18 && c < 0.5, `캐주얼 타율 ${c.toFixed(3)}`);
 });
