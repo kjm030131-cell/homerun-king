@@ -3,6 +3,10 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { Game, inZone, PCI, pciJudge, evalSwing, integrate, surface, standR, battedBall, FOUL, WALL_FOUL } from '../shared/sim.js';
 
+// 결정적 난수 (사람 흉내 테스트가 CI에서 운에 따라 깨지지 않게)
+const seeded = (s) => () => { s |= 0; s = (s + 0x6D2B79F5) | 0; let t = Math.imul(s ^ (s >>> 15), 1 | s); t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t; return ((t ^ (t >>> 14)) >>> 0) / 4294967296; };
+const withSeed = (seed, fn) => { const r = Math.random; Math.random = seeded(seed); try { return fn(); } finally { Math.random = r; } };
+
 test('PCI 판정: 타이밍 창 밖이면 커서가 정확해도 헛스윙, 안이면 빠름/늦음으로 구분', () => {
   const W = PCI.contact.W;
   assert.equal(pciJudge('contact', -W * 1.05, 0, 0).why, 'early');
@@ -63,12 +67,12 @@ function human(rules, games, innings) {
   return { avg: h / ab, k: k / pa };
 }
 test('보통 사람 흉내: 리얼 타율 .19~.335 (목표 .22~.30) · 삼진율 15~29% (목표 18~25%)', () => {
-  const r = human('real', 12, 9);
+  const r = withSeed(21, () => human('real', 12, 9));
   assert.ok(r.avg > 0.19 && r.avg < 0.335, `리얼 타율 ${r.avg.toFixed(3)}`);
   assert.ok(r.k > 0.15 && r.k < 0.29, `리얼 삼진율 ${(r.k * 100).toFixed(1)}%`);
 });
 test('보통 사람 흉내: 캐주얼 타율 .28~.46 (목표 .30~.40)', () => {
-  const r = human('casual', 18, 3);
+  const r = withSeed(22, () => human('casual', 18, 3));
   assert.ok(r.avg > 0.28 && r.avg < 0.46, `캐주얼 타율 ${r.avg.toFixed(3)}`);
 });
 

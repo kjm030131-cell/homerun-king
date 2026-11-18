@@ -2,6 +2,8 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { Game, inZone } from '../shared/sim.js';
+// 결정적 난수 (CI에서 운에 따라 깨지지 않게)
+const seeded = (s) => () => { s |= 0; s = (s + 0x6D2B79F5) | 0; let t = Math.imul(s ^ (s >>> 15), 1 | s); t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t; return ((t ^ (t >>> 14)) >>> 0) / 4294967296; };
 
 function pickoffOdds(steal, trials = 150) {
   let out = 0, stuck = 0;
@@ -45,6 +47,7 @@ test('타격 연습 모드: 아웃 없이 계속 진행 + 구종 고정', () => 
 });
 
 test('사람 타자(초보 흉내) 타율이 너무 낮거나 높지 않음 (.12~.32)', () => {
+  const rnd0 = Math.random; Math.random = seeded(31);
   const gs = (s) => { let u = 0, v = 0; while (!u) u = Math.random(); while (!v) v = Math.random(); return s * Math.sqrt(-2 * Math.log(u)) * Math.cos(2 * Math.PI * v); };
   let h = 0, ab = 0;
   for (let n = 0; n < 4; n++) {
@@ -63,6 +66,7 @@ test('사람 타자(초보 흉내) 타율이 너무 낮거나 높지 않음 (.12
     }
     const st = game.stats.get('me'); if (st) { h += st.h; ab += st.pa - st.bb; }
   }
+  Math.random = rnd0;
   const avg = h / ab;
   assert.ok(avg > 0.12 && avg < 0.32, `타율 ${avg.toFixed(3)}`);
 });
