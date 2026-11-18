@@ -62,7 +62,7 @@ export class Room {
     return {
       code: this.code, name: g.set.name || `${lp.players.find((p) => p.id === g.hostId)?.name || '???'}의 방`,
       mode: g.set.mode, players: lp.players.filter((p) => p.team !== 'spec').length, spec: lp.players.filter((p) => p.team === 'spec').length,
-      max: g.set.max, phase: g.phase, locked: !!g.password, pub: g.set.pub, inn: g.inning || 0,
+      max: g.set.max, phase: g.phase, locked: !!g.password, pub: g.set.pub, inn: g.inning || 0, rules: g.set.rules || 'real', timeLim: g.set.timeLim || 0,
     };
   }
 
