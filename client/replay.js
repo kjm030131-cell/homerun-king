@@ -22,6 +22,7 @@ export class Replay {
       a[o++] = r.position.x; a[o++] = r.position.y; a[o++] = r.position.z; a[o++] = r.rotation.y; a[o++] = r.visible ? 1 : 0;
       a[o++] = b.position.x; a[o++] = b.position.y; a[o++] = b.position.z;
       a[o++] = b.quaternion.x; a[o++] = b.quaternion.y; a[o++] = b.quaternion.z; a[o++] = b.quaternion.w;
+      if (p.char) { a[o++] = p.bat.visible ? 1 : 0; a[o++] = p.ball.visible ? 1 : 0; a[o++] = p.glove.visible ? 1 : 0; fr.items.push([p, a, p.char.snapshot()]); continue; } // 새 캐릭터: 클립 상태만 기록(가벼움)
       for (const j of JOINTS) { const q = p.J[j].quaternion; a[o++] = q.x; a[o++] = q.y; a[o++] = q.z; a[o++] = q.w; }
       a[o++] = p.bat.position.x; a[o++] = p.bat.position.y; a[o++] = p.bat.position.z;
       a[o++] = p.bat.quaternion.x; a[o++] = p.bat.quaternion.y; a[o++] = p.bat.quaternion.z; a[o++] = p.bat.quaternion.w;
@@ -43,7 +44,7 @@ export class Replay {
     const frames = this.buf.filter((f) => f.t >= tEvent - pre && f.t <= tEvent + post);
     if (frames.length < 5) return false;
     // 기록에 있던 선수 모음 (현재 장면에서 빠진 선수는 잠깐 다시 넣음)
-    const set = new Set(); for (const f of frames) for (const [p] of f.items) set.add(p);
+    const set = new Set(); for (const f of frames) for (const it of f.items) set.add(it[0]);
     const added = [], hidden = [], sprites = [];
     for (const p of set) if (!p.root.parent && scene) { scene.add(p.root); added.push(p); }
     for (const p of set) p.root.traverse((o) => { if (o.isSprite && o.visible) { o.visible = false; sprites.push(o); } });
@@ -69,10 +70,10 @@ export class Replay {
     let i = 0; while (i < F.length - 2 && F[i + 1].t < A.t) i++;
     const f0 = F[i], f1 = F[i + 1];
     const u = Math.max(0, Math.min(1, (A.t - f0.t) / Math.max(1e-4, f1.t - f0.t)));
-    const m1 = new Map(f1.items);
+    const m1 = new Map(f1.items.map((x) => [x[0], x]));
     const present = new Set();
-    for (const [p, a] of f0.items) {
-      const b = m1.get(p) || a; present.add(p);
+    for (const [p, a, cs] of f0.items) {
+      const it1 = m1.get(p), b = it1 ? it1[1] : a; present.add(p);
       const L = (k) => a[k] + (b[k] - a[k]) * u;
       let o = 0;
       p.root.position.set(L(0), L(1), L(2)); o = 3;
@@ -80,6 +81,7 @@ export class Replay {
       p.root.visible = a[4] > 0.5; o = 5;
       p.body.position.set(L(5), L(6), L(7)); o = 8;
       _q.set(a[8], a[9], a[10], a[11]); _q2.set(b[8], b[9], b[10], b[11]); p.body.quaternion.copy(_q).slerp(_q2, u); o = 12;
+      if (cs && p.char) { p.bat.visible = a[12] > 0.5; p.ball.visible = a[13] > 0.5; p.glove.visible = a[14] > 0.5; p.char.restore(cs, it1 && it1[2], u); continue; }
       for (const j of JOINTS) { _q.set(a[o], a[o + 1], a[o + 2], a[o + 3]); _q2.set(b[o], b[o + 1], b[o + 2], b[o + 3]); p.J[j].quaternion.copy(_q).slerp(_q2, u); o += 4; }
       p.bat.position.set(L(o), L(o + 1), L(o + 2)); o += 3;
       _q.set(a[o], a[o + 1], a[o + 2], a[o + 3]); _q2.set(b[o], b[o + 1], b[o + 2], b[o + 3]); p.bat.quaternion.copy(_q).slerp(_q2, u); o += 4;
