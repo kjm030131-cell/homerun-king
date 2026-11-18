@@ -2,7 +2,8 @@
 // main.js는 createUI(ctx) 하나만 부르고, 게임 상태는 ctx 게터로만 읽는다. UI는 게임 상태를 바꾸지 않고 서버/Game에 메시지만 보낸다.
 import { $, esc, show, isShown, segVal, setSeg, bindSegs } from './dom.js';
 import { cfg, store, bindSettings, fillSettings, emitVolume, TOUCH } from './settings.js';
-import { banner, feedback, toast, castLine, stopSpeech, clearBanner } from './announce.js';
+import { banner, feedback, toast, castLine, stopSpeech, clearBanner, gradeFeedback } from './announce.js';
+import { RULES } from '../../shared/rules.js';
 import { initChat, addChat, sysChat, openChat, closeChat, toggleQuick, sendQuick, quickOpen } from './chat.js';
 import { bindRoom, renderRoom, clubGrid, rulesOf, RULES_KO } from './room.js';
 import { fillOver, renderTab } from './results.js';
@@ -109,9 +110,10 @@ export function createUI(ctx) {
     for (const [k, id] of [['me', 'oClubMe'], ['op', 'oClubOp']]) { const b = $(id); b.querySelector('img').src = emblemURL(soloClub[k], 72); b.querySelector('span').textContent = clubOf(soloClub[k]).name; }
   }
   document.querySelectorAll('[data-solo]').forEach((b) => (b.onclick = () => openClubPicker({ solo: b.dataset.solo })));
-  $('bSolo').onclick = () => { if (!getName()) return; ctx.unlockAudio(); paintSoloClubs(); setSeg('oRules', cfg.rules); setSeg('oHit', store.get('hitEase', cfg.rules === 'casual' ? 0 : 1)); setSeg('oTod', store.get('tod', 'night')); openModal('soloM'); };
+  $('bSolo').onclick = () => { if (!getName()) return; ctx.unlockAudio(); paintSoloClubs(); setSeg('oRules', cfg.rules); oDefaults(cfg.rules); setSeg('oHit', store.get('hitEase', cfg.rules === 'casual' ? 0 : 1)); setSeg('oTod', store.get('tod', 'night')); openModal('soloM'); };
   $('oMode').addEventListener('change', (e) => { $('oInnLbl').textContent = e.detail === 'derby' ? '아웃 수 (×3)' : '이닝'; show('oInnWrap', e.detail !== 'practice'); });
-  $('oRules').addEventListener('change', (e) => setSeg('oHit', e.detail === 'casual' ? 0 : 1));
+  const oDefaults = (r) => { setSeg('oHit', r === 'casual' ? 0 : 1); setSeg('oInn', RULES[r].innings); };
+  $('oRules').addEventListener('change', (e) => oDefaults(e.detail));
   $('oGo').onclick = () => {
     if (!ctx.myName && !getName()) return;
     closeModal('soloM'); ctx.unlockAudio(); showErr('');
@@ -122,8 +124,10 @@ export function createUI(ctx) {
   };
 
   // ── 방 만들기 ──
-  $('bCreate').onclick = () => { if (!getName()) return; ctx.unlockAudio(); setSeg('cRules', cfg.rules); setSeg('cHit', cfg.rules === 'casual' ? 0 : 1); $('cName').value = `${ctx.myName}의 방`; openModal('createM'); };
-  $('cRules').addEventListener('change', (e) => setSeg('cHit', e.detail === 'casual' ? 0 : 1));
+  $('bCreate').onclick = () => { if (!getName()) return; ctx.unlockAudio(); setSeg('cRules', cfg.rules); cDefaults(cfg.rules); $('cName').value = `${ctx.myName}의 방`; openModal('createM'); };
+  // 규칙을 바꾸면 그 모드 기본값으로 (이닝은 shared/rules.js RULES.innings — 리얼 9, 캐주얼 3)
+  const cDefaults = (r) => { setSeg('cHit', r === 'casual' ? 0 : 1); if (segVal('cMode') === 'game') $('cInn').value = String(RULES[r].innings); };
+  $('cRules').addEventListener('change', (e) => cDefaults(e.detail));
   $('cMode').addEventListener('change', (e) => { $('cInn').value = e.detail === 'derby' ? '10' : '3'; });
   $('cSize').addEventListener('change', (e) => show('cMaxWrap', e.detail === '0'));
   $('cGo').onclick = async () => {
@@ -131,7 +135,7 @@ export function createUI(ctx) {
     try {
       const r = await fetch('/api/new', { method: 'POST' }); const j = await r.json();
       const mode = segVal('cMode'), n = +$('cInn').value;
-      pendingSettings = { rules: segVal('cRules') || cfg.rules, name: $('cName').value.trim(), mode, innings: mode === 'game' ? Math.min(9, n) : 3, derbyOuts: mode === 'derby' ? n : 10, max: +$('cMax').value, size: +segVal('cSize'), tod: segVal('cTod'), hitEase: +segVal('cHit'), pw: $('cPw').value, pub: segVal('cPub') === '1' };
+      pendingSettings = { rules: segVal('cRules') || cfg.rules, name: $('cName').value.trim(), mode, innings: mode === 'game' ? Math.min(9, n) : 3, derbyOuts: mode === 'derby' ? n : 10, max: +$('cMax').value, size: +segVal('cSize'), tod: segVal('cTod'), hitEase: +segVal('cHit'), pw: $('cPw').value, pub: segVal('cPub') === '1', timeLim: +segVal('cTime') || 0 };
       enterRoom(j.code);
     } catch { showErr('서버에 연결할 수 없어. 잠시 뒤 다시 해봐'); }
   };
@@ -271,7 +275,7 @@ export function createUI(ctx) {
   ui.frame = (role, f) => {
     const S = ctx.S;
     if (!S || !S.fl || (screen !== 'game' && screen !== 'over')) return;
-    hudFrame({ S, simNow: ctx.simNow, local: ctx.local, myId: ctx.myId, myName: ctx.myName, myTeam: ctx.myTeam(), nameOf: ctx.nameOf, setPitchType: ctx.setPitchType, nPlayers: ctx.lobby ? ctx.lobby.players.length : 0, rules: S.rules || (ctx.local ? soloRules : rulesOf(ctx.lobby && ctx.lobby.set)) }, role, f);
+    hudFrame({ S, simNow: ctx.simNow, local: ctx.local, myId: ctx.myId, myName: ctx.myName, myTeam: ctx.myTeam(), nameOf: ctx.nameOf, setPitchType: ctx.setPitchType, nPlayers: ctx.lobby ? ctx.lobby.players.length : 0, rules: S.ru || (ctx.local ? soloRules : rulesOf(ctx.lobby && ctx.lobby.set)) }, role, f);
     if (screen === 'game') updateCoach(S, role);
   };
   ui.introCard = (kind, s) => introCard(kind, s, { nameOf: ctx.nameOf, myId: ctx.myId, sound: ctx.sound });
@@ -282,7 +286,8 @@ export function createUI(ctx) {
   bus.on('ballCall', () => { onBus('count'); pulseCount('b'); });
   bus.on('strikeCall', () => { onBus('count'); pulseCount('s'); });
   bus.on('out', () => { onBus('count'); pulseCount('o'); });
-  bus.on('score', (d) => { onBus('score'); flashScore(d && d.team === 'home' ? 'home' : 'away'); });
+  bus.on('score', (d) => { onBus('score'); flashScore(d && d.half === 1 ? 'home' : 'away'); }); // half 0 = 초(원정 공격)
+  bus.on('contact', (d) => { if (d && d.grade) gradeFeedback(d.grade, d.pow); });
   bus.on('modeChange', () => { resetHUD(); paintRules(); });
 
   setScreen('title');

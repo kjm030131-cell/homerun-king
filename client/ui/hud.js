@@ -99,10 +99,11 @@ export function hudFrame(c, role, f) {
   show('gauge', gOn); show('gaugeLbl', gOn);
   if (gOn) {
     style($('gauge').querySelector('.fill'), 'transform', `scaleY(${clamp(f.gauge.lv / 1.15, 0, 1).toFixed(3)})`);
+    if (f.gauge.band) { const [b0, b1] = f.gauge.band; style($('gauge').querySelector('.band'), 'bottom', `${(b0 / 1.15 * 100).toFixed(1)}%`); style($('gauge').querySelector('.band'), 'height', `${((b1 - b0) / 1.15 * 100).toFixed(1)}%`); } // 모드별 퍼펙트 구간
     setText('gaugeLbl', `${Math.round(PITCHES[f.gauge.type].v * (0.86 + 0.15 * Math.min(1, f.gauge.lv)))}km`);
   }
   show('pitchbar', role.pitcher && s.ph === 'pitch' && !f.gauge);
-  if (role.pitcher && s.ph === 'pitch') renderPitchBar(f.pitchType, false, c.setPitchType);
+  if (role.pitcher && s.ph === 'pitch') renderPitchBar(f.pitchType, false, c.setPitchType, s.sq);
 
   // 화면 키 버튼 (송구 베이스 · 주루)
   let keysHtml = '', soft = false;
@@ -239,11 +240,18 @@ function setDots(root, cnt) {
 }
 
 // ── 구종 선택 막대 ──
-export function renderPitchBar(pitchType, force, onPick) {
+// sq: 이번 타석 최근 구종(스냅샷 S.sq, 오래된 것 → 최근). 같은 공을 연달아 던졌으면 그 구종에 '연속 n' 표시 (리얼은 타자가 익숙해짐)
+let lastSq = [];
+export function renderPitchBar(pitchType, force, onPick, sq) {
   const bar = $('pitchbar');
-  if (!force && bar._k === pitchType) return;
-  bar._k = pitchType;
-  bar.innerHTML = PITCH_KEYS.map((k, i) => `<button data-p="${k}" class="${k === pitchType ? 'on' : ''}"><span class="kbd">${i + 1}</span><i class="pc" style="background:${PITCHES[k].col}"></i>${PITCHES[k].name}<em>${PITCHES[k].v}</em></button>`).join('');
+  if (sq !== undefined) lastSq = sq || [];
+  const key = pitchType + '|' + lastSq.join(',');
+  if (!force && bar._k === key) return;
+  bar._k = key;
+  let run = 0; const lastT = lastSq[lastSq.length - 1];
+  for (let i = lastSq.length - 1; i >= 0 && lastSq[i] === lastT; i--) run++;
+  bar.innerHTML = (lastSq.length ? `<div class="sq">이번 타석 ${lastSq.map((k) => `<i class="pc" style="background:${PITCHES[k] ? PITCHES[k].col : '#888'}" title="${PITCHES[k] ? PITCHES[k].name : k}"></i>`).join('')}</div>` : '') +
+    PITCH_KEYS.map((k, i) => `<button data-p="${k}" class="${k === pitchType ? 'on' : ''}"><span class="kbd">${i + 1}</span><i class="pc" style="background:${PITCHES[k].col}"></i>${PITCHES[k].name}${k === lastT && run >= 2 ? `<b class="rep">연속 ${run}</b>` : ''}<em>${PITCHES[k].v}</em></button>`).join('');
   bar.querySelectorAll('button').forEach((b) => (b.onpointerdown = (e) => { e.stopPropagation(); onPick(b.dataset.p); }));
 }
 

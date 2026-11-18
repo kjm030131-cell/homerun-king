@@ -14,7 +14,7 @@ export function bindRoom(c) {
   seg('sRules', 'rules');
   seg('sMode', 'mode'); seg('sInn', 'innings', Number); seg('sOuts', 'derbyOuts', Number); seg('sDiff', 'diff', Number);
   seg('sPub', 'pub', (v) => v === '1'); seg('sSize', 'size', Number); seg('sPit', 'pitRot'); seg('sLine', 'lineup');
-  seg('sFld', 'fieldCtl'); seg('sTod', 'tod'); seg('sHit', 'hitEase', Number);
+  seg('sFld', 'fieldCtl'); seg('sTod', 'tod'); seg('sHit', 'hitEase', Number); seg('sTime', 'timeLim', Number);
   $('sMax').onchange = () => sendSet({ max: +$('sMax').value });
   $('sName').onchange = () => sendSet({ name: $('sName').value });
   $('sTA').onchange = $('sTH').onchange = () => sendSet({ teams: [$('sTA').value, $('sTH').value] });
@@ -52,12 +52,12 @@ export function renderRoom(lobby, myId, send) {
   // 설정 값
   setSeg('sRules', rules);
   setSeg('sSize', st.size || 0); setSeg('sPit', st.pitRot || 'inning'); setSeg('sLine', st.lineup || 'humans'); setSeg('sFld', st.fieldCtl || 'pos');
-  setSeg('sTod', st.tod || 'night'); setSeg('sHit', st.hitEase ?? 1);
+  setSeg('sTod', st.tod || 'night'); setSeg('sHit', st.hitEase ?? 1); setSeg('sTime', st.timeLim || 0);
   setSeg('sMode', st.practice ? 'derby' : st.mode); setSeg('sInn', st.innings); setSeg('sOuts', st.derbyOuts); setSeg('sDiff', st.diff); setSeg('sPub', st.pub ? 1 : 0);
   show('sMaxWrap', !st.size);
   for (const [id, v] of [['sName', st.name], ['sTA', st.teams[0]], ['sTH', st.teams[1]]]) if (document.activeElement !== $(id)) $(id).value = v;
   $('sMax').value = String(st.max);
-  show('sInnWrap', st.mode === 'game'); show('sOutWrap', st.mode === 'derby');
+  show('sInnWrap', st.mode === 'game'); show('sOutWrap', st.mode === 'derby'); show('sTimeWrap', st.mode === 'game');
   document.querySelectorAll('#sets .seg').forEach((s) => s.classList.toggle('ro', !isHost));
   for (const id of ['sName', 'sTA', 'sTH', 'sMax', 'sPw']) $(id).disabled = !isHost;
   show('hostOnly', !isHost);

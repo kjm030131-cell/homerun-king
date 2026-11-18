@@ -34,8 +34,13 @@ export function clearBanner() { bannerQ.length = 0; clearTimeout(flushT); clearT
 // ── 피드백 (스윙·투구·수비 결과 한 줄) ──
 let fbT = 0;
 export function feedback(text, color = '#fff') {
-  const f = $('fb'); f.textContent = text; f.style.color = color;
+  const f = $('fb'); f.textContent = text; f.style.color = color; delete f.dataset.grade; f.style.setProperty('--pow', '0');
   replay(f, 'show'); clearTimeout(fbT); fbT = setTimeout(() => f.classList.remove('show'), 2600);
+}
+
+// 서버 contact 이벤트의 grade/pow로 피드백 문구 크기·색 (내 화면 문구는 doSwing이 먼저 띄움 → 그 문구를 키움)
+export function gradeFeedback(grade, pow) {
+  const f = $('fb'); f.dataset.grade = grade; f.style.setProperty('--pow', String(Math.max(0, Math.min(1, pow || 0))));
 }
 
 // ── 토스트 ──
