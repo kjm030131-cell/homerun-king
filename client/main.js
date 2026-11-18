@@ -1,9 +1,5 @@
 // main.js — 홈런왕 클라이언트
 import * as THREE from 'three';
-import { EffectComposer } from 'three/addons/postprocessing/EffectComposer.js';
-import { RenderPass } from 'three/addons/postprocessing/RenderPass.js';
-import { UnrealBloomPass } from 'three/addons/postprocessing/UnrealBloomPass.js';
-import { OutputPass } from 'three/addons/postprocessing/OutputPass.js';
 import {
   Game, HIT_EASE, pitchPos, integrate, fenceR, BASES, MOUND, ZONE, PITCHES, PITCH_KEYS, POS_KO, HOME_SPOT, FOUL, SPRINT_SPEED, FIELD_SPEED,
   RELEASE, WINDUP, SWING, BALL_R, runnerXZ, RULES, // [gameplay] RULES: 모드별 퍼펙트 투구 구간
@@ -15,7 +11,7 @@ import { makeActor } from './anim/actor.js'; // [anim]
 import { CLUBS, clubOf, emblemURL, uniformsFor } from './emblem.js';
 import { TEX_AVG, FACE_SKINS } from './texinfo.js';
 import { Animator, PITCH_DUR, PITCH_RELEASE_K, THROW_DUR, swingTrack, pitchK } from './anim.js';
-import { buildStadium, glowTex } from './stadium.js';
+import { buildStadium, glowTex, createLook } from './stadium.js'; // [stadium] 구장 + 조명·톤매핑·블룸(look)
 import { FX } from './fx.js';
 import { sfx, audio, setVolume, crowdAmbience } from './audio.js';
 // [ui] 화면·HUD·설정은 client/ui/ (createUI 하나로 연결)
@@ -46,65 +42,21 @@ if (!glOK) {
   throw new Error('WebGL unavailable');
 }
 const renderer = new THREE.WebGLRenderer({ canvas, antialias: true, powerPreference: 'high-performance' });
-renderer.shadowMap.type = THREE.PCFSoftShadowMap;
-renderer.toneMapping = THREE.ACESFilmicToneMapping;
-renderer.toneMappingExposure = 1.0;
 const scene = new THREE.Scene();
-scene.fog = new THREE.Fog('#1a2444', 500, 3000);
 const camera = new THREE.PerspectiveCamera(55, 1, 0.15, 7500);
 window.__camera = camera;
 camera.position.set(0, 60, -100);
-// 후처리 렌더타깃에 MSAA(4x) — 이게 없으면 블룸 켰을 때 선·가장자리가 계단처럼 깨져 보임
-const composer = new EffectComposer(renderer, new THREE.WebGLRenderTarget(innerWidth, innerHeight, { samples: 4, type: THREE.HalfFloatType }));
-composer.addPass(new RenderPass(scene, camera));
-const bloom = new UnrealBloomPass(new THREE.Vector2(256, 256), 0.55, 0.5, 0.82);
-composer.addPass(bloom);
-composer.addPass(new OutputPass());
-
-scene.add(new THREE.HemisphereLight('#bcd0ff', '#2e4a2a', 0.55));
-const key = new THREE.DirectionalLight('#fff3df', 2.1);
-key.position.set(-70, 130, -50); key.target.position.set(0, 0, 45);
-key.shadow.mapSize.set(2048, 2048);
-Object.assign(key.shadow.camera, { left: -95, right: 95, top: 95, bottom: -95, near: 20, far: 340 });
-key.shadow.bias = -0.0004; key.shadow.normalBias = 0.02;
-scene.add(key, key.target);
-const fill = new THREE.DirectionalLight('#9db4ff', 0.7); fill.position.set(90, 70, 170); scene.add(fill);
-const rim = new THREE.DirectionalLight('#ffe2b8', 0.6); rim.position.set(60, 90, -120); scene.add(rim);
-const hemi = scene.children.find((o) => o.isHemisphereLight);
-// 낮/밤: 조명·안개·노출·블룸 + 구장(하늘/조명탑/건물)
-let todNow = '';
-function applyTimeOfDay(mode) {
-  mode = mode === 'day' ? 'day' : 'night';
-  if (mode === todNow) return; todNow = mode;
-  const day = mode === 'day';
-  hemi.color.set(day ? '#d6e6ff' : '#bcd0ff'); hemi.groundColor.set(day ? '#5d6b45' : '#2e4a2a'); hemi.intensity = day ? 1.15 : 0.55;
-  // 낮 경기 해: 3루 쪽 위에서 비춤 (실제로 1루 관중석이 오후 햇빛을 받음)
-  key.color.set(day ? '#fff4e0' : '#fff3df'); key.intensity = day ? 2.9 : 2.1;
-  key.position.set(day ? 110 : -70, day ? 120 : 130, day ? 10 : -50);
-  fill.intensity = day ? 0.35 : 0.7; rim.intensity = day ? 0.25 : 0.6;
-  scene.fog.color.set(day ? '#c6d6e6' : '#1a2444'); scene.fog.near = day ? 700 : 500; scene.fog.far = day ? 4200 : 3000;
-  renderer.toneMappingExposure = day ? 0.92 : 1.0;
-  bloom.strength = day ? 0.22 : 0.55; bloom.threshold = day ? 0.92 : 0.82;
-  stadium.setTimeOfDay(mode);
-}
-
-function applyQuality() {
-  const q = cfg.gq;
-  renderer.setPixelRatio(q === 'low' ? 1 : q === 'mid' ? Math.min(devicePixelRatio, 1.25) : Math.min(devicePixelRatio, 2));
-  renderer.shadowMap.type = q === 'high' ? THREE.PCFSoftShadowMap : THREE.PCFShadowMap; // 부드러운 그림자는 '높음'에서만 (무거움)
-  renderer.shadowMap.enabled = q !== 'low';
-  key.castShadow = q !== 'low';
-  key.shadow.mapSize.set(q === 'high' ? 4096 : 2048, q === 'high' ? 4096 : 2048);
-  if (key.shadow.map) { key.shadow.map.dispose(); key.shadow.map = null; }
-  bloom.enabled = q !== 'low';
+// [stadium] 톤매핑·조명(해/조명탑)·그림자·안개·블룸·환경광·낮밤은 client/stadium/look.js
+const look = createLook(renderer, scene, camera);
+function applyTimeOfDay(mode) { look.setTimeOfDay(mode, stadium); } // [stadium]
+function applyQuality() { // [stadium]
+  look.setQuality(cfg.gq); stadium.setQuality(cfg.gq);
   scene.traverse((o) => { if (o.material) o.material.needsUpdate = true; });
   resize();
 }
 function resize() {
   const w = innerWidth, h = innerHeight;
-  renderer.setSize(w, h, false);
-  composer.setSize(w, h);
-  bloom.resolution.set(w / 2, h / 2);
+  look.resize(w, h); // [stadium]
   camera.aspect = w / h; camera.updateProjectionMatrix();
 }
 addEventListener('resize', resize);
@@ -1558,7 +1510,7 @@ function frame(now, manual) {
   fx.update(dt, camera);
   if (window.__noRender) { if (!manual) requestAnimationFrame(frame); return; } // 테스트용
   syncAllSkins(camera);
-  if (bloom.enabled) composer.render(); else renderer.render(scene, camera);
+  look.render(); // [stadium]
   if (!manual) requestAnimationFrame(frame);
 }
 window.__frame = (t) => frame(t, true);
