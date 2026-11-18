@@ -221,7 +221,10 @@ function wantNew() {
 function startLoading() {
   if (started) return; started = true;
   if (!wantNew()) return;
-  loadLib().then((lib) => { console.info('[anim] 새 캐릭터 사용 — 클립', lib.clips.size, '개'); upgradeAll(); })
+  loadLib().then((lib) => {
+    if (lib.incomplete && lib.incomplete.length) throw new Error('필수 클립 없음: ' + lib.incomplete.join(', ') + ' (?animlab 에서는 있는 클립을 볼 수 있음)');
+    console.info('[anim] 새 캐릭터 사용 — 클립', lib.clips.size, '개'); upgradeAll();
+  })
     .catch((e) => { if (e.message !== 'no-model') console.warn('[anim] 새 캐릭터 못 씀 → 옛 몸 유지:', e.message); failed = true; legacy.clear(); });
   if (/[?&]animlab\b/.test(qs())) import('./lab.js').then((m) => m.openLab()).catch((e) => console.warn('[anim] lab', e));
 }

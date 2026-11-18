@@ -287,8 +287,8 @@ export function loadLib({ dir = MODEL_DIR, onClip = null } = {}) {
     const addClip = (name, gltf) => { try { const e = prepClip(name, gltf.animations, T); e.src = gltf.animations; e.index = lib.clipList.length; lib.clipList.push(e); lib.clips.set(name, e); if (onClip) onClip(e); return e; } catch (err) { console.warn('[anim] 클립', name, err.message); return null; } };
     const getClip = (name) => loader.loadAsync(X && X.anim && X.anim[name] ? X.anim[name] : dir + 'anim/' + name + '.glb').then((g) => addClip(name, g)).catch(() => { lib.missing.push(name); return null; });
     await Promise.all(EARLY.map(getClip));
-    const miss = REQUIRED.filter((n) => !lib.clips.has(n));
-    if (miss.length) throw new Error('필수 클립 없음: ' + miss.join(', '));
+    // 필수 클립이 빠지면 게임은 옛 몸 유지(LIB 를 비워 둠) — 그래도 ?animlab 에서 있는 클립은 볼 수 있게 lib 는 돌려준다
+    lib.incomplete = REQUIRED.filter((n) => !lib.clips.has(n));
     // 장비
     const getAcc = (k) => loader.loadAsync(url(k, FILES[k])).then((g) => g.scene).catch(() => null);
     const [cap, helmet, bat, glove] = await Promise.all(['cap', 'helmet', 'bat', 'glove'].map(getAcc));
@@ -299,7 +299,7 @@ export function loadLib({ dir = MODEL_DIR, onClip = null } = {}) {
     lib.acc.glove = shadowBig(glove ? prepGlove(glove, T) : fallbackItem('glove', T));
     lib.acc.gloveC = shadowBig(glove ? prepGlove(glove.clone(), T, true) : fallbackItem('glove', T));
     lib.raw = { cap, helmet, bat, glove };
-    LIB = lib;
+    if (!lib.incomplete.length) LIB = lib;
     // 나머지 클립은 뒤에서(게임 시작을 막지 않음)
     (async () => { for (const n of Object.keys(CLIPS)) if (!lib.clips.has(n) && !EARLY.includes(n)) await getClip(n); })();
     return lib;

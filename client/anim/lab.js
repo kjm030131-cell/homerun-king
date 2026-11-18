@@ -37,7 +37,7 @@ export async function openLab() {
   cv.onpointerup = () => { drag = null; };
   cv.onwheel = (e) => { dist = Math.max(0.5, Math.min(10, dist * (1 + e.deltaY * 0.001))); e.preventDefault(); };
 
-  const S = { team: 'home', role: 'fielder', clip: 'idle', t: 0, play: true, speed: 1, pitchLoop: false, tau: 0, focus: 'body' };
+  const S = { team: 'home', role: 'fielder', clip: lib.clips.has('idle') ? 'idle' : [...lib.clips.keys()][0], t: 0, play: true, speed: 1, pitchLoop: false, tau: 0, focus: 'body' };
   let P = null;
   const rebuild = () => {
     if (P) { sc.remove(P.root); P.dispose(); }
@@ -55,7 +55,7 @@ export async function openLab() {
   };
   const reclip = (name) => { const e = lib.clips.get(name); if (!e || !e.src) return; const n = prepClip(name, e.src, lib); Object.assign(e, { clip: n.clip, markers: n.markers }); rebuild(); };
   rebuild();
-  msg(`클립 ${lib.clips.size}개: ${[...lib.clips.keys()].join(', ')}\n없음: ${Object.keys(CLIPS).filter((k) => !lib.clips.has(k)).join(', ') || '-'}\n장비 GLB: ${['cap', 'helmet', 'bat', 'glove'].map((k) => k + (lib.raw[k] ? '✓' : '(대체)')).join(' ')}`);
+  msg(`${lib.incomplete && lib.incomplete.length ? '※ 필수 클립 없음(' + lib.incomplete.join(', ') + ') → 게임은 아직 옛 몸. 여기서는 있는 클립만 볼 수 있음\n' : ''}클립 ${lib.clips.size}개: ${[...lib.clips.keys()].join(', ')}\n없음: ${Object.keys(CLIPS).filter((k) => !lib.clips.has(k)).join(', ') || '-'}\n장비 GLB: ${['cap', 'helmet', 'bat', 'glove'].map((k) => k + (lib.raw[k] ? '✓' : '(대체)')).join(' ')}`);
 
   // ── 패널 ──
   const pn = box.querySelector('#alP');
@@ -70,7 +70,7 @@ export async function openLab() {
   sel('역할', ['fielder', 'batter', 'runner', 'catcher', 'pitcher', 'ump'], S.role, (v) => { S.role = v; rebuild(); });
   sel('확대', ['body', 'head', 'handL', 'handR'], 'body', (v) => { S.focus = v; dist = v === 'body' ? 3.2 : 0.9; });
   h('클립');
-  const clipSel = sel('클립', [...lib.clips.keys()], 'idle', (v) => { S.clip = v; S.t = 0; S.pitchLoop = false; showClip(); });
+  const clipSel = sel('클립', [...lib.clips.keys()], S.clip, (v) => { S.clip = v; S.t = 0; S.pitchLoop = false; showClip(); });
   const tl = document.createElement('input'); tl.type = 'range'; tl.min = 0; tl.max = 1000; tl.style.width = '100%'; tl.oninput = () => { S.play = false; S.pitchLoop = false; const e = lib.clips.get(S.clip); S.t = (+tl.value / 1000) * e.clip.duration; }; pn.appendChild(tl);
   const tinfo = document.createElement('div'); tinfo.className = 'msg'; pn.appendChild(tinfo);
   const row = document.createElement('div'); row.className = 'row'; pn.appendChild(row);

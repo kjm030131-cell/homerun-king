@@ -7,3 +7,4 @@ dist/
 .DS_Store
 # [audio] 빌드가 만드는 효과음 목록
 public/assets/sfx/index.json
+__pycache__/
