@@ -25,7 +25,7 @@ export const crowd = new Crowd();
 let caster = null, rules = 'real', inited = false;
 const seenContact = new Map(); // pid → 처리 시각 (내 스윙 즉시 소리 + 나중에 서버 정보 도착해도 두 번 안 냄)
 const game = { inn: 1, innings: 9, mode: 'game' }; // windup 에 없는 상황(이닝·모드)은 다른 이벤트에서 모아 둠
-let lastMitt = -9, lastGameEnd = 0, lastHr = 0, lastSitu = null;
+let myId = null, lastDive = -9, lastMitt = -9, lastGameEnd = 0, lastHr = 0, lastSitu = null;
 const UMP_OUT = new Set(['force', 'tag', 'pick', 'cs']); // 누심이 소리 내 외치는 아웃 (뜬공·삼진은 제외)
 
 // 타구 기대치(0~1): 관중이 얼마나 들썩일지. 타구 속도·발사각이 있으면 그걸로, 없으면 q 로
@@ -51,7 +51,7 @@ export function initAudio() {
   // ── 투구 ──
   on('windup', (d) => { d = { ...d, inn: game.inn, innings: game.innings, mode: game.mode }; lastSitu = situation(d); crowd.prePitch(tension(lastSitu)); caster.situ(d); });
   on('cue:release', () => S.ui.cue());
-  on('cue:swing', (d) => S.swing(d));
+  on('cue:swing', (d) => { if (!d.bunt) S.swing(d); }); // main.js·anim 둘 다 낼 수 있음 → synth 쪽 key/gap(0.15초)로 한 번만
   on('cue:mitt', (d) => { lastMitt = now(); S.mitt(d.kmh || 140); });
 
   // ── 타격 ──
@@ -107,8 +107,9 @@ export function initAudio() {
     else if (d.fly && (d.dive || d.jump)) crowd.cheer(0.75, 2.6);
   });
   on('throw', (d) => S.throwWhoosh({ x: d.from && d.from[0], z: d.from && d.from[1], p: d.pw }));
-  on('cue:slide', (d) => S.slide(d));
-  on('dive', (d) => S.dive(d));
+  on('cue:slide', (d) => S.slide(d)); // 서버 slide 는 위치가 없어 소리 안 냄. main.js·anim 중복은 key/gap(0.3초)
+  on('cue:dive', (d) => { lastDive = now(); S.dive(d); });
+  on('dive', (d) => { setTimeout(() => { if (now() - lastDive > 0.6) S.dive(d); }, 250); }); // 화면 신호(cue:dive)가 없을 때만
   on('cue:bounce', (d) => S.bounce(d));
   on('wall', (d) => { S.wall(d); if (crowd.pending() > 0.4) crowd.ooh(0.6); });
   on('steal', () => crowd.rise(0.3));
@@ -138,7 +139,10 @@ export function initAudio() {
   on('ui:perfect', () => S.ui.perfect());
   on('ui:tick', (d) => S.ui.tick(d.p));
   on('ui:walkup', (d) => { if (d.me) S.music.walkup(); });
-  bus.on('ui:screen', (d) => { const g = d && (d.screen === 'game' || d.screen === 'over'); crowd.setScene(!!g); if (!g && caster) caster.stop(); });
+  bus.on('ui:me', (d) => { myId = d && d.id; });
+  on('batterUp', (d) => { if (d.id && d.id === myId) S.music.walkup(); }); // 내 타석 오르간
+  bus.on('ui:screen', (d) => { const n = d && (d.name || d.screen); const g = n === 'game' || n === 'over'; crowd.setScene(!!g); if (!g && caster) caster.stop(); });
+  bus.on('ui:volume', (d) => { if (!d) return; for (const k of ['master', 'sfx', 'crowd', 'cast']) if (d[k] != null) setVol(k, d[k] * 100, false); });
   bus.on('ui:msg', (d) => { if (caster && d) caster.msg(d.text, d.s); }); // 자막은 소리가 막혀 있어도 나오게
   window.__audio = { E, stats, sampleInfo, crowd, SLOTS, expectOf, rules: () => rules };
 }

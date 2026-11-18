@@ -17,41 +17,31 @@ client/audio.js         호환용 껍데기: 예전 sfx.* 호출 → bus 이벤�
 - 다른 파트는 **`bus.emit(이벤트, 데이터)`만** 한다. `sfx`를 직접 부르지 않는다.
 - 사운드는 이벤트를 듣기만 하고 게임 상태를 바꾸지 않는다. 내보내는 건 `caster:line {text, pri}`(자막용) 하나.
 
-## 2. 이벤트 (REBUILD.md 4-1 이름 그대로)
+## 2. 이벤트 (2026-11-18 통합 후)
 
-데이터 필드는 gameplay가 `docs/rebuild/events.md`로 확정하기 전이라 **있으면 쓰고 없으면 기본값**. 아래 필드를 넣어 주면 소리가 좋아진다.
+**기준은 서버 이벤트**(sim → 스냅샷 `ev` → main.js `case 's'`에서 `bus.emit`, 필드는 `docs/rebuild/events.md`). 화면 시각에 맞춰야 하는 소리만 클라 신호로 내고, 같은 순간의 서버 이벤트는 걸러서 **한 번만** 난다.
 
-| 이벤트 | 사운드가 쓰는 필드 | 소리 |
-|---|---|---|
-| `windup` | `s`(스냅샷) 또는 `cnt, occ, sc, inn, mode` | 관중 숨죽임(긴장도만큼), 상황 멘트(만루·풀카운트…) |
-| `release` | `cue` | 타자용 '온다' 신호음 |
-| `swing` | `power`, `bunt` | 배트 바람소리 |
-| `miss` | `local` | 내 헛스윙 공기음 |
-| `contact` | `pid, q, ev(km/h), la(°), mode, bunt, foul, kmh` | 타격음 6종 + 관중 함성 차오름. 같은 `pid`가 두 번 오면 두 번째는 관중 반응만 보정 |
-| `foul` | | 큰 타구였으면 '오~', 아니면 가라앉음 |
-| `ballCall` | `walk` | 볼넷이면 박수. 접전이면 응원 박수 시작 |
-| `strikeCall` | `k, swinging, looking` | 심판 "스트라이크!"(루킹), 삼진은 큰 콜 + 환호 |
-| `catch` | `x, z, pitch, kmh, dive, jump, held` | `pitch`면 포수 미트 '팡'(구속 비례), 아니면 야수 글러브(거리감) |
-| `throw` | `x, z, p` | 송구 바람소리 |
-| `tag` | `x, z` | 글러브 터치 |
-| `out` | `x, z, call, big, robbed, dp, fly` | `call`이면 누심 "아웃!", 큰 타구 잡히면 탄식→박수, 호수비면 환호 |
-| `safe` | `x, z, call, hit('1B'/'2B'/'3B'/'bunt'), error` | 누심 "세이프!", 안타 환호(장타일수록 큼), 실책 탄식 |
-| `hr` | `dist, n, walkoff` | 관중 폭발 + 오르간 + 불꽃 6발 |
-| `score` | `walkoff` | 환호 / 끝내기 폭발 |
-| `steal` | `ok` | 웅성 / 환호 |
-| `slide`, `dive` | `x, z` | 흙 미끄러짐 / 몸 던지는 쿵 |
-| `inningEnd` | `start` | 박수 + 가끔 이닝 오르간 |
-| `gameEnd` | `king` | 긴 환호·박수 |
-| `modeChange` | `rules: 'real'\|'casual'` | 관중·타격음 톤 바꿈 |
+### 클라 신호 (화면 타이밍)
+| 이벤트 | 누가 | 소리 | 같은 순간 서버 이벤트 처리 |
+|---|---|---|---|
+| `localSwing {pid,mode,contact,q}` | main.js doSwing (gameplay) | 내 스윙 즉시 타격음 / 헛스윙 공기음 | 같은 `pid`의 서버 `contact`는 타격음 없이 관중 반응만 실제 속도·각도로 보정 |
+| `cue:mitt {pid,kmh}` | main.js (공이 화면에서 미트에 닿는 순간) | 포수 미트 '팡' | 1.5초 안의 서버 `catch{pitch:1}` 무시 (서버 catch 에 pid 가 없어 시각으로) |
+| `cue:swing {pid?,power,bunt}` | main.js + anim | 배트 바람소리 | 서버 `swing`/`miss`는 소리 안 냄. main·anim 둘 다 와도 같은 소리 0.15초 간격 제한으로 한 번 |
+| `cue:release {pid}` | main.js (타자일 때 릴리스 순간) | '온다' 신호음 | 서버 `release`는 소리 안 냄 |
+| `cue:slide {rid?,x,z}` | main.js + anim | 흙 슬라이딩 | 서버 `slide`는 위치가 없어 소리 안 냄. 0.3초 간격 제한 |
+| `cue:dive {x,z}` | anim | 다이빙 쿵 | 서버 `dive`는 0.25초 기다렸다가 0.6초 안에 cue:dive 가 없었을 때만 |
+| `cue:bounce {x,z,impact,surf}` | main.js (클라 공 물리) | 바운드 | 서버엔 없음 |
 
-클라 전용 보조 이벤트(sim 이벤트 아님): `ui:click`, `ui:perfect`, `ui:tick{p}`, `ui:walkup{me}`, `ui:screen{screen}`, `ui:msg{text,s}`(배너 문구 → 캐스터), `ball:bounce{x,z,impact,surf}`, `ball:wall{x,z}`.
+### 서버 이벤트 → 소리
+`windup`(b·s·o·on·sc → 관중 숨죽임, 상황 멘트) · `contact`(grade → 타격음 종류, ev·la → 관중 기대치) · `foul` · `ballCall`(walk 박수, hbp '오~') · `strikeCall`(looking 콜, k 삼진 콜+환호) · `catch`(글러브, robbed/다이빙 뜬공 환호) · `throw`(from 위치 바람소리) · `tag` · `out`(force·tag·pick·cs 만 누심 "아웃!", dp≥2 환호, 큰 뜬공 잡히면 탄식) · `safe`(close·steal·pick 만 "세이프!") · `hit`(루타별 환호) · `error`(탄식) · `hr`(폭발+오르간+불꽃) · `score`(go·tie 크게, walkoff 폭발, 홈런 직후는 생략) · `wall` · `steal` · `wildPitch` · `inningStart`(이닝 기억, 가끔 오르간) · `inningEnd`(박수) · `gameEnd` · `modeChange`(rules 톤, mode·innings 기억) · **`batterUp`(id 가 내 id 면 등장 오르간)**.
+
+### UI 이벤트
+`ui:screen {name}`(게임 화면이면 관중 켬) · `ui:click` · `ui:perfect` · `ui:volume {master,sfx,crowd,cast}`(0~1) · `ui:me {id}`(main.js 가 내 id 알려 줌 → batterUp 판단) · `ui:msg {text,s}`(배너 문구 → 캐스터). 내보내는 것: `caster:line {text,pri}` → UI 가 자막.
 
 ### main.js 연결 (`// [audio]` 태그)
-- 예전 `sfx.*` 호출 자리 전부 → `bus.emit(...)`. `crowdAmbience` 매 프레임 호출 삭제(관중은 이벤트로 움직임).
-- 배너 메시지 정규식 → 이벤트 변환 블록(`onSnap` 메시지 부분). **gameplay가 sim에 `ev` 이벤트를 넣으면 이 블록의 emit 줄은 지우면 된다**(배너·excite 부분은 남김).
-- `setScreen`에서 `ui:screen`, 투구 시작(`ph`가 `pitching`으로 바뀔 때) `windup`, 서버 `s.lh` 도착 시 `contact`(실제 타구 속도·각도).
-- 캐스터 대사 표(CAST)는 `client/audio/caster.js`로 옮김. main 은 `caster:line`을 받아 자막만 그림.
-- `tools/build.mjs`에 2줄: `public/assets/sfx/index.json` 생성. `.gitignore`에 그 파일 추가.
+- 지운 것: 서버 이벤트를 흉내 내던 emit 전부(windup, hr, throw, catch, held catch, contact 2곳, out/safe 판정, wall, gameEnd, miss) + 배너 문구 → 이벤트 정규식 변환. 배너 블록엔 화면 연출(excite·축하)만 남김.
+- 남긴 것: `cue:swing`, `cue:slide`, `cue:mitt`, `cue:bounce`, `cue:release`, `ui:perfect`, `ui:click`(게이지 시작), `ui:msg`, `ui:me`, `initAudio()`.
+- ui ctx 의 `sound()`는 빈 함수(오르간은 사운드가 `batterUp`으로 냄).
 
 ## 3. 소리 설계
 
@@ -82,7 +72,7 @@ client/audio.js         호환용 껍데기: 예전 sfx.* 호출 → bus 이벤�
 - 판단: TTS는 '기계 목소리' 한계가 있어서 기본값은 지금처럼 자막. 진짜 중계 느낌을 원하면 다음 단계로 ElevenLabs TTS로 대사를 미리 녹음해 샘플로 쓰는 걸 제안(대사 풀이 고정이라 가능).
 
 ### 설정·성능
-- 볼륨 4개: 전체(기존 `vol` 키 그대로), 효과음 `volSfx`, 관중 `volCrowd`, 캐스터 `volCast` (localStorage `hr_*`). 설정 창에 슬라이더가 없으면 사운드가 '전체 음량' 아래에 붙인다(`mountVolumeUI`) — ui 파트가 새 설정 화면을 만들면 같은 id 로 두면 됨.
+- 볼륨 4개: 전체 `vol`, 효과음 `volSfx`, 관중 `volCrowd`, 캐스터 `volCast` (localStorage `hr_*`). 슬라이더는 ui 파트 설정 화면, 바뀌면 `ui:volume`을 받아 적용.
 - 첫 클릭/키 입력에서 AudioContext 해제(크롬·사파리 정책), 탭 복귀 시 재개.
 - 동시 발음 28개 상한(넘치면 우선순위 낮고 오래된 소리부터 끊음, 타격음이 최우선). 같은 소리 최소 간격(바운드 50ms, 포구 90ms…).
 - 노이즈 버퍼는 시작 때 한 번만 만든다(예전엔 소리마다 새 버퍼). 관중 말소리 버퍼는 첫 클릭 직후 한 번 생성.
@@ -142,7 +132,6 @@ client/audio.js         호환용 껍데기: 예전 sfx.* 호출 → bus 이벤�
 6. 렉: 홈런 장면에서 fps 가 예전과 같은지(콘솔 `__audio.stats.peak` 28 이하).
 
 ## 6. 다른 파트에 요청
-- **gameplay**: sim 이벤트에 위 2절 필드를 넣어 주기. 특히 `contact{pid,q,ev,la,mode,foul}`, `catch{pitch,kmh,x,z,dive}`, `out/safe{call,x,z,k}`, `hr{dist,n,walkoff}`, `windup`(카운트·주자·점수). 이벤트가 들어오면 main.js `onSnap`의 `[audio]` 메시지→이벤트 변환 줄은 지우기. `modeChange{rules}`도 경기 시작 때 한 번.
-- **ui**: 설정 화면을 새로 만들 때 음량 슬라이더 id `vol`(전체)·`volSfx`·`volCrowd`·`volCast` 유지(없으면 사운드가 자동으로 붙임). 캐스터 자막은 `bus.on('caster:line', {text})`로 그리기. 화면 바뀔 때 `ui:screen{screen}` emit 유지, 버튼 클릭음은 `bus.emit('ui:click')`.
-- **anim**: 스윙 모션에서 배트가 빠르게 지나가는 순간 `swing{power}` emit(지금은 main.js 가 swingK 로 냄), 슬라이딩·다이빙 시작 때 `slide/dive{x,z}`.
-- **총괄**: `tools/build.mjs`에 2줄(`[audio]`), `.gitignore` 1줄 추가함.
+- **ui**: `client/ui/hud.js`의 `c.sound('organ')` 두 곳 지워도 됨(사운드가 `batterUp`으로 냄, ctx.sound 는 이미 빈 함수). `client/ui/announce.js` 내장 멘트·음성은 `caster:line`이 오면 꺼지니 그대로 둬도 되고, 나중에 지워도 됨.
+- **gameplay**: `catch{pitch:1}`에 `pid` 넣어 주면 미트 소리 중복을 시각 대신 pid 로 거를 수 있음. `slide`에 `x,z`(베이스 위치)도 있으면 좋음.
+- **anim**: `cue:swing/slide/dive`가 들어오면 main.js 의 `cue:swing`·`cue:slide` 줄은 지워도 됨(지금은 둘 다 와도 한 번만 남).

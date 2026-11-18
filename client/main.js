@@ -16,26 +16,19 @@ import { TEX_AVG, FACE_SKINS } from './texinfo.js';
 import { Animator, PITCH_DUR, PITCH_RELEASE_K, THROW_DUR, swingTrack, pitchK } from './anim.js';
 import { buildStadium, glowTex } from './stadium.js';
 import { FX } from './fx.js';
-import { initAudio, mountVolumeUI, setVolume, unlock as audio } from './audio/index.js'; // [audio] 사운드 매니저 (bus 이벤트로만 소리)
-import { bus } from './core/bus.js'; // [gameplay] 게임 이벤트 → bus / [audio]
+import { initAudio, setVolume, unlock as audio } from './audio/index.js'; // [audio] 사운드 매니저 (서버 이벤트 + cue:* 로만 소리)
+// [ui] 화면·HUD·설정은 client/ui/ (createUI 하나로 연결)
+import { createUI, cfg, store, TOUCH, banner, feedback, toast, castLine, addChat, sysChat, myDuty, paintClubs, swingReport, saveLocalCareer } from './ui/index.js';
+import { bus } from './core/bus.js'; // [gameplay] 게임 이벤트 → bus
 
-const OFFLINE = !!window.HR_OFFLINE;
 const $ = (id) => document.getElementById(id);
 const clamp = (v, a, b) => Math.max(a, Math.min(b, v));
 const lerp = (a, b, t) => a + (b - a) * t;
 const nowP = () => performance.now() / 1000;
-const esc = (s) => String(s).replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
-const TOUCH = matchMedia('(pointer: coarse)').matches;
-
-// ═════════════ 설정 ═════════════
-const store = {
-  get(k, d) { try { const v = localStorage.getItem('hr_' + k); return v === null ? d : JSON.parse(v); } catch { return d; } },
-  set(k, v) { try { localStorage.setItem('hr_' + k, JSON.stringify(v)); } catch { } },
-};
-const cfg = { vol: store.get('vol', 80), gq: store.get('gq', TOUCH ? 'low' : 'mid'), shake: store.get('shake', 1), sens: store.get('sens', 100), assist: store.get('assist2', 1), batCam: store.get('batCam', 0), replay: store.get('replay', 1), cast: store.get('cast', 1), fieldCam: store.get('fieldCam', 'tps') };
+// [ui] 설정·localStorage·TOUCH 는 client/ui/settings.js 로 옮김 (cfg/store 는 위 import)
 const fcam = { yawOff: 0, pitchOff: 0, dragT: 0, yaw: null };
 setVolume(cfg.vol / 100);
-initAudio(); mountVolumeUI(); // [audio]
+initAudio(); // [audio]
 
 // ═════════════ 렌더러 ═════════════
 const canvas = $('c');
@@ -269,7 +262,7 @@ function buildTeams(s) {
 // ═════════════ 네트워크 ═════════════
 function startLocal(name, o) {
   const game = new Game({ emit: (m) => handleMsg(m), sendTo: (id, m) => handleMsg(m), onGameOver: (sum) => saveLocalCareer(sum, name) });
-  myId = 'me'; myName = name;
+  myId = 'me'; myName = name; bus.emit('ui:me', { id: myId }); // [audio] 내 타석 오르간(batterUp)용
   game.addPlayer('me', name);
   const me = game.players.get('me'); me.team = o.team; me.pos = o.pos;
   game.applySettings({ mode: o.mode, innings: o.inn, derbyOuts: o.mode === 'derby' ? Math.max(5, o.inn * 3) : 10, diff: o.diff, clubs: o.clubs || [0, 1], pitRot: 'fixed', fieldCtl: o.fld || 'pos', tod: o.tod || 'night', hitEase: o.hitEase ?? 1, rules: o.rules }); // [gameplay] rules: 'real' | 'casual' (ui가 메뉴에서 넘겨줄 것)
@@ -277,7 +270,7 @@ function startLocal(name, o) {
   let last = performance.now();
   const tickFn = () => {
     const t = performance.now(); const dt = Math.min(0.1, (t - last) / 1000); last = t;
-    if (dt <= 0) return;
+    if (dt <= 0 || (net && net.paused)) return; // [ui] 혼자하기 일시정지 (Esc 메뉴)
     game.tick(dt);
     handleMsg(game.snapshot(true)); // [gameplay] true: 이벤트(ev)도 같이
   };
@@ -302,10 +295,10 @@ function connectWS(code, name, pw = '') {
   ws.onmessage = (e) => { lastMsgAt = performance.now(); try { handleMsg(JSON.parse(e.data)); } catch (err) { console.error(err); } };
   ws.onclose = (e) => {
     if (!net || net.ws !== ws) return;
-    if (e.code === 4001) { toTitle(); openPw(code); showErr('비밀번호가 틀렸어'); return; }
-    if (e.code === 4002 || e.code === 4003) { toTitle(); showErr(e.reason || '방에 들어갈 수 없어'); return; }
-    if (e.code === 4004) { toTitle(); showErr('다른 창에서 접속했어'); return; }
-    if (!opened && !myId) { toTitle(); showErr('방에 접속할 수 없어'); return; }
+    if (e.code === 4001) { toTitle(); ui.openPw(code); ui.showErr('비밀번호가 틀렸어'); return; }
+    if (e.code === 4002 || e.code === 4003) { toTitle(); ui.showErr(e.reason || '방에 들어갈 수 없어'); return; }
+    if (e.code === 4004) { toTitle(); ui.showErr('다른 창에서 접속했어'); return; }
+    if (!opened && !myId) { toTitle(); ui.showErr('방에 접속할 수 없어'); return; }
     $('conn').classList.remove('hide');
     // 재접속: 토큰으로 원래 자리로 복귀. 처음엔 빠르게, 점점 간격 늘려 최대 2분 정도 계속 시도
     if (wsRetry < 30) { wsRetry++; setTimeout(() => { if (net && net.ws === ws) connectWS(code, name); }, Math.min(4000, 400 * wsRetry)); }
@@ -329,189 +322,27 @@ function connectWS(code, name, pw = '') {
 let rtt = 0, pgList = null, pingDrawT = 0, curFps = 0;
 function handleMsg(m) {
   switch (m.t) {
-    case 'welcome': myId = m.id; myToken = m.token; if (m.code) sessionStorage.setItem('hr_tok_' + m.code, m.token); break;
+    case 'welcome': myId = m.id; bus.emit('ui:me', { id: myId }); /* [audio] */ myToken = m.token; if (m.code) sessionStorage.setItem('hr_tok_' + m.code, m.token); break;
     case 'pong': rtt = Math.round(performance.now() - m.c); net && net.send({ t: 'rtt', ms: rtt }); break;
-    case 'lobby': lobby = m; renderLobby(); break;
+    case 'lobby': lobby = m; ui.renderLobby(); break;
     case 'chat': addChat(m.name, m.text, m.team); break;
-    case 'kicked': toTitle(); showErr('방장이 내보냈어'); break;
+    case 'kicked': toTitle(); ui.showErr('방장이 내보냈어'); break;
     case 'toast': toast(m.text); break;
     case 's': onSnap(m); if (m.ev) for (const x of m.ev) bus.emit(x.e, x); break; // [gameplay] 게임 이벤트 연결 지점 (docs/rebuild/events.md)
   }
 }
 
-// ═════════════ 화면 ═════════════
-function show(id, on) { $(id).classList.toggle('hide', !on); }
-function setScreen(sc) {
-  screen = sc;
-  show('title', sc === 'title'); show('browser', sc === 'browser'); show('room', sc === 'room');
-  show('hud', sc === 'game' || sc === 'over'); show('over', sc === 'over');
-  document.querySelector('.credit').classList.toggle('hide', sc !== 'title');
-  show('touch', TOUCH && sc === 'game');
-  bus.emit('ui:screen', { screen: sc }); // [audio]
-}
+// ═════════════ 화면 (UI 연결) ═════════════ [ui]
+function setScreen(sc) { ui.setScreen(sc); }
 function toTitle() {
   if (net) { const n = net; net = null; n.close(); }
   clearInterval(pingIv);
   S = null; prevS = null; lobby = null; offset = null; myId = null; snapHist.length = 0; netQ.lastArr = 0;
-  setScreen('title');
+  setScreen(myName ? 'lobby' : 'title'); // [ui] 나가면 닉네임이 있으면 로비로
   history.replaceState(null, '', location.pathname);
   clearActors();
 }
-function showErr(t) { $('err').textContent = t || ''; }
-let toastT = 0;
-function toast(t) { const e = $('toast'); e.textContent = t; e.classList.add('show'); clearTimeout(toastT); toastT = setTimeout(() => e.classList.remove('show'), 2800); }
-function modal(id, on = true) { show(id, on); if (on) bus.emit('ui:click'); } // [audio]
-document.querySelectorAll('[data-close]').forEach((b) => (b.onclick = () => b.closest('.modal').classList.add('hide')));
-document.querySelectorAll('.seg').forEach((seg) => seg.addEventListener('click', (e) => {
-  const b = e.target.closest('button'); if (!b || seg.classList.contains('ro')) return;
-  seg.querySelectorAll('button').forEach((x) => x.classList.toggle('on', x === b));
-  seg.dispatchEvent(new CustomEvent('change', { detail: b.dataset.v }));
-}));
-const segVal = (id) => $(id).querySelector('.on')?.dataset.v;
-const setSeg = (id, v) => $(id).querySelectorAll('button').forEach((x) => x.classList.toggle('on', x.dataset.v === String(v)));
-
-$('nick').value = store.get('name', '');
-function getName() {
-  const n = $('nick').value.trim();
-  if (!n) { showErr('닉네임 먼저 적어줘'); $('nick').focus(); return null; }
-  store.set('name', n); myName = n; return n;
-}
-if (OFFLINE) document.querySelectorAll('.mp').forEach((e) => e.classList.add('hide'));
-const urlRoom = new URLSearchParams(location.search).get('room');
-if (urlRoom && !OFFLINE) $('code').value = urlRoom.toUpperCase();
-
-const soloClub = { me: +(store.get('club', 0)) || 0, op: 1 };
-if (soloClub.op === soloClub.me) soloClub.op = (soloClub.me + 1) % CLUBS.length;
-function paintSoloClubs() {
-  for (const [k, id] of [['me', 'oClubMe'], ['op', 'oClubOp']]) { const b = $(id); b.querySelector('img').src = emblemURL(soloClub[k], 72); b.querySelector('span').textContent = clubOf(soloClub[k]).name; }
-}
-document.querySelectorAll('[data-solo]').forEach((b) => (b.onclick = () => openClubPicker({ solo: b.dataset.solo })));
-$('bSolo').onclick = () => { if (getName()) { audio(); paintSoloClubs(); modal('soloM'); } };
-$('oMode').addEventListener('change', (e) => { $('oInnLbl').textContent = e.detail === 'derby' ? '아웃 수 (×3)' : '이닝'; });
-$('oGo').onclick = () => {
-  show('soloM', false); audio(); showErr('');
-  store.set('tod', segVal('oTod'));
-  store.set('hitEase', segVal('oHit'));
-  startLocal(myName, { fld: segVal('oFld'), hitEase: +segVal('oHit'), tod: segVal('oTod'), mode: segVal('oMode'), inn: +segVal('oInn'), diff: +segVal('oDiff'), team: segVal('oTeam'), pos: $('oPos').value, clubs: segVal('oTeam') === 'away' ? [soloClub.me, soloClub.op] : [soloClub.op, soloClub.me] });
-  setScreen('game');
-};
-$('bCreate').onclick = () => { if (getName()) { audio(); modal('createM'); $('cName').value = `${myName}의 방`; } };
-$('cMode').addEventListener('change', (e) => { $('cInn').value = e.detail === 'derby' ? '10' : '3'; });
-$('cSize').addEventListener('change', (e) => show('cMaxWrap', e.detail === '0'));
-$('cGo').onclick = async () => {
-  show('createM', false);
-  try {
-    const r = await fetch('/api/new', { method: 'POST' }); const j = await r.json();
-    const mode = segVal('cMode'), n = +$('cInn').value;
-    pendingSettings = { name: $('cName').value.trim(), mode, innings: mode === 'game' ? Math.min(9, n) : 3, derbyOuts: mode === 'derby' ? n : 10, max: +$('cMax').value, size: +segVal('cSize'), tod: segVal('cTod'), hitEase: +segVal('cHit'), pw: $('cPw').value, pub: segVal('cPub') === '1' };
-    enterRoom(j.code);
-  } catch { showErr('서버에 연결할 수 없어'); }
-};
-let pendingSettings = null;
-$('bJoin').onclick = () => {
-  if (!getName()) return;
-  const c = $('code').value.trim().toUpperCase();
-  if (!/^[A-Z0-9]{4}$/.test(c)) return showErr('방 코드는 4자리야');
-  tryJoin(c);
-};
-$('code').onkeydown = (e) => { if (e.key === 'Enter') $('bJoin').click(); };
-async function tryJoin(code) {
-  try {
-    const r = await fetch('/api/room/' + code); const j = await r.json();
-    if (!j.exists) return showErr('그 코드의 방이 없어');
-    if (j.locked) return openPw(code);
-    enterRoom(code);
-  } catch { showErr('서버에 연결할 수 없어'); }
-}
-let pwCode = null;
-function openPw(code) { pwCode = code; $('pwIn').value = ''; modal('pwM'); setTimeout(() => $('pwIn').focus(), 50); }
-$('pwGo').onclick = () => { show('pwM', false); enterRoom(pwCode, $('pwIn').value); };
-$('pwIn').onkeydown = (e) => { if (e.key === 'Enter') $('pwGo').click(); };
-function enterRoom(code, pw = '') {
-  audio(); showErr('');
-  connectWS(code, myName, pw);
-  history.replaceState(null, '', `?room=${code}`);
-  $('rCode').textContent = code;
-  setScreen('room');
-}
-$('bBrowse').onclick = () => { if (getName()) { setScreen('browser'); loadRooms(); } };
-$('bBrowseBack').onclick = () => setScreen('title');
-$('bRefresh').onclick = loadRooms;
-async function loadRooms() {
-  $('rlist').innerHTML = '<div class="empty">불러오는 중…</div>';
-  try {
-    const r = await fetch('/api/rooms'); const j = await r.json();
-    if (!j.rooms.length) { $('rlist').innerHTML = '<div class="empty">열린 방이 없어. 직접 만들어봐!</div>'; return; }
-    $('rlist').innerHTML = j.rooms.map((x) => `<button class="ritem" data-code="${esc(x.code)}" data-locked="${x.locked ? 1 : 0}"><b>${x.locked ? '🔒 ' : ''}${esc(x.name)}</b><span class="tag">${x.mode === 'derby' ? '홈런 더비' : '정규 경기'}</span><span class="tag ${x.phase === 'lobby' ? '' : 'live'}">${x.phase === 'lobby' ? '대기 중' : x.mode === 'game' ? `${x.inn}회 진행 중` : '진행 중'}</span><span class="cnt">${x.players}/${x.max}</span></button>`).join('');
-    $('rlist').querySelectorAll('.ritem').forEach((b) => (b.onclick = () => (b.dataset.locked === '1' ? openPw(b.dataset.code) : enterRoom(b.dataset.code))));
-  } catch { $('rlist').innerHTML = '<div class="empty">목록을 불러오지 못했어</div>'; }
-}
-$('bCopy').onclick = () => {
-  const url = `${location.origin}${location.pathname}?room=${roomCode}`;
-  const done = () => { $('bCopy').textContent = '복사됨!'; setTimeout(() => ($('bCopy').textContent = '초대 링크 복사'), 1500); };
-  navigator.clipboard?.writeText(url).then(done, () => toast(url));
-};
-$('bLeave').onclick = toTitle;
-$('bQuit').onclick = toTitle;
-$('mQuit').onclick = () => { show('menuM', false); toTitle(); };
-$('mLobby').onclick = () => { show('menuM', false); net && net.send({ t: 'lobby' }); };
-$('mSettings').onclick = () => { show('menuM', false); openSettings(); };
-$('mHelp').onclick = () => { show('menuM', false); modal('helpM'); };
-$('bHelp').onclick = () => modal('helpM');
-$('bSettings').onclick = openSettings;
-function openSettings() {
-  $('vol').value = cfg.vol; setSeg('gq', cfg.gq); setSeg('shake', cfg.shake); setSeg('replayS', cfg.replay); setSeg('castS', cfg.cast); setSeg('assist', cfg.assist); $('sens').value = cfg.sens; modal('setM');
-}
-$('vol').oninput = () => { cfg.vol = +$('vol').value; store.set('vol', cfg.vol); setVolume(cfg.vol / 100); };
-$('gq').addEventListener('change', (e) => { cfg.gq = e.detail; store.set('gq', cfg.gq); applyQuality(); });
-$('shake').addEventListener('change', (e) => { cfg.shake = +e.detail; store.set('shake', cfg.shake); });
-$('replayS').addEventListener('change', (e) => { cfg.replay = +e.detail; store.set('replay', cfg.replay); if (!cfg.replay) replay.stop(); });
-$('castS').addEventListener('change', (e) => { cfg.cast = +e.detail; store.set('cast', cfg.cast); if (cfg.cast < 2) try { speechSynthesis.cancel(); } catch { } });
-$('assist').addEventListener('change', (e) => { cfg.assist = +e.detail; store.set('assist2', cfg.assist); });
-$('sens').oninput = () => { cfg.sens = +$('sens').value; store.set('sens', cfg.sens); };
-document.querySelectorAll('[data-team]').forEach((b) => (b.onclick = () => net && net.send({ t: 'team', team: b.dataset.team })));
-$('myPos').onchange = () => net && net.send({ t: 'pos', pos: $('myPos').value });
-$('bReady').onclick = () => { const me = lobby && lobby.players.find((p) => p.id === myId); net && net.send({ t: 'ready', on: !(me && me.ready) }); };
-$('bStart').onclick = () => net && net.send({ t: 'start' });
-$('bAgain').onclick = () => net && net.send({ t: 'start' });
-$('bToLobby').onclick = () => net && net.send({ t: 'lobby' });
-$('bReconnect').onclick = () => { if (roomCode) { wsRetry = 0; connectWS(roomCode, myName); } };
-// 설정 변경 (방장)
-const sendSet = (o) => net && lobby && lobby.host === myId && net.send({ t: 'set', ...o });
-$('sMode').addEventListener('change', (e) => sendSet({ mode: e.detail }));
-$('sInn').addEventListener('change', (e) => sendSet({ innings: +e.detail }));
-$('sOuts').addEventListener('change', (e) => sendSet({ derbyOuts: +e.detail }));
-$('sDiff').addEventListener('change', (e) => sendSet({ diff: +e.detail }));
-$('sPub').addEventListener('change', (e) => sendSet({ pub: e.detail === '1' }));
-$('sMax').onchange = () => sendSet({ max: +$('sMax').value });
-$('sSize').addEventListener('change', (e) => sendSet({ size: +e.detail }));
-$('sPit').addEventListener('change', (e) => sendSet({ pitRot: e.detail }));
-$('sLine').addEventListener('change', (e) => sendSet({ lineup: e.detail }));
-$('sFld').addEventListener('change', (e) => sendSet({ fieldCtl: e.detail }));
-$('sTod').addEventListener('change', (e) => sendSet({ tod: e.detail }));
-$('sHit').addEventListener('change', (e) => sendSet({ hitEase: +e.detail }));
-$('myBo').onchange = () => net && net.send({ t: 'bo', bo: +$('myBo').value });
-document.querySelectorAll('[data-club]').forEach((b) => (b.onclick = () => openClubPicker({ side: b.dataset.club })));
-let clubPick = null;
-function openClubPicker(o) {
-  clubPick = o;
-  let cur, other, can = true;
-  if (o.solo) { cur = soloClub[o.solo]; other = soloClub[o.solo === 'me' ? 'op' : 'me']; $('clubT').textContent = o.solo === 'me' ? '내 구단 고르기' : '상대 구단 고르기'; }
-  else {
-    const ti = o.side === 'home' ? 1 : 0; cur = lobby.set.clubs[ti]; other = lobby.set.clubs[1 - ti];
-    can = lobby.host === myId || myTeam() === o.side;
-    $('clubT').textContent = `${o.side === 'home' ? '홈' : '원정'}팀 구단 ${can ? '고르기' : '(그 팀 선수나 방장만 바꿀 수 있어)'}`;
-  }
-  $('clubGrid').innerHTML = CLUBS.map((c, i) => `<button data-i="${i}" class="${i === cur ? 'on' : ''}" ${i === other || !can ? 'disabled' : ''}><img src="${emblemURL(i, 96)}" alt=""><span>${esc(c.name)}</span></button>`).join('');
-  $('clubGrid').querySelectorAll('button').forEach((b) => (b.onclick = () => {
-    const i = +b.dataset.i;
-    if (clubPick.solo) { soloClub[clubPick.solo] = i; if (clubPick.solo === 'me') store.set('club', i); paintSoloClubs(); }
-    else net && net.send({ t: 'club', side: clubPick.side, club: i });
-    show('clubM', false); bus.emit('ui:click'); // [audio]
-  }));
-  modal('clubM');
-}
-// 구단 → 유니폼/스코어버그
+// 구단 → 유니폼 (스코어버그 엠블럼은 ui/hud.js paintClubs)
 let clubsKey = '';
 function applyClubs(cl) {
   if (!cl) return;
@@ -521,80 +352,21 @@ function applyClubs(cl) {
   Object.assign(UNIFORMS.away, uniformsFor(cl[0], 'away'));
   Object.assign(UNIFORMS.home, uniformsFor(cl[1], 'home'));
   if (fieldTeamBuilt || batTeamBuilt) clearActors();
-  $('bEmA').src = emblemURL(cl[0], 48); $('bEmH').src = emblemURL(cl[1], 48);
-  $('trA').querySelector('i').style.background = clubOf(cl[0]).c1 === '#1c1c22' ? clubOf(cl[0]).c2 : clubOf(cl[0]).c1;
-  $('trH').querySelector('i').style.background = clubOf(cl[1]).c2 === '#1a1a1f' ? clubOf(cl[1]).c1 : clubOf(cl[1]).c2;
+  paintClubs(cl);
 }
-$('sName').onchange = () => sendSet({ name: $('sName').value });
-$('sTA').onchange = $('sTH').onchange = () => sendSet({ teams: [$('sTA').value, $('sTH').value] });
-$('sPw').onchange = () => sendSet({ pw: $('sPw').value });
-$('rchatin').onkeydown = (e) => { e.stopPropagation(); if (e.key === 'Enter') { const t = $('rchatin').value.trim(); if (t && net) net.send({ t: 'chat', text: t }); $('rchatin').value = ''; } };
-
-function renderLobby() {
-  if (!lobby) return;
-  if (pendingSettings && lobby.host === myId) { net.send({ t: 'set', ...pendingSettings }); pendingSettings = null; }
-  const isHost = lobby.host === myId;
-  const st = lobby.set;
-  const me = lobby.players.find((p) => p.id === myId);
-  const li = (p) => `<li class="pl ${p.id === myId ? 'me' : ''}"><span class="rd ${p.ready ? 'on' : ''}" title="${p.ready ? '준비 완료' : '대기'}"></span><span class="bo" title="타순">${p.bo ? p.bo + '번' : '자동'}</span><span class="nm">${esc(p.name)}${p.conn ? '' : ' (끊김)'}</span>${p.pos !== 'any' ? `<span class="pos">${POS_KO[p.pos] || ''}</span>` : ''}${p.id === lobby.host ? '<span class="host">방장</span>' : ''}<span class="ping">${p.ping ? p.ping + 'ms' : ''}</span>${isHost && p.id !== myId ? `<button class="x" data-kick="${p.id}" title="내보내기">강퇴</button>` : ''}</li>`;
-  const a = lobby.players.filter((p) => p.team === 'away'), h = lobby.players.filter((p) => p.team === 'home'), sp = lobby.players.filter((p) => p.team === 'spec');
-  const bySlot = (x, y) => (x.bo || 99) - (y.bo || 99);
-  const cap = st.size || Math.ceil(st.max / 2);
-  const empty = (n) => Array.from({ length: Math.max(0, Math.min(3, cap) - n) }, () => '<li class="pl slot"><span class="nm" style="color:var(--dim)">빈 자리 · CPU</span></li>').join('');
-  $('tAway').innerHTML = a.sort(bySlot).map(li).join('') + (st.size ? empty(a.length) : a.length ? '' : '<div class="cpu">CPU 팀</div>');
-  $('tHome').innerHTML = h.sort(bySlot).map(li).join('') + (st.size ? empty(h.length) : h.length ? '' : '<div class="cpu">CPU 팀</div>');
-  $('cntA').textContent = `${a.length}/${cap}`; $('cntH').textContent = `${h.length}/${cap}`;
-  const cl = st.clubs || [0, 1];
-  $('emA').src = emblemURL(cl[0], 96); $('emH').src = emblemURL(cl[1], 96);
-  applyClubs(cl);
-  setSeg('sSize', st.size || 0); setSeg('sPit', st.pitRot || 'inning'); setSeg('sLine', st.lineup || 'humans'); setSeg('sFld', st.fieldCtl || 'pos'); setSeg('sTod', st.tod || 'night'); setSeg('sHit', st.hitEase ?? 1); applyTimeOfDay(st.tod || 'night');
-  show('sMaxWrap', !st.size);
-  document.querySelectorAll('.team [data-team]').forEach((b) => { const t = b.dataset.team, n = t === 'away' ? a.length : h.length; b.disabled = me && me.team === t || n >= cap; b.textContent = me && me.team === t ? '내 팀' : n >= cap ? '꽉 참' : '이 팀으로'; });
-  $('specbar').innerHTML = sp.length ? '관전 ' + sp.map((p) => `<span>${esc(p.name)}</span>`).join('') : '';
-  document.querySelectorAll('[data-kick]').forEach((b) => (b.onclick = () => net.send({ t: 'kick', id: b.dataset.kick })));
-  $('rName').textContent = st.name || '방';
-  $('tnA').textContent = st.teams[0]; $('tnH').textContent = st.teams[1];
-  if (document.activeElement !== $('sName')) $('sName').value = st.name;
-  if (document.activeElement !== $('sTA')) $('sTA').value = st.teams[0];
-  if (document.activeElement !== $('sTH')) $('sTH').value = st.teams[1];
-  setSeg('sMode', st.mode); setSeg('sInn', st.innings); setSeg('sOuts', st.derbyOuts); setSeg('sDiff', st.diff); setSeg('sPub', st.pub ? 1 : 0);
-  $('sMax').value = String(st.max);
-  show('sInnWrap', st.mode === 'game'); show('sOutWrap', st.mode === 'derby');
-  document.querySelectorAll('#sets .seg').forEach((s) => s.classList.toggle('ro', !isHost));
-  for (const id of ['sName', 'sTA', 'sTH', 'sMax', 'sPw']) $(id).disabled = !isHost;
-  show('hostOnly', !isHost);
-  if (me) { $('myBo').value = String(me.bo || 0); $('myPos').value = me.pos; $('bReady').textContent = me.ready ? '준비 취소' : '준비'; $('bReady').classList.toggle('gold', me.ready); }
-  show('bStart', isHost);
-  const nonReady = lobby.players.filter((p) => p.team !== 'spec' && !p.ready && p.id !== lobby.host).length;
-  $('rnote').textContent = isHost ? (nonReady ? `${nonReady}명 준비 안 됨` : '모두 준비됨') : '방장이 시작하길 기다리는 중…';
-  show('mLobby', isHost && !net?.local);
-  if (lobby.phase === 'lobby' && screen !== 'title' && screen !== 'browser' && !net?.local) setScreen('room');
-  if (lobby.phase !== 'lobby' && screen === 'room') setScreen('game');
-}
-
-// ═════════════ 채팅 ═════════════
-function addChat(name, text, team) {
-  const color = team === 'away' ? '#ff8a8f' : team === 'home' ? '#8fb2ff' : '#ffcf3f';
-  for (const box of ['chatlog', 'rchat']) {
-    const d = document.createElement('div');
-    d.innerHTML = `<b style="color:${color}">${esc(name)}</b>${esc(text)}`;
-    $(box).appendChild(d);
-    while ($(box).children.length > 40) $(box).firstChild.remove();
-    $(box).scrollTop = 1e9;
-  }
-}
-function sysChat(text) { const d = document.createElement('div'); d.className = 'sys'; d.textContent = text; $('chatlog').appendChild(d); }
-$('chatin').onkeydown = (e) => {
-  e.stopPropagation();
-  if (e.key === 'Enter') { const t = $('chatin').value.trim(); if (t && net) net.send({ t: 'chat', text: t }); $('chatin').value = ''; $('chatin').classList.add('hide'); $('chatin').blur(); }
-  else if (e.key === 'Escape') { $('chatin').classList.add('hide'); $('chatin').blur(); }
-};
-const QUICK = ['나이스!', '가자!!', 'ㅋㅋㅋㅋ', '아 ㅠㅠ', '홈런 각', '수비 나이스', 'GG', '한 판 더?'];
-$('quick').innerHTML = QUICK.map((q, i) => `<button data-q="${i}"><span class="kbd">${i + 1}</span>${q}</button>`).join('');
-$('quick').querySelectorAll('button').forEach((b) => (b.onclick = () => sendQuick(+b.dataset.q)));
-let quickOpen = false;
-function sendQuick(i) { if (net) net.send({ t: 'chat', text: QUICK[i] }); quickOpen = false; show('quick', false); }
-
+function setPitchType(k) { pitchType = k; ui.renderPitchBar(k); }
+const ui = createUI({
+  get S() { return S; }, get lobby() { return lobby; }, get myId() { return myId; }, get myName() { return myName; },
+  get net() { return net; }, get roomCode() { return roomCode; }, get local() { return !!net?.local; },
+  setMyName: (n) => { myName = n; }, getRole: () => getRole(), myTeam: () => myTeam(), nameOf: (id) => nameOf(id), simNow: () => simNow(),
+  startLocal: (name, o) => startLocal(name, o), connect: (code, name, pw) => connectWS(code, name, pw), leave: () => toTitle(),
+  applyQuality: () => applyQuality(), applyTimeOfDay: (t) => applyTimeOfDay(t), applyClubs: (cl) => applyClubs(cl),
+  setVolume: (v) => setVolume(v), stopReplay: () => replay.stop(), sound: () => { }, /* [audio] 오르간은 사운드가 batterUp 으로 직접 냄 → ui 쪽 호출은 지워도 됨 */ unlockAudio: () => audio(),
+  setPitchType: (k) => setPitchType(k),
+  setPaused: (on) => { if (net && net.local) { net.paused = on; if (!on) offset = null; } },
+  onScreen: (sc) => { screen = sc; },
+});
+$('bReconnect').onclick = () => { if (roomCode) { wsRetry = 0; connectWS(roomCode, myName); } };
 // ═════════════ 스냅샷 ═════════════
 const seen = { msg: -1, hr: -1, te: -1, ce: -1, we: -1, pitch: -1, lp: -1 };
 let ballL = null, lastBallSt = '', hitStopUntil = 0, excite = 0, hrCine = 0, hrCineStart = 0;
@@ -633,7 +405,9 @@ function onSnap(s) {
   if (!net?.local && s.fl) netBuf(s, p);
   if (s.pg) pgList = s.pg;
   if (s.ph === 'lobby') { S = s; if ((screen === 'game' || screen === 'over') && !net?.local) setScreen('room'); return; }
-  if (screen === 'room' || (screen === 'title' && net)) setScreen('game');
+  if (screen === 'room' || ((screen === 'title' || screen === 'lobby' || screen === 'modes') && net)) setScreen('game');
+  if (s.cl) applyClubs(s.cl); // [ui] HUD 갱신에서 옮겨옴 (값 바뀔 때만 실제 작업)
+  if (s.tod) applyTimeOfDay(s.tod);
   if (!s.fl || !s.fl.length) { S = s; return; }
   buildTeams(s);
   if (!S || !S.fl) { seen.ce2 = s.ce2 ? s.ce2.id : -2; seen.hr = s.hr ? s.hr.id : -2; seen.te = s.te ? s.te.id : -2; seen.ce = s.ce ? s.ce.id : -2; seen.we = s.we ? s.we.id : -2; }
@@ -644,6 +418,7 @@ function onSnap(s) {
     const t = s.msg[1];
     banner(t, !!s.msg[2], /홈런!|만루 홈런|점 홈런|홈런왕/.test(t));
     castLine(t, s);
+    bus.emit('ui:msg', { text: t, s }); // [audio] 배너 문구 → 캐스터(caster:line 으로 자막)
     // [audio] 소리는 서버 이벤트(ev)로 — 여기선 화면 연출만
     if (/끝내기/.test(t)) { fx.show(18); excite = 1; startCelebration(); }
     else if (/득점/.test(t)) excite = Math.max(excite, 0.6);
@@ -654,8 +429,7 @@ function onSnap(s) {
   }
   // 홈런 이벤트
   if (s.hr && s.hr.id !== seen.hr) {
-    { hrCine = 1; hrCineStart = nowP(); excite = 1; setTimeout(() => { fx.show(12, [0, 0, 165]); }, 900);
-      bigBoard = { t: nowP(), big: '홈런!', sub: `${s.hr.name} · ${s.hr.dist}m` }; }
+    { hrCine = 1; hrCineStart = nowP(); excite = 1; setTimeout(() => { fx.show(12, [0, 0, 165]); }, 900); /* [audio] 소리는 서버 hr */ bigBoard = { t: nowP(), big: '홈런!', sub: `${s.hr.name} · ${s.hr.dist}m` }; }
     seen.hr = s.hr.id;
     if (cfg.replay && lastContactT && nowP() - lastContactT < 8) replay.schedule(nowP() + 2.6, { tEvent: lastContactT, pre: 0.8, post: 1.6, speed: 0.42, cam: 'hr', scene });
   }
@@ -697,7 +471,7 @@ function onSnap(s) {
   if (s.ph === 'pitch') droppedBat.visible = false;
   if (prevS && prevS.bat && s.bat && (prevS.bat.name !== s.bat.name || prevS.bat.id !== s.bat.id || prevS.bat.n !== s.bat.n)) { buntOn = false; if (s.mode !== 'derby') startIntro(s); }
   if (s.p && s.p.id !== seen.pitch) { seen.pitch = s.p.id; pitchFb = false; fx.trailClear(); tracerId = null; }
-  if (s.ph === 'over' && screen !== 'over') showOver(s);
+  if (s.ph === 'over' && screen !== 'over' && ui.showOver(s)) { fx.show(8, [0, 0, 160]); } // [ui] (환호는 서버 gameEnd)
   if (s.ph !== 'over' && screen === 'over') setScreen('game');
 }
 let umpCall = 0, bigBoard = null, pitchFb = false;
@@ -752,61 +526,11 @@ function onContact(p, q, bunt) {
   excite = Math.max(excite, 0.25 + q * 0.4);
 }
 
-// ── 캐스터 멘트: 대사 고르기·음성은 사운드 매니저(client/audio/caster.js), 자막만 여기서 그림 (설정: 끄기 / 자막 / 자막+음성) ── [audio]
-let castT = 0;
-function castLine(t, s) { bus.emit('ui:msg', { text: t, s }); }
-bus.on('caster:line', ({ text }) => {
-  const e = $('cast'); e.textContent = '🎙 ' + text; e.classList.remove('show'); void e.offsetWidth; e.classList.add('show');
-  clearTimeout(castT); castT = setTimeout(() => e.classList.remove('show'), 3800);
-});
-let bannerT = 0, bannerAt = 0, bannerBig = false;
-const bannerQ = [];
-// 메시지가 연달아 오면 앞 메시지를 최소 1.1초는 보여주고 다음 걸 띄움 (큰 메시지는 작은 메시지를 바로 덮음)
-function banner(text, big, hr) {
-  const now = performance.now();
-  if (!hr && !(big && !bannerBig) && now - bannerAt < 1100 && $('banner').classList.contains('show')) {
-    if (bannerQ.length > 2) bannerQ.shift();
-    bannerQ.push([text, big, hr]);
-    if (bannerQ.length === 1) setTimeout(flushBanner, 1100 - (now - bannerAt));
-    return;
-  }
-  bannerQ.length = 0; showBanner(text, big, hr);
-}
-function flushBanner() { const n = bannerQ.shift(); if (!n) return; showBanner(...n); if (bannerQ.length) setTimeout(flushBanner, 1100); }
-function showBanner(text, big, hr) {
-  const b = $('banner');
-  bannerAt = performance.now(); bannerBig = !!big;
-  b.textContent = text;
-  b.classList.toggle('small', !big); b.classList.toggle('hr', !!hr);
-  b.classList.remove('show'); void b.offsetWidth; b.classList.add('show');
-  clearTimeout(bannerT); bannerT = setTimeout(() => b.classList.remove('show'), hr ? 3400 : big ? 2600 : 1900);
-}
-let wuT = 0;
-// ── 통산 기록 (멀티: 서버 저장 / 혼자: 이 브라우저) ──
-let career = {}, careerT = 0;
-function saveLocalCareer(sum, me) {
-  const v = sum && (sum[me] || Object.values(sum)[0]); if (!v) return;
-  const all = store.get('career', {}), cur = all[me] || {};
-  for (const k of ['g', 'w', 'pa', 'h', 'hr', 'rbi', 'k', 'bb', 'sb', 'outs', 'r', 'ph', 'pk', 'pbb']) cur[k] = (cur[k] || 0) + (Number(v[k]) || 0);
-  cur.max = Math.max(cur.max || 0, Number(v.max) || 0);
-  all[me] = cur; store.set('career', all); career[me] = cur;
-}
-function refreshCareer(force) {
-  if (!S || (!force && nowP() - careerT < 30)) return;
-  careerT = nowP();
-  if (net?.local) { career = { ...store.get('career', {}) }; return; }
-  const names = [...new Set((lobby?.players || []).map((p) => p.name))].slice(0, 20);
-  if (!names.length) return;
-  fetch('/api/stats?n=' + encodeURIComponent(names.join(','))).then((r) => r.json()).then((j) => { career = j.stats || {}; }).catch(() => {});
-}
-const avgStr = (h, ab) => (ab > 0 ? (h / ab).toFixed(3).replace(/^0/, '') : '-.---');
-const eraStr = (r, outs) => (outs > 0 ? (r * 27 / outs).toFixed(2) : '-.--');
-const ipStr = (outs) => `${Math.floor(outs / 3)}${outs % 3 ? '.' + (outs % 3) : ''}`;
-// ── 등장 컷씬: (투수 바뀌면 투수 →) 타자 클로즈업 + 기록 카드 ──
+// ── 등장 컷씬: (투수 바뀌면 투수 →) 타자 클로즈업 + 기록 카드(ui) ──
 let intro = null, lastPitcherName = '';
 function startIntro(s) {
-  if (s.mode !== 'game' || replay.active) { walkup(s); return; }
-  refreshCareer();
+  if (s.mode !== 'game' || replay.active) { ui.walkup(s); return; }
+  ui.refreshCareer();
   const seq = [];
   if (s.cp && s.cp[0] !== lastPitcherName) { seq.push('p'); lastPitcherName = s.cp[0]; }
   seq.push('b');
@@ -820,116 +544,10 @@ function introStep() {
   for (let i = 0; i < intro.seq.length; i++) { if (e < acc + D[intro.seq[i]]) { idx = i; break; } acc += D[intro.seq[i]]; }
   const windup = S && S.ph === 'pitching' && S.p && simNow() > S.p.t0 - WINDUP;
   if (idx < 0 || windup || !S || S.mode !== 'game' || screen !== 'game' || replay.active) { endIntro(); return null; }
-  if (idx !== intro.idx) { intro.idx = idx; showIntroCard(intro.seq[idx], S); }
+  if (idx !== intro.idx) { intro.idx = idx; ui.introCard(intro.seq[idx], S); }
   return { kind: intro.seq[idx], e: e - acc };
 }
-function endIntro() { intro = null; $('intro').classList.remove('show'); }
-function showIntroCard(kind, s) {
-  const el = $('intro');
-  const club = clubOf((s.cl || [0, 1])[kind === 'b' ? (s.half === 0 ? 0 : 1) : (s.half === 0 ? 1 : 0)]) || {};
-  const lum = (hex) => { const c = new THREE.Color(hex || '#000'); return 0.2126 * c.r + 0.7152 * c.g + 0.0722 * c.b; };
-  const cc = lum(club.c1) > 0.12 ? club.c1 : lum(club.c2) > 0.12 ? club.c2 : '#ffd23a'; // 어두운 팀색은 밝은 보조색으로
-  el.style.setProperty('--cc', cc || '#ff6a2b');
-  if (kind === 'b') {
-    const st = (s.st || []).find((r) => (r[0] && r[0] === s.bat.id) || (!r[0] && r[1] === s.bat.name));
-    const nm = s.bat.id ? (nameOf(s.bat.id) || s.bat.name) : s.bat.name;
-    const slot = s.bat.slot || ((s.bat.n - 1) % 9) + 1;
-    const c = career[nm];
-    el.querySelector('.in-tag').textContent = `${slot}번 타자 · ${club.name || ''}`;
-    el.querySelector('.in-nm').textContent = nm;
-    let today = '오늘 첫 타석';
-    if (st && st[3]) { const ab = st[3] - st[9]; today = `오늘 ${ab}타수 ${st[4]}안타` + (st[5] ? ` ${st[5]}홈런` : '') + (st[6] ? ` ${st[6]}타점` : '') + (st[9] ? ` ${st[9]}볼넷` : '') + (st[8] ? ` ${st[8]}삼진` : ''); }
-    el.querySelector('.in-today').textContent = today;
-    if (c && c.pa) { const ab = c.pa - (c.bb || 0); el.querySelector('.in-big').textContent = avgStr(c.h || 0, ab); el.querySelector('.in-bigl').textContent = '통산 타율'; el.querySelector('.in-car').textContent = `${c.g || 0}경기 · ${c.h || 0}안타 · ${c.hr || 0}홈런 · ${c.rbi || 0}타점 · 최장 ${c.max || 0}m`; }
-    else if (st && st[3]) { const ab = st[3] - st[9]; el.querySelector('.in-big').textContent = avgStr(st[4], ab); el.querySelector('.in-bigl').textContent = '오늘 타율'; el.querySelector('.in-car').textContent = s.bat.id ? '통산 기록은 경기가 끝나면 쌓여요' : 'CPU 타자'; }
-    else { el.querySelector('.in-big').textContent = s.bat.id ? '-.---' : 'CPU'; el.querySelector('.in-bigl').textContent = s.bat.id ? '타율' : ''; el.querySelector('.in-car').textContent = s.bat.id ? '첫 기록 도전!' : ''; }
-    const runners = (s.occ || []).filter(Boolean).length;
-    el.querySelector('.in-sit').textContent = runners === 3 ? '만루 찬스!' : (s.occ && (s.occ[1] || s.occ[2])) ? '득점권 찬스' : (s.cnt ? `${s.cnt[2]}아웃` : '');
-    if (s.bat.id === myId) bus.emit('ui:walkup', { me: true }); // [audio]
-  } else {
-    const cp = s.cp || ['', 0, 0, 0, 0, 0, 0, null];
-    const c = career[cp[0]];
-    el.querySelector('.in-tag').textContent = `투수 · ${club.name || ''}`;
-    el.querySelector('.in-nm').textContent = cp[0];
-    el.querySelector('.in-today').textContent = cp[1] || cp[6] ? `오늘 ${ipStr(cp[1])}이닝 · ${cp[4]}탈삼진 · ${cp[2]}실점 · ${cp[6]}구` : '오늘 첫 등판';
-    if (c && c.outs) { el.querySelector('.in-big').textContent = eraStr(c.r || 0, c.outs); el.querySelector('.in-bigl').textContent = '통산 평균자책'; el.querySelector('.in-car').textContent = `${ipStr(c.outs)}이닝 · ${c.pk || 0}탈삼진 · 볼넷 ${c.pbb || 0}`; }
-    else { el.querySelector('.in-big').textContent = cp[1] ? eraStr(cp[2], cp[1]) : '-.--'; el.querySelector('.in-bigl').textContent = cp[1] ? '오늘 평균자책' : '평균자책'; el.querySelector('.in-car').textContent = cp[7] ? '' : 'CPU 투수'; }
-    el.querySelector('.in-sit').textContent = '';
-  }
-  el.classList.remove('show'); void el.offsetWidth; el.classList.add('show');
-}
-function walkup(s) {
-  const st = (s.st || []).find((r) => (r[0] && r[0] === s.bat.id) || (!r[0] && r[1] === s.bat.name));
-  const me = s.bat.id && s.bat.id === myId;
-  const slot = s.bat.slot || ((s.bat.n - 1) % 9) + 1;
-  const e = $('walkup');
-  e.querySelector('.wu-no').textContent = slot;
-  e.querySelector('.wu-nm').textContent = (me ? '타석: ' : '') + (s.bat.id ? (nameOf(s.bat.id) || s.bat.name) : s.bat.name);
-  let line = '오늘 첫 타석';
-  if (st && st[3]) { const ab = st[3] - st[9]; line = `오늘 ${ab}타수 ${st[4]}안타` + (st[5] ? ` · ${st[5]}홈런` : '') + (st[6] ? ` · ${st[6]}타점` : '') + (st[9] ? ` · ${st[9]}볼넷` : ''); }
-  const runners = (s.occ || []).filter(Boolean).length;
-  if (runners && s.inn >= 1) line += runners === 3 ? ' · 만루 찬스' : (s.occ[1] || s.occ[2]) ? ' · 득점권' : '';
-  e.querySelector('.wu-st').textContent = line;
-  e.classList.toggle('me', !!me);
-  e.classList.remove('show'); void e.offsetWidth; e.classList.add('show');
-  if (me) bus.emit('ui:walkup', { me: true }); // [audio]
-  clearTimeout(wuT); wuT = setTimeout(() => e.classList.remove('show'), 4000);
-}
-let fbT = 0;
-function feedback(text, color = '#fff') { const f = $('fb'); f.textContent = text; f.style.color = color; f.classList.add('show'); clearTimeout(fbT); fbT = setTimeout(() => f.classList.remove('show'), 2600); }
-
-const KING_SVG = '<svg viewBox="0 0 60 34" fill="currentColor"><path d="M2 32 L6 6 L18 20 L30 2 L42 20 L54 6 L58 32 Z"/></svg>';
-function statTable(st, mine) {
-  let h = '<tr><th>타자</th><th>타석</th><th>안타</th><th class="r">홈런</th><th>타점</th><th>최장</th><th>삼진</th><th>볼넷</th><th>도루</th><th>통산 타율</th></tr>';
-  h += st.filter((r) => r[3] > 0 || r[0]).map((r) => { const c = r[0] && career[r[1]]; return `<tr class="${r[0] && r[0] === myId ? 'me' : ''}"><td>${esc(r[1])}</td><td>${r[3]}</td><td>${r[4]}</td><td class="r">${r[5]}</td><td>${r[6]}</td><td>${r[7] ? r[7] + 'm' : '-'}</td><td>${r[8]}</td><td>${r[9]}</td><td>${r[10]}</td><td>${c && c.pa ? avgStr(c.h || 0, c.pa - (c.bb || 0)) : '-'}</td></tr>`; }).join('');
-  const ps = (S && S.ps) || [];
-  if (ps.length) {
-    h += '<tr class="sep"><th>투수</th><th>이닝</th><th>피안타</th><th class="r">실점</th><th>탈삼진</th><th>볼넷</th><th>피홈런</th><th>상대</th><th>ERA</th><th>통산 ERA</th></tr>';
-    h += ps.map((p) => { const c = p[0] && career[p[1]]; return `<tr class="${p[0] && p[0] === myId ? 'me' : ''}"><td>${esc(p[1])}</td><td>${ipStr(p[3])}</td><td>${p[5]}</td><td class="r">${p[4]}</td><td>${p[6]}</td><td>${p[7]}</td><td>${p[8]}</td><td>${p[9]}</td><td>${eraStr(p[4], p[3])}</td><td>${c && c.outs ? eraStr(c.r || 0, c.outs) : '-'}</td></tr>`; }).join('');
-  }
-  return h;
-}
-function lineTable(s) {
-  const inns = Math.max(s.ls[0].length, s.ls[1].length, s.inn || 1);
-  let h = '<tr><th></th>' + Array.from({ length: inns }, (_, i) => `<th>${i + 1}</th>`).join('') + '<th class="r">R</th><th>H</th><th>E</th></tr>';
-  (s.tn || ['원정', '홈']).forEach((nm, r) => { h += `<tr><td>${esc(nm)}</td>` + Array.from({ length: inns }, (_, i) => `<td>${s.ls[r][i] ?? '-'}</td>`).join('') + `<td class="r">${s.sc[r]}</td><td>${s.hits[r]}</td><td>${s.errs ? s.errs[r] : 0}</td></tr>`; });
-  return h;
-}
-function showOver(s) {
-  setTimeout(() => refreshCareer(true), 1500);
-  setScreen('over');
-  const mySide = myTeam();
-  let title, king = null;
-  if (s.mode === 'derby' && s.dy) {
-    const list = [...s.dy.list].sort((a, b) => b[2] - a[2] || b[3] - a[3]);
-    title = '홈런 더비 종료';
-    if (list[0]) king = { name: list[0][1], line: `홈런 ${list[0][2]}개 · 최장 ${list[0][3] || '-'}m` };
-    $('overLine').innerHTML = '<tr><th>순위</th><th>선수</th><th class="r">홈런</th><th>최장 비거리</th></tr>' + list.map((r, i) => `<tr class="${r[0] === myId ? 'me' : ''}"><td>${i + 1}위</td><td>${esc(r[1])}</td><td class="r">${r[2]}</td><td>${r[3] ? r[3] + 'm' : '-'}</td></tr>`).join('');
-    $('overStats').innerHTML = '';
-  } else {
-    title = s.win ? `${s.tn[s.win === 'away' ? 0 : 1]} 승리` : '무승부';
-    if (mySide && mySide !== 'spec' && s.win) title = s.win === mySide ? '승리!' : '패배…';
-    const st = s.st || [];
-    const top = [...st].sort((a, b) => b[5] - a[5] || b[7] - a[7] || b[4] - a[4] || b[6] - a[6])[0];
-    if (top && top[5] > 0) king = { name: top[1], line: `홈런 ${top[5]}개 · 최장 ${top[7]}m · ${top[6]}타점` };
-    // MVP: 타자(안타·홈런·타점·볼넷·도루)와 투수(아웃·탈삼진·실점) 점수를 같이 비교, 이긴 팀 보너스
-    const cands = [];
-    for (const r of st) if (r[3] > 0) cands.push({ name: r[1], sc: r[4] * 1.5 + r[5] * 2.5 + r[6] * 1.2 + r[9] * 0.5 + r[10] * 0.6 - r[8] * 0.25 + (r[2] === s.win ? 0.8 : 0), line: `${r[3] - r[9]}타수 ${r[4]}안타` + (r[5] ? ` ${r[5]}홈런` : '') + (r[6] ? ` ${r[6]}타점` : '') });
-    for (const p of s.ps || []) if (p[3] > 0) cands.push({ name: p[1], sc: p[3] * 0.4 + p[6] * 0.45 - p[4] * 1.3 - p[7] * 0.3 - p[5] * 0.25 + (p[2] === s.win ? 1 : 0), line: `${ipStr(p[3])}이닝 ${p[6]}탈삼진 ${p[4]}실점` });
-    const mvp = cands.sort((a, b) => b.sc - a.sc)[0];
-    if (mvp) s._mvp = mvp;
-    $('overLine').innerHTML = lineTable(s);
-    $('overStats').innerHTML = statTable(st);
-  }
-  $('overT').textContent = title;
-  const card = (k, label) => `<div class="king">${KING_SVG}<div><small>${label}</small><b>${esc(k.name)}</b><em>${esc(k.line)}</em></div></div>`;
-  $('kingBox').innerHTML = (s._mvp ? card(s._mvp, '오늘의 MVP') : '') + (king && (!s._mvp || king.name !== s._mvp.name || s.mode === 'derby') ? ' ' + card(king, s.mode === 'derby' ? '홈런왕' : '오늘의 홈런왕') : '');
-  if (s._mvp) king = king || s._mvp;
-  const isHost = net?.local || (lobby && lobby.host === myId);
-  show('bAgain', isHost); show('bToLobby', isHost && !net?.local);
-  $('overNote').textContent = isHost ? '' : '방장이 다음 경기를 고르는 중…';
-  if (king) fx.show(8, [0, 0, 160]);
-}
+function endIntro() { intro = null; ui.introHide(); }
 function myTeam() { const p = lobby && lobby.players.find((x) => x.id === myId); return p ? p.team : null; }
 function nameOf(id) { if (!id) return null; const p = lobby && lobby.players.find((x) => x.id === id); return p ? p.name : null; }
 
@@ -972,19 +590,11 @@ addEventListener('keydown', (e) => {
   const k = keyOf(e);
   if (replay.active && (k === ' ' || e.key === 'Escape' || e.key === 'Enter')) { replay.stop(); e.preventDefault(); return; }
   if (intro && (e.key === 'Escape' || e.key === 'Enter') && !getRole().pitcher) { endIntro(); e.preventDefault(); return; }
-  if (e.key === 'Escape') {
-    if (!$('helpM').classList.contains('hide')) return show('helpM', false);
-    if (!$('setM').classList.contains('hide')) return show('setM', false);
-    if (screen === 'game' || screen === 'over') { show('menuM', $('menuM').classList.contains('hide')); return; }
-  }
+  if (ui.handleKey(e, k)) return; // [ui] Esc 메뉴/창 닫기, Enter 채팅, Tab 기록, H 조작법, T 빠른 채팅
   if (screen !== 'game' && screen !== 'over') return;
-  if (e.key === 'Enter') { $('chatin').classList.remove('hide'); $('chatin').focus(); e.preventDefault(); return; }
-  if (e.key === 'Tab') { e.preventDefault(); show('tab', true); refreshCareer(); renderTab(); return; }
-  if (k === 'h') { modal('helpM', $('helpM').classList.contains('hide')); return; }
+  if (ui.modalOpen()) return; // 창이 떠 있으면 경기 입력 막음 (혼자하기 일시정지 중 스윙 방지)
   if (k === 'v' && S && getRole().fi >= 0 && !getRole().pitcher && getRole().pos !== 'C') { cfg.fieldCam = cfg.fieldCam === 'tps' ? 'tv' : 'tps'; store.set('fieldCam', cfg.fieldCam); fcam.yawOff = 0; toast(cfg.fieldCam === 'tps' ? '수비 시점: 내 선수 뒤 (드래그로 회전)' : '수비 시점: 중계 화면'); return; }
   if (k === 'v') { cfg.batCam = cfg.batCam === 1 ? 0 : 1; store.set('batCam', cfg.batCam); toast(cfg.batCam === 1 ? '타격 시점: 타자 어깨 뒤' : '타격 시점: 포수 뒤 (중계)'); return; }
-  if (quickOpen && /^[1-8]$/.test(k)) { sendQuick(+k - 1); return; }
-  if (k === 't') { quickOpen = !quickOpen; show('quick', quickOpen); return; }
   keys[k] = true;
   if (e.code === 'Space') e.preventDefault();
   if (!S || screen !== 'game' || e.repeat) return;
@@ -996,7 +606,7 @@ addEventListener('keydown', (e) => {
     if (k === 'f') doSwing('power');
   }
   // 투수
-  if (role.pitcher && S.ph === 'pitch' && /^[1-6]$/.test(k)) { pitchType = PITCH_KEYS[+k - 1]; renderPitchBar(true); }
+  if (role.pitcher && S.ph === 'pitch' && /^[1-6]$/.test(k)) setPitchType(PITCH_KEYS[+k - 1]);
   if (role.batter && S.dy && S.dy.pr && /^[0-6]$/.test(k)) net.send({ t: 'ppick', type: k === '0' ? 'MIX' : PITCH_KEYS[+k - 1] }); // 타격 연습: 구종 고정
   if (role.pitcher && e.code === 'Space') pitchClick();
   if (role.pitcher && S.ph === 'pitch' && k === 'q') { net.send({ t: 'pick' }); gauge = null; }
@@ -1027,8 +637,8 @@ addEventListener('keydown', (e) => {
 let throwCharge = null, pendThrow = null;
 const throwPow = () => (throwCharge ? clamp((nowP() - throwCharge.t0) / 0.7, 0, 1) : 0);
 addEventListener('keyup', (e) => { const k = keyOf(e); keys[k] = false; keys[e.key.toLowerCase()] = false;
-  if (throwCharge && throwCharge.k === k) { const p = 0.25 + throwPow() * 0.75; if (net && getRole().holding) { net.send({ t: 'throw', base: throwCharge.base, p }); if (p > 0.85) feedback('강송구!', '#ff9f43'); } else pendThrow = { base: throwCharge.base, t: nowP() }; throwCharge = null; } if (e.key === 'Tab') show('tab', false); });
-addEventListener('blur', () => { for (const k in keys) keys[k] = false; show('tab', false); });
+  if (throwCharge && throwCharge.k === k) { const p = 0.25 + throwPow() * 0.75; if (net && getRole().holding) { net.send({ t: 'throw', base: throwCharge.base, p }); if (p > 0.85) feedback('강송구!', '#ff9f43'); } else pendThrow = { base: throwCharge.base, t: nowP() }; throwCharge = null; } ui.handleKeyUp(e); });
+addEventListener('blur', () => { for (const k in keys) keys[k] = false; ui.onBlur(); });
 addEventListener('contextmenu', (e) => { if (screen === 'game') e.preventDefault(); });
 canvas.addEventListener('pointermove', (e) => {
   mouseRaw.set(e.clientX / innerWidth * 2 - 1, -(e.clientY / innerHeight) * 2 + 1);
@@ -1099,43 +709,7 @@ function doSwing(mode) {
   }
 }
 let contactFreeze = null, perfectHit = 0;
-// ── 스윙 분석: 타이밍(빠름/늦음)과 위치(배트 원 vs 공) 중 뭐가 문제였는지 바로 보여줌 + 최근 스윙 경향 코칭 ──
-const swHist = [];
-let swaT = 0;
-function swingReport(dt, a, p, M, contact) {
-  const el = $('swa'); if (!el) return;
-  const ex = a[0] - p.tx, ey = a[1] - p.ty, d = Math.hypot(ex, ey);
-  swHist.push({ dt, ex, ey, d, contact, W: M.W, R: M.R }); if (swHist.length > 12) swHist.shift();
-  // 타이밍 바: ±0.2초 범위, 초록 = 맞는 구간
-  const span = 0.2, pos = clamp(dt / span, -1, 1);
-  el.querySelector('.sw-win').style.cssText = `left:${50 - M.W / span * 50}%;width:${M.W / span * 100}%`;
-  el.querySelector('.sw-mk').style.left = `${50 + pos * 50}%`;
-  el.querySelector('.sw-mk').style.background = Math.abs(dt) <= M.W ? '#4fd18b' : '#ff6b5a';
-  const tOk = Math.abs(dt) <= M.W, lOk = d <= M.R;
-  el.querySelector('.sw-tv').textContent = Math.abs(dt) < 0.02 ? '딱 맞음' : `${Math.round(Math.abs(dt) * 1000)}ms ${dt < 0 ? '빠름' : '늦음'}`;
-  el.querySelector('.sw-tv').style.color = tOk ? '#4fd18b' : '#ff8a80';
-  // 위치 그림: 공(흰 점) 기준으로 배트 원(초록/빨강)이 어디 있었나
-  const c = el.querySelector('canvas'), g = c.getContext('2d'), S0 = 60, k = 60 / 0.3;
-  g.clearRect(0, 0, 120, 120);
-  g.strokeStyle = 'rgba(255,255,255,.15)'; g.strokeRect(10, 10, 100, 100);
-  g.beginPath(); g.arc(S0 + ex * k, S0 - ey * k, M.R * k, 0, 7); g.fillStyle = lOk ? 'rgba(79,209,139,.25)' : 'rgba(255,107,90,.22)'; g.fill(); g.strokeStyle = lOk ? '#4fd18b' : '#ff6b5a'; g.lineWidth = 2; g.stroke();
-  g.beginPath(); g.arc(S0, S0, 5, 0, 7); g.fillStyle = '#fff'; g.fill();
-  const dirTxt = d < 0.03 ? '정확' : `${Math.round(d * 100)}cm ${Math.abs(ey) > Math.abs(ex) ? (ey > 0 ? '위로' : '아래로') : ((ex < 0) ? '왼쪽' : '오른쪽')}`;
-  el.querySelector('.sw-lv').textContent = dirTxt; el.querySelector('.sw-lv').style.color = lOk ? '#4fd18b' : '#ff8a80';
-  // 경향 코칭 (최근 4번 이상)
-  let tip = '';
-  const last = swHist.slice(-6);
-  if (last.length >= 4) {
-    const mT = last.reduce((s, h) => s + h.dt, 0) / last.length;
-    const badT = last.filter((h) => Math.abs(h.dt) > h.W).length, badL = last.filter((h) => h.d > h.R).length;
-    const mY = last.reduce((s, h) => s + h.ey, 0) / last.length;
-    if (badT >= badL && badT >= 2) tip = mT > 0 ? `타이밍이 늦는 편 (평균 ${Math.round(mT * 1000)}ms) → '스트라이드!' 뜰 때 미리 준비` : `타이밍이 빠른 편 (평균 ${Math.round(-mT * 1000)}ms) → 공이 존 앞에 올 때까지 참기`;
-    else if (badL >= 2) tip = Math.abs(mY) > 0.06 ? `배트 원이 공보다 ${mY > 0 ? '위' : '아래'}에 있는 편 → ${mY > 0 ? '조금 낮게' : '조금 높게'}` : '위치가 좌우로 흔들림 → 공 따라 원을 끝까지 옮기기';
-    else tip = '좋아요! 지금 감각 유지';
-  }
-  el.querySelector('.sw-tip').textContent = tip;
-  el.classList.remove('hide'); clearTimeout(swaT); swaT = setTimeout(() => el.classList.add('hide'), 5200);
-}
+// [ui] 스윙 분석 창은 client/ui/hud.js swingReport
 const swingInfo = {};
 // 투구 게이지
 const GAUGE_UP = 0.85, GAUGE_MAX = 1.15;
@@ -1171,14 +745,6 @@ function toggleBunt() {
   buntOn = !(buntOn || S.bs); net.send({ t: 'bunt', on: buntOn });
   feedback(buntOn ? '번트 자세 · 공 들어올 때 클릭' : '강공 자세', '#9fd0ff');
 }
-function renderPitchBar(force) {
-  const bar = $('pitchbar');
-  if (!force && bar.dataset.k === pitchType) return;
-  bar.dataset.k = pitchType;
-  bar.innerHTML = PITCH_KEYS.map((k, i) => `<button data-p="${k}" class="${k === pitchType ? 'on' : ''}"><small>${i + 1}</small><i class="pc" style="background:${PITCHES[k].col}"></i>${PITCHES[k].name}<em>~${PITCHES[k].v}km/h</em></button>`).join('');
-  bar.querySelectorAll('button').forEach((b) => (b.onpointerdown = (e) => { e.stopPropagation(); pitchType = b.dataset.p; renderPitchBar(true); }));
-}
-
 // ═════════════ 내 수비수 이동 ═════════════
 const ctl = { active: false, x: 0, z: 0, ry: 0, lastIn: 0, lastSend: 0, idx: -1, moving: false };
 const touchMove = { x: 0, y: 0 };
@@ -1270,16 +836,6 @@ const tossBall = new THREE.Mesh(new THREE.SphereGeometry(BALL_R * 1.4, 12, 10), 
 tossBall.visible = false; scene.add(tossBall);
 let lastPh = '', lastRes = null, tossT = -9, lastInn = '';
 const TOSS = { start: 0.35, dur: 0.75 };
-// 수비 중 '지금 내 역할' (서버가 정한 추격자/베이스 커버 기준)
-function myDuty(s, role) {
-  if (s.ph !== 'live' || role.fi < 0) return null;
-  if (role.holding) return { k: 'hold', txt: s.rl && ['LF', 'CF', 'RF'].includes(role.pos) ? '공 잡았다! R = 커트맨에게 중계 (멀면 Space도 자동 중계)' : '공 잡았다! 송구할 베이스 선택', col: '#4fd18b' };
-  if (s.ch === role.fi) return { k: 'chase', txt: '▶ 네 타구! 공(주황 원) 쪽으로 가서 잡아', col: '#ffcf3f' };
-  if (s.rl && s.rl[0] === role.fi) return { k: 'relay', txt: `▶ 중계! 파란 원으로 가서 외야 송구 받고 ${s.rl[3] === 4 ? '홈' : s.rl[3] + '루'}로`, col: '#5bd0ff' };
-  const cv = s.cv || [], bi = cv.indexOf(role.fi);
-  if (bi >= 0) return { k: 'cover', base: bi, txt: `▶ ${['1루', '2루', '3루', '홈'][bi]} 커버! 베이스로 가서 송구 받기`, col: '#7cc4ff' };
-  return { k: 'idle', txt: role.pos === 'P' ? '투수는 대기 · 다른 야수가 처리 중' : '대기 · 다른 야수가 처리 중', col: '#aab3c5' };
-}
 function updateWorld(dt) {
   const s = S, t = simNow(), tp = nowP();
   if (s.p) lastRes = s.p.res;
@@ -1410,7 +966,7 @@ function updateWorld(dt) {
     const dBase = Math.hypot(tb[0] - x, tb[1] - z);
     let slideK = -1;
     // 슬라이딩은 서버 판정과 같게 (flags 4)
-    if ((flags & 4) && s.ph === 'live') { if (!A.slideT) { A.slideT = tp; bus.emit('cue:slide', { rid, x, z }); fx.dustPuff(x, z, 2, 1.5); } } // [audio]
+    if ((flags & 4) && s.ph === 'live') { if (!A.slideT) { A.slideT = tp; bus.emit('cue:slide', { rid, x, z }); /* [audio] */ fx.dustPuff(x, z, 2, 1.5); } }
     if (A.slideT) { slideK = (tp - A.slideT) / 0.6; if (slideK > 1.6 || (sp < 0.3 && slideK > 1)) { A.slideT = 0; slideK = -1; } }
     const nm = nameOf(pid);
     setTag(A, nm || '', pid === myId ? '#ffcf3f' : '#fff');
@@ -1452,7 +1008,7 @@ function startCelebration() {
 function updateCelebration(dt) {
   if (!celeb) return;
   const e = nowP() - celeb.t0;
-  if (e > 14 || screen === 'room' || screen === 'title') { for (const A of celeb.actors) scene.remove(A.p.root); celeb = null; return; }
+  if (e > 14 || (screen !== 'game' && screen !== 'over')) { for (const A of celeb.actors) scene.remove(A.p.root); celeb = null; return; }
   for (const A of celeb.actors) {
     const r = A.p.root, [gx, gz] = A.goal;
     const dx = gx - r.position.x, dz = gz - r.position.z, d = Math.hypot(dx, dz);
@@ -1519,29 +1075,6 @@ function recBase() {
   if (!best) best = 1;
   return Math.min(4, best);
 }
-// 처음 몇 번은 상황별 짧은 도움말 카드 (브라우저마다 종류별 2번까지)
-const COACH = {
-  bat: ['타격', '투수가 다리를 들었다 <b>멈춘 뒤</b> 내딛을 때 공이 나와. 하얀 원을 공 길목에 두고, 원 테두리가 <b style="color:#4fd18b">초록</b>일 때 클릭!'],
-  pitch: ['투구', '<b>1~6</b> 구종 고르고 → 마우스로 코스 → 클릭해서 게이지 시작 → <b style="color:#4fd18b">초록 구간</b>에서 한 번 더 클릭.'],
-  field: ['수비', '노란 링이 내 선수. <b>WASD</b>로 공 밑으로 가면 자동 포구. 잡으면 <b>Space</b> = 금색 베이스로 송구.'],
-  run: ['주루', '주자 있으면 투구 전 <b>R</b> 도루. 타구 후 <b>E</b> 추가 진루 / <b>Q</b> 귀루. 접전은 자동 슬라이딩.'],
-};
-let coachT = 0, coachSeen = {};
-try { coachSeen = JSON.parse(localStorage.getItem('hr_coach') || '{}'); } catch {}
-function coach(kind) {
-  if ((coachSeen[kind] || 0) >= 2 || nowP() - coachT < 6) return;
-  coachSeen[kind] = (coachSeen[kind] || 0) + 1; try { localStorage.setItem('hr_coach', JSON.stringify(coachSeen)); } catch {}
-  const [t, h] = COACH[kind]; const e = $('coach');
-  e.querySelector('b').textContent = '도움말 · ' + t; e.querySelector('span').innerHTML = h;
-  e.classList.add('show'); coachT = nowP(); setTimeout(() => e.classList.remove('show'), 6500);
-}
-let coachLast = '';
-function updateCoach(role) {
-  if (!S || screen !== 'game') return;
-  const k = role.batter && S.ph === 'pitch' ? 'bat' : role.pitcher && S.ph === 'pitch' ? 'pitch' : role.fi >= 0 && S.ph === 'live' && !role.pitcher ? 'field' : role.offense && !role.batter && (S.occ || []).some(Boolean) && S.ph === 'pitch' ? 'run' : '';
-  if (k && k !== coachLast) coach(k);
-  coachLast = k;
-}
 function updateBaseTags(role) {
   // 중계 위치 표시: 커트맨(나) 또는 공 든 외야수(나)에게
   const rl = S && S.ph === 'live' && S.rl;
@@ -1558,9 +1091,9 @@ function updateBaseTags(role) {
     drawBaseTag(sp, targets.has(sp.userData.n));
     const d = camera.position.distanceTo(sp.position); const sc = clamp(d * 0.045, 1.1, 6); sp.scale.set(sc, sc, 1);
   }
-  const bar = $('tbar');
-  if (bar) { const show_ = !!throwCharge && on; bar.classList.toggle('hide', !show_); if (show_) bar.querySelector('i').style.width = `${(0.25 + throwPow() * 0.75) * 100}%`; }
+  tbarPow = throwCharge && on ? 0.25 + throwPow() * 0.75 : null; // [ui] 송구 세기 바는 ui/hud.js가 그림
 }
+let tbarPow = null;
 // 내가 조작 중인 수비수 표시 (발밑 링 + 방향 화살표)
 const myRing = new THREE.Group();
 {
@@ -1876,48 +1409,15 @@ function updateCamera(dt, time) {
   if (batter) batter.p.root.traverse((o) => { if (o.isMesh) o.material.transparent = false; });
 }
 
-// ═════════════ HUD ═════════════
-let hudKey = '';
+// ═════════════ HUD: 3D 조준 표시 + ui 연결 ═════════════
+// [ui] DOM HUD(스코어버그·볼카운트·안내·게이지·핑 등)는 client/ui/hud.js. 여기는 장면 안의 존·배트 원·조준점만 + ui.frame 호출
 function updateHUD() {
   if (!S || !S.fl || (screen !== 'game' && screen !== 'over')) return;
   const role = getRole();
   const s = S;
   const pitchPhase = s.ph === 'pitch' || s.ph === 'pitching';
-  // 시계
-  if (s.ph === 'pitch' && role.pitcher && s.dl != null) { $('clock').classList.remove('hide'); const v = Math.max(0, Math.ceil(s.dl)); $('clock').textContent = v; $('clock').classList.toggle('warn', v <= 5); }
-  else $('clock').classList.add('hide');
-  // ── 투구 타이밍 신호 (타자): 셋 → 다리 들기 → 정점 → 스트라이드 → 릴리스 ──
-  {
-    const pc = $('pcue');
-    let on = false;
-    if (role.batter && s.ph === 'pitching' && s.p && s.mode !== 'derby') {
-      const t = simNow(), p = s.p, tau = t - (p.t0 - WINDUP);
-      if (tau >= 0 && t < p.t0 + 0.3) {
-        on = true;
-        const go = t >= p.t0;
-        pc.classList.toggle('go', go);
-        pc.querySelector('.pc-t').textContent = go ? '온다!' : tau < 0.35 ? '투수 셋 포지션' : tau < 1.25 ? '다리 들기…' : tau < 1.45 ? '정점 — 준비!' : '스트라이드!';
-        pc.querySelector('i').style.width = Math.min(100, tau / WINDUP * 100) + '%';
-        if (go && seen.rel !== p.id) { seen.rel = p.id; bus.emit('cue:release', { pid: p.id, kmh: p.kmh }); /* [audio] */ fx.impact(new THREE.Vector3(RELEASE[0] - 0.15, RELEASE[1], RELEASE[2]), 0.22); }
-      }
-    }
-    pc.classList.toggle('hide', !on);
-  }
-  // 큰 볼카운트 (타석/투구 중)
-  {
-    const bc = $('bigcount'), on = (role.batter || role.pitcher) && pitchPhase && s.cnt && s.mode !== 'derby';
-    bc.classList.toggle('hide', !on);
-    if (on) { const key = s.cnt.join(); if (bc.dataset.k !== key) { bc.dataset.k = key; const set = (sel, n) => bc.querySelectorAll(sel + ' i').forEach((e, i) => e.classList.toggle('on', i < n)); set('.bc-b', s.cnt[0]); set('.bc-s', s.cnt[1]); set('.bc-o', s.cnt[2]); } }
-  }
-  // 구종 표시: 쉬움은 던지자마자, 그 외엔 공이 지나간 뒤 (어떤 공이었는지 학습용)
-  {
-    const pt = $('ptype'); let txt = '';
-    if (role.batter && s.p && PITCHES[s.p.type] && s.mode !== 'derby' && (s.ph === 'pitching' || s.ph === 'result')) {
-      const t = simNow(), early = (s.he ?? 1) === 0;
-      if ((early && t >= s.p.t0 + 0.08) || t >= s.p.arrive + 0.15) txt = `<span style="color:${PITCHES[s.p.type].col}">●</span> ${PITCHES[s.p.type].name} ${s.p.kmh}km/h`;
-    }
-    pt.classList.toggle('hide', !txt); if (txt && pt.innerHTML !== txt) pt.innerHTML = txt;
-  }
+  // 릴리스 순간 손끝 반짝 + 소리 (타자 와인드업 신호 '온다!'와 같은 순간)
+  if (role.batter && s.ph === 'pitching' && s.p && s.mode !== 'derby' && simNow() >= s.p.t0 && seen.rel !== s.p.id) { seen.rel = s.p.id; bus.emit('cue:release', { pid: s.p.id, kmh: s.p.kmh }); /* [audio] */ fx.impact(new THREE.Vector3(RELEASE[0] - 0.15, RELEASE[1], RELEASE[2]), 0.22); }
   // 존/커서
   zoneGroup.visible = pitchPhase && camMode !== 'intro' && (role.batter || role.pitcher || camMode === 'tv' || camMode === 'catch');
   if (zoneGroup.visible && zoneMesh) { // 타석일 땐 진하게, 와인드업~투구 중엔 살짝 더 밝게
@@ -1946,148 +1446,37 @@ function updateHUD() {
     }
   }
   const a = (role.batter || role.pitcher) && pitchPhase ? aimPoint() : null;
+  const mode = mode2();
   if (a && role.batter && camMode !== 'intro') {
-    const mode = buntOn || s.bs ? 'bunt' : keys.f ? 'power' : 'contact';
     const R = SWING[mode].R * (mode === 'bunt' ? 1 : hitEase());
     pci.visible = true; pci.position.set(a[0], a[1], -0.02);
-    pci.scale.setScalar(1); pciOuter.scale.setScalar(R); pciFill.scale.setScalar(R);
+    pci.scale.setScalar(1);
     // 표시 크기는 '잘 맞는 구간'(판정 반경의 60%)만 — 화면이 덜 어지럽게
     pciOuter.scale.setScalar(R * 0.6); pciFill.scale.setScalar(R * 0.6);
     pciOuter.material.color.set(pciHot ? '#4fd18b' : mode === 'bunt' ? '#9fd0ff' : mode === 'power' ? '#ff9f43' : '#ffffff');
     pciOuter.material.opacity = pciHot ? 0.95 : 0.5;
     pci.lookAt(camera.position);
-    $('modeTag').className = mode; $('modeTag').textContent = mode === 'bunt' ? '번트' : '강타';
   }
-  show('modeTag', !!(a && role.batter && (mode2() !== 'contact')));
-  const showBunt = role.batter && pitchPhase && s.mode !== 'derby';
-  show('buntBtn', showBunt);
-  if (showBunt) { const on = buntOn || !!s.bs; const b = $('buntBtn'); b.classList.toggle('on', on); b.innerHTML = on ? '<span class="kbd">B</span>번트 해제' : '<span class="kbd">B</span>번트 자세'; }
   if (camMode === 'intro') { pci.visible = false; aimMark.visible = false; }
   if (role.pitcher && s.ph === 'pitch' && camMode !== 'intro') {
     const aim = gauge ? gauge.aim : a;
     if (aim) { aimMark.visible = true; aimMark.position.set(aim[0], aim[1], 0.01); aimMark.lookAt(camera.position); }
   }
-  // 게이지
-  show('gauge', !!gauge && role.pitcher); show('gaugeLbl', !!gauge && role.pitcher);
+  // 투구 게이지 (값 계산·자동 투구는 여기, 그림은 ui)
+  let g = null;
   if (gauge && role.pitcher) {
     const el = nowP() - gauge.t0, lv = gaugeLevel(el);
-    const g = $('gauge'), H = g.clientHeight - 8;
-    g.querySelector('.fill').style.height = `${clamp(lv / 1.15, 0, 1) * H}px`;
-    { const [b0, b1] = pBand(); g.querySelector('.band').style.cssText = `bottom:${b0 / 1.15 * H + 4}px;height:${(b1 - b0) / 1.15 * H}px`; } // [gameplay]
-    g.querySelector('.over').style.height = `${(0.15 / 1.15) * H + 4}px`;
-    $('gaugeLbl').textContent = `~${Math.round(PITCHES[gauge.type].v * (0.86 + 0.15 * Math.min(1, lv)))}km`;
+    g = { lv, type: gauge.type, band: pBand() }; // [gameplay] 모드별 퍼펙트 구간 → ui 게이지
     if (el > GAUGE_UP * 2) sendPitch(0.35);
   }
   if (s.ph !== 'pitch' && gauge) gauge = null;
-  show('pitchbar', role.pitcher && s.ph === 'pitch' && !gauge);
-  if (role.pitcher && s.ph === 'pitch') renderPitchBar();
-  // 키 버튼
-  let keysHtml = '', soft = false;
-  if (s.ph === 'live' && role.holding) keysHtml = [['1', '1루'], ['2', '2루'], ['3', '3루'], ['4', '홈'], ['F', '투수']].map(([k, l]) => `<button data-k="${k.toLowerCase()}"><span class="kbd">${k}</span>${l}</button>`).join('');
-  else if (role.offense && s.ph === 'live') { keysHtml = '<button data-k="e"><span class="kbd">E</span>추가 진루</button><button data-k="q"><span class="kbd">Q</span>귀루</button>'; soft = true; }
-  else if (role.offense && s.ph === 'pitch' && (s.rn || []).length && !role.batter) { keysHtml = '<button data-k="r"><span class="kbd">R</span>도루</button>'; soft = true; }
-  const kb = $('keys');
-  if (kb.dataset.h !== keysHtml) {
-    kb.dataset.h = keysHtml; kb.innerHTML = keysHtml;
-    kb.querySelectorAll('button').forEach((b) => (b.onpointerdown = (e) => { e.stopPropagation(); dispatchEvent(new KeyboardEvent('keydown', { key: b.dataset.k })); }));
-  }
-  kb.classList.toggle('soft', soft);
-  show('keys', !!keysHtml && !(role.pitcher && s.ph === 'pitch'));
   if (TOUCH) renderTouchButtons(role);
-  // 타구 정보
-  const hi = $('hitinfo');
-  if (s.lh && (s.ph === 'live' || s.ph === 'result') && s.p && s.lh.id === s.p.id && s.p.res === 'hit') {
-    hi.classList.add('show');
-    $('hiEv').textContent = `${s.lh.ev}km/h`; $('hiLa').textContent = `${s.lh.la}°`;
-    $('hiD').textContent = s.hr && s.hr.id && s.ph === 'result' && /홈런/.test(s.msg[1]) ? `${s.hr.dist}m` : ballL && ballL.h < 0 ? `${Math.round(Math.hypot(ballPos.x, ballPos.z))}m` : '-';
-  } else hi.classList.remove('show');
-  // 핑
-  const fpsTxt = curFps ? `<span style="color:${curFps >= 50 ? '#4fd18b' : curFps >= 35 ? '#ffcf3f' : '#ff6b5a'}">${curFps}fps</span>` : '';
-  if (net?.local) { if ($('ping').dataset.h !== fpsTxt) { $('ping').dataset.h = fpsTxt; $('ping').innerHTML = fpsTxt; } }
-  else if (nowP() - (pingDrawT || 0) > 0.5) { // 0.5초마다: 내 핑 + 다른 사람 핑 (색: 초록 <80 / 노랑 <160 / 빨강)
-    pingDrawT = nowP();
-    const col = (ms) => ms < 80 ? '#4fd18b' : ms < 160 ? '#ffcf3f' : '#ff6b5a';
-    const others = (pgList || []).filter((x) => x[0] !== myName).map((x) => `<span style="color:${col(x[1])}">${esc(x[0])} ${x[1]}</span>`).join(' · ');
-    const unstable = netQ.jit > 0.05 ? ' <b style="color:#ff8a80">연결 불안정</b>' : '';
-    $('ping').innerHTML = `${fpsTxt ? fpsTxt + ' · ' : ''}<span style="color:${col(rtt)}">내 핑 ${rtt}ms</span>${unstable}${others ? '<br>' + others : ''}`;
-  }
-  // 이하 변할 때만
-  const keyNow = JSON.stringify([s.sc, s.inn, s.half, s.cnt, s.occ, s.bat, s.bt, role.pos, role.batter, s.ph, role.holding, role.offense, s.tn, s.sta, s.pc, s.dy, lobby && lobby.players.length, s.mode, buntOn, s.bs]);
-  if (keyNow === hudKey) return;
-  hudKey = keyNow;
-  const bugName = (i) => (s.cl && s.tn[i] === clubOf(s.cl[i]).name ? clubOf(s.cl[i]).short : s.tn[i]);
-  $('nA').textContent = bugName(0); $('nH').textContent = bugName(1);
-  if (s.cl) applyClubs(s.cl);
-  if (s.tod) applyTimeOfDay(s.tod);
-  $('sA').textContent = s.sc[0]; $('sH').textContent = s.sc[1];
-  $('trA').classList.toggle('bat', s.bt === 'away'); $('trH').classList.toggle('bat', s.bt === 'home');
-  $('half').textContent = s.half === 0 ? '▲ 초' : '▼ 말';
-  $('innN').textContent = s.inn;
-  ['d1', 'd2', 'd3'].forEach((id, i) => $(id).setAttribute('fill', s.occ && s.occ[i] ? '#ffcf3f' : 'rgba(255,255,255,.18)'));
-  const [b, st, o] = s.cnt;
-  document.querySelectorAll('.dots.b i').forEach((d, i) => d.classList.toggle('on', i < b));
-  document.querySelectorAll('.dots.s i').forEach((d, i) => d.classList.toggle('on', i < st));
-  document.querySelectorAll('.dots.o i').forEach((d, i) => d.classList.toggle('on', i < o));
-  // 매치업
-  $('muBat').textContent = s.bat ? s.bat.name : '-';
-  if (s.mode === 'derby' && s.dy) {
-    const cur = s.dy.list[s.dy.idx];
-    $('muBatS').textContent = s.dy.pr ? `연습 ${s.dy.sw}타구 · 홈런 ${cur ? cur[2] : 0} · 평균 예상타율 ${s.dy.sw ? (s.dy.xh / s.dy.sw).toFixed(3).slice(1) : '-'}` : cur ? `홈런 ${cur[2]} · 아웃 ${s.dy.outs}/${s.dy.n}` : '';
-    $('muP').classList.add('hide');
-  } else {
-    const myst = (s.st || []).find((r) => s.bat && ((r[0] && r[0] === s.bat.id) || (!r[0] && r[1] === s.bat.name)));
-    $('muBatS').textContent = myst ? `${myst[3] - myst[9]}타수 ${myst[4]}안타${myst[5] ? ' ' + myst[5] + '홈런' : ''}` : '첫 타석';
-    $('muP').classList.remove('hide');
-    const pf = s.fl.find((f) => f[0] === 'P');
-    $('muPit').textContent = (pf && nameOf(pf[4])) || (pf && pf[4] === myId ? myName : 'CPU');
-    $('staBar').style.width = `${s.sta ?? 100}%`;
-    $('muPc').textContent = `${s.pc || 0}구`;
-  }
-  const team = myTeam();
-  let r = '관전 중', sub = '';
-  if (team && team !== 'spec') {
-    sub = s.mode === 'derby' ? '홈런 더비' : `${s.tn[team === 'away' ? 0 : 1]} · ${role.offense ? '공격' : '수비'}`;
-    if (role.batter) r = '타석';
-    else if (role.pos) r = POS_KO[role.pos];
-    else if (role.offense) r = '공격 대기';
-    else r = s.mode === 'derby' ? '대기' : '수비 (CPU 담당)';
-  }
-  $('role').innerHTML = `${esc(r)}<small>${esc(sub)}</small>`;
-  { const du = myDuty(s, role), el = $('duty'); const h = du ? `<span style="color:${du.col}">${esc(du.txt)}</span>` : '';
-    if (el.dataset.h !== h) { el.dataset.h = h; el.innerHTML = h; if (du && du.k !== 'idle' && du.k !== el.dataset.k) { el.classList.remove('pop'); void el.offsetWidth; el.classList.add('pop'); } el.dataset.k = du ? du.k : ''; }
-    el.classList.toggle('hide', !du); }
-  // 조작 안내: 역할 이름 + 키 칩 + 상황 팁
-  let keysL = [], tip = '', title = '';
-  const runnersOn = (s.occ || []).some(Boolean);
-  if (role.batter && pitchPhase) {
-    title = buntOn || s.bs ? '번트' : '타격';
-    keysL = buntOn || s.bs ? [['클릭', '번트 대기'], ['마우스 좌우', '방향'], ['B', '강공 전환']]
-      : [['마우스', '배트 원 이동'], ['좌클릭', '정타'], ['우클릭 · F', '강타'], ...(s.dy && s.dy.pr ? [['1~6', `구종 고정${s.dy.pp && s.dy.pp !== 'MIX' && PITCHES[s.dy.pp] ? '(' + PITCHES[s.dy.pp].name + ')' : ''}`], ['0', '섞어서']] : [['B', '번트']]), ['V', '시점']];
-    tip = buntOn || s.bs ? '' : '위쪽 바가 노랗게 차면 공이 온다 → 원 테두리가 초록일 때 스윙';
-  } else if (role.pitcher && s.ph === 'pitch') {
-    title = '투구'; keysL = [['1~6', '구종'], ['마우스', '코스'], ['클릭', '게이지 시작'], ['클릭', '초록에서 투구']];
-    if (runnersOn) keysL.push(['Q', '견제']);
-  } else if (role.pos && s.ph === 'live') {
-    title = POS_KO[role.pos] || '수비';
-    keysL = role.holding ? [['Space', '추천 베이스(금색) 송구'], ['1 2 3 4', '베이스 지정'], ...(['LF', 'CF', 'RF'].includes(role.pos) ? [['R', '중계(커트맨)']] : []), ['꾹 누르기', '강송구']]
-      : [['WASD', '이동'], ['Shift', '질주'], ['Space', '점프'], ['C', '다이빙'], ...(s.fc === 'auto' ? [['Q', '선수 전환']] : []), ['드래그', '시점 회전'], ['V', '시점']];
-    tip = role.holding ? '' : landRing.visible && s.ch === role.fi ? '주황 원(낙구 지점)에 들어가면 초록 → 자동으로 잡아요' : '가만히 있으면 CPU가 알아서 이동 · 키 누르면 직접 조작';
-  } else if (role.pos && pitchPhase) {
-    title = POS_KO[role.pos] || '수비';
-    keysL = role.pos === 'C' ? [] : [['WASD', '수비 위치 이동'], ['드래그', '시점 회전'], ['V', '시점']];
-    tip = role.pos === 'C' ? '포수 · 투수 공 받는 중' : '';
-  } else if (role.offense && s.ph === 'live') { title = '주루'; keysL = [['E', '추가 진루'], ['Q', '귀루'], ['Space', '슬라이딩']]; tip = '베이스 앞 4m 안에서 Space = 슬라이딩'; }
-  else if (role.offense) { title = '공격 대기'; keysL = [['R', '도루'], ['T', '빠른 채팅'], ['Tab', '기록']]; tip = runnersOn ? '도루는 투구 직전에! 너무 일찍 누르면 견제당해요' : ''; }
-  else { keysL = [['Tab', '기록'], ['T', '빠른 채팅'], ['Esc', '메뉴']]; }
-  const hint = (title ? `<b class="ht">${title}</b>` : '') + keysL.map(([k, l]) => `<span class="hk"><span class="kbd">${k}</span>${l}</span>`).join('') + (tip ? `<span class="tip">${tip}</span>` : '');
-  if ($('hint').dataset.h !== hint) { $('hint').dataset.h = hint; $('hint').innerHTML = hint; }
-}
-function renderTab() {
-  if (!S || !S.ls) return;
-  if (S.mode === 'derby' && S.dy) {
-    $('tabLine').innerHTML = '<tr><th>선수</th><th class="r">홈런</th><th>최장</th><th>상태</th></tr>' + S.dy.list.map((r, i) => `<tr class="${r[0] === myId ? 'me' : ''}"><td>${esc(r[1])}</td><td class="r">${r[2]}</td><td>${r[3] ? r[3] + 'm' : '-'}</td><td>${r[4] ? '완료' : i === S.dy.idx ? '타석' : '대기'}</td></tr>`).join('');
-    $('tabStats').innerHTML = '';
-  } else { $('tabLine').innerHTML = lineTable(S); $('tabStats').innerHTML = statTable(S.st || []); }
+  ui.frame(role, {
+    camMode, gauge: g, pitchType, bunt: !!(buntOn || s.bs), swingMode: mode, aimOn: !!(a && role.batter && camMode !== 'intro'),
+    throwPow: tbarPow, landChase: landRing.visible && s.ch === role.fi,
+    ballDist: ballL && ballL.h < 0 ? Math.hypot(ballPos.x, ballPos.z) : null,
+    fps: curFps, rtt, pgList, jit: netQ.jit,
+  });
 }
 // 미니맵
 const mm = $('minimap').getContext('2d');
@@ -2148,7 +1537,7 @@ function frame(now, manual) {
   if (contactFreeze && nowP() > contactFreeze.until) contactFreeze = null;
   updateCalls();
   updateTracer();
-  if (S && S.fl) { const rr = getRole(); updateMyRing(rr); updateBaseTags(rr); updateCoach(rr); }
+  if (S && S.fl) { const rr = getRole(); updateMyRing(rr); updateBaseTags(rr); }
   updateCamera(dt, time);
   updateHUD();
   if (frameN % 2 === 0) drawMinimap();
@@ -2168,6 +1557,5 @@ function frame(now, manual) {
 }
 window.__frame = (t) => frame(t, true);
 requestAnimationFrame(frame);
-setScreen('title');
 document.fonts && document.fonts.ready.then(() => { stadium.refreshText(); stadium.drawScoreboard(S); });
 for (const f of ['900 40px "Noto Sans KR"', '700 40px Oswald', '40px "Black Han Sans"']) document.fonts?.load(f).then(() => stadium.refreshText()).catch(() => {});
