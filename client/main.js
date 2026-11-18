@@ -11,6 +11,7 @@ import {
 import { Player, UNIFORMS, setFaceTextures } from './player.js';
 import { loadSkin, attachSkin, syncAllSkins } from './skinned.js';
 import { Replay } from './replay.js';
+import { makeActor } from './anim/actor.js'; // [anim]
 import { CLUBS, clubOf, emblemURL, uniformsFor } from './emblem.js';
 import { TEX_AVG, FACE_SKINS } from './texinfo.js';
 import { Animator, PITCH_DUR, PITCH_RELEASE_K, THROW_DUR, swingTrack, pitchK } from './anim.js';
@@ -228,7 +229,7 @@ const runners = new Map();
 const umps = [];
 const coaches = [];
 if (!/noskin/.test(location.search)) loadSkin((window.HR_ASSETS && window.HR_ASSETS.model) || './assets/models/body.bin', (window.HR_ASSETS && window.HR_ASSETS.modelLo) || './assets/models/body_lo.bin');
-function mkActor(opts) { const p = new Player(opts); p.setRole(opts.role || 'fielder'); attachSkin(p); scene.add(p.root); p.root.traverse((o) => { if (o.isMesh) { const g = o.geometry, n = g ? (g.index ? g.index.count : g.attributes.position.count) / 3 : 0; o.castShadow = o.isSkinnedMesh || n > 400; } }); /* 작은 장식(모자 실밥·밴드 등)은 그림자 생략 → 그림자 패스 드로우콜 절반 */ return { p, a: new Animator(p), init: false, spd: 0, px: 0, pz: 0 }; }
+function mkActor(opts) { return makeActor(opts, scene); } // [anim] 새 캐릭터(GLB) 있으면 Character, 없으면 옛 몸 — client/anim/actor.js
 function clearActors() {
   for (const A of fielders) scene.remove(A.p.root);
   fielders = []; fieldTeamBuilt = null;
