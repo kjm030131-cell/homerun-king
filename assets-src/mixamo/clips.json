@@ -1,0 +1,13 @@
+{
+  "body": "assets-src/models/player.glb",
+  "tex": { "base": 2048, "other": 1024 },
+  "clips": {
+    "batStance": { "src": "Baseball_Idle.fbx", "yaw": 90 },
+    "swing": { "src": "Baseball_Hit.fbx", "yaw": 90, "trim": [0, 1.85] },
+    "powerSwing": { "src": "Baseball_Hit_1.fbx", "yaw": 90, "trim": [0, 2.1] },
+    "buntStance": { "src": "Baseball_Bunt.fbx", "yaw": 90, "hold": 1.2 },
+    "pitch": { "src": "Baseball_Pitching_1.fbx", "yaw": 0, "trim": [0, 2.8] },
+    "catcherSquat": { "src": "Baseball_Catcher.fbx", "loop": [6.9, 9.17, 1.2] },
+    "umpireCall": { "src": "Baseball_Umpire.fbx" }
+  }
+}

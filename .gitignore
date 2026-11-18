@@ -5,3 +5,4 @@ node_modules/
 public/app.js
 dist/
 .DS_Store
+__pycache__/
