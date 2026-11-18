@@ -6,7 +6,7 @@ import { UnrealBloomPass } from 'three/addons/postprocessing/UnrealBloomPass.js'
 import { OutputPass } from 'three/addons/postprocessing/OutputPass.js';
 import {
   Game, HIT_EASE, pitchPos, integrate, fenceR, BASES, MOUND, ZONE, PITCHES, PITCH_KEYS, POS_KO, HOME_SPOT, FOUL, SPRINT_SPEED, FIELD_SPEED,
-  RELEASE, WINDUP, SWING, BALL_R, runnerXZ,
+  RELEASE, WINDUP, SWING, BALL_R, runnerXZ, RULES, // [gameplay] RULES: 모드별 퍼펙트 투구 구간
 } from '../shared/sim.js';
 import { Player, UNIFORMS, setFaceTextures } from './player.js';
 import { loadSkin, attachSkin, syncAllSkins } from './skinned.js';
@@ -17,7 +17,7 @@ import { Animator, PITCH_DUR, PITCH_RELEASE_K, THROW_DUR, swingTrack, pitchK } f
 import { buildStadium, glowTex } from './stadium.js';
 import { FX } from './fx.js';
 import { initAudio, mountVolumeUI, setVolume, unlock as audio } from './audio/index.js'; // [audio] 사운드 매니저 (bus 이벤트로만 소리)
-import { bus } from './core/bus.js'; // [audio]
+import { bus } from './core/bus.js'; // [gameplay] 게임 이벤트 → bus / [audio]
 
 const OFFLINE = !!window.HR_OFFLINE;
 const $ = (id) => document.getElementById(id);
@@ -190,7 +190,7 @@ let zoneMesh = null;
 scene.add(zoneGroup);
 const pci = new THREE.Group();
 let pciHot = false;
-const hitEase = () => HIT_EASE[(S && S.he) ?? 0] || 1;
+const hitEase = () => (S && S.hx) || HIT_EASE[(S && S.he) ?? 0] || 1; // [gameplay] hx = 서버가 쓰는 실제 판정 폭(모드·난이도 반영)
 const mode2 = () => (buntOn || (S && S.bs) ? 'bunt' : keys.f ? 'power' : 'contact');
 // 배트 중심(PCI): 얇은 타원 테두리 + 아주 옅은 채움 + 가운데 점 하나. 타이밍 맞을 때만 테두리가 초록으로
 const pciOuter = new THREE.Mesh(new THREE.RingGeometry(0.93, 1, 64), new THREE.MeshBasicMaterial({ color: '#ffffff', transparent: true, opacity: 0.55, depthTest: false, side: THREE.DoubleSide }));
@@ -272,14 +272,14 @@ function startLocal(name, o) {
   myId = 'me'; myName = name;
   game.addPlayer('me', name);
   const me = game.players.get('me'); me.team = o.team; me.pos = o.pos;
-  game.applySettings({ mode: o.mode, innings: o.inn, derbyOuts: o.mode === 'derby' ? Math.max(5, o.inn * 3) : 10, diff: o.diff, clubs: o.clubs || [0, 1], pitRot: 'fixed', fieldCtl: o.fld || 'pos', tod: o.tod || 'night', hitEase: o.hitEase ?? 1 });
+  game.applySettings({ mode: o.mode, innings: o.inn, derbyOuts: o.mode === 'derby' ? Math.max(5, o.inn * 3) : 10, diff: o.diff, clubs: o.clubs || [0, 1], pitRot: 'fixed', fieldCtl: o.fld || 'pos', tod: o.tod || 'night', hitEase: o.hitEase ?? 1, rules: o.rules }); // [gameplay] rules: 'real' | 'casual' (ui가 메뉴에서 넘겨줄 것)
   applyClubs(game.set.clubs);
   let last = performance.now();
   const tickFn = () => {
     const t = performance.now(); const dt = Math.min(0.1, (t - last) / 1000); last = t;
     if (dt <= 0) return;
     game.tick(dt);
-    handleMsg(game.snapshot());
+    handleMsg(game.snapshot(true)); // [gameplay] true: 이벤트(ev)도 같이
   };
   const iv = setInterval(tickFn, 1000 / 60);
   net = { send: (m) => game.handle('me', m), close: () => clearInterval(iv), local: true, game };
@@ -335,7 +335,7 @@ function handleMsg(m) {
     case 'chat': addChat(m.name, m.text, m.team); break;
     case 'kicked': toTitle(); showErr('방장이 내보냈어'); break;
     case 'toast': toast(m.text); break;
-    case 's': onSnap(m); break;
+    case 's': onSnap(m); if (m.ev) for (const x of m.ev) bus.emit(x.e, x); break; // [gameplay] 게임 이벤트 연결 지점 (docs/rebuild/events.md)
   }
 }
 
@@ -638,48 +638,36 @@ function onSnap(s) {
   buildTeams(s);
   if (!S || !S.fl) { seen.ce2 = s.ce2 ? s.ce2.id : -2; seen.hr = s.hr ? s.hr.id : -2; seen.te = s.te ? s.te.id : -2; seen.ce = s.ce ? s.ce.id : -2; seen.we = s.we ? s.we.id : -2; }
   prevS = S; S = s;
-  if (s.ph === 'pitching' && prevS && prevS.ph !== 'pitching') bus.emit('windup', { s }); // [audio]
   // 메시지
   if (s.msg && s.msg[0] !== seen.msg) {
     seen.msg = s.msg[0];
     const t = s.msg[1];
     banner(t, !!s.msg[2], /홈런!|만루 홈런|점 홈런|홈런왕/.test(t));
     castLine(t, s);
-    // [audio] 소리는 bus 이벤트로만 (gameplay가 sim 이벤트(ev)를 넣으면 이 메시지 해석은 지워도 됨)
-    if (/끝내기/.test(t)) { bus.emit('score', { walkoff: true }); fx.show(18); excite = 1; startCelebration(); }
-    else if (/득점/.test(t)) { bus.emit('score', {}); excite = Math.max(excite, 0.6); }
-    else if (/안타|2루타|3루타|번트 안타/.test(t)) { bus.emit('safe', { hit: /3루타/.test(t) ? '3B' : /2루타/.test(t) ? '2B' : /번트/.test(t) ? 'bunt' : '1B' }); excite = Math.max(excite, 0.45); }
-    else if (/삼진/.test(t)) { bus.emit('strikeCall', { k: true, swinging: /헛스윙|파울팁/.test(t), s }); umpCall = nowP(); }
-    else if (/스트라이크$/.test(t)) { bus.emit('strikeCall', { looking: true, s }); umpCall = nowP(); }
-    else if (/^헛스윙$/.test(t)) bus.emit('strikeCall', { swinging: true, s });
-    else if (/강탈|다이빙 캐치|도루 저지/.test(t)) { bus.emit('out', { big: true, robbed: /강탈/.test(t) }); excite = Math.max(excite, 0.7); }
-    else if (/병살|삼중살/.test(t)) bus.emit('out', { dp: true });
-    else if (/플라이 아웃|직선타/.test(t)) bus.emit('out', { fly: true });
-    else if (/실책/.test(t)) bus.emit('safe', { error: true });
-    else if (/파울/.test(t)) bus.emit('foul', { s });
-    else if (/^볼넷|^볼$/.test(t)) bus.emit('ballCall', { walk: /볼넷/.test(t), s });
-    else if (/도루 성공/.test(t)) bus.emit('steal', { ok: true });
-    else if (/도루 시도/.test(t)) bus.emit('steal', {});
-    else if (/\d회(초|말) · /.test(t)) bus.emit('inningEnd', { start: true });
-    else if (/경기 종료|더비 종료/.test(t)) bus.emit('gameEnd', {});
+    // [audio] 소리는 서버 이벤트(ev)로 — 여기선 화면 연출만
+    if (/끝내기/.test(t)) { fx.show(18); excite = 1; startCelebration(); }
+    else if (/득점/.test(t)) excite = Math.max(excite, 0.6);
+    else if (/안타|2루타|3루타|번트 안타/.test(t)) excite = Math.max(excite, 0.45);
+    else if (/삼진|스트라이크$/.test(t)) umpCall = nowP();
+    else if (/강탈|다이빙 캐치|도루 저지/.test(t)) excite = Math.max(excite, 0.7);
     if (/관전 입장|퇴장|재접속|끊김|강퇴/.test(t)) sysChat(t);
   }
   // 홈런 이벤트
   if (s.hr && s.hr.id !== seen.hr) {
-    { hrCine = 1; hrCineStart = nowP(); bus.emit('hr', { dist: s.hr.dist, n: s.hr.n || 1, name: s.hr.name }); excite = 1; setTimeout(() => { fx.show(12, [0, 0, 165]); }, 900); // [audio]
+    { hrCine = 1; hrCineStart = nowP(); excite = 1; setTimeout(() => { fx.show(12, [0, 0, 165]); }, 900);
       bigBoard = { t: nowP(), big: '홈런!', sub: `${s.hr.name} · ${s.hr.dist}m` }; }
     seen.hr = s.hr.id;
     if (cfg.replay && lastContactT && nowP() - lastContactT < 8) replay.schedule(nowP() + 2.6, { tEvent: lastContactT, pre: 0.8, post: 1.6, speed: 0.42, cam: 'hr', scene });
   }
   // 송구/포구/펜스 이벤트
-  if (s.te && s.te.id !== seen.te) { if (fielders[s.te.i]) { fielders[s.te.i].throwT = nowP(); { const P = fielders[s.te.i].p.root.position; bus.emit('throw', { x: P.x, z: P.z }); } /* [audio] */ } seen.te = s.te.id; }
-  if (s.ce && s.ce.id !== seen.ce) { if (fielders[s.ce.i]) { fielders[s.ce.i].catchT = nowP(); { const P = fielders[s.ce.i].p.root.position; bus.emit('catch', { x: P.x, z: P.z, dive: !!s.ce.dive, jump: !!s.ce.jump }); } /* [audio] */ if (s.ce.i === getRole().fi && getRole().defense) { feedback(s.ce.dive ? '다이빙 캐치!! 나이스!' : s.ce.jump ? '점프 캐치!! 나이스!' : '나이스 캐치!', '#4fd18b'); if (s.ce.dive || s.ce.jump) bus.emit('ui:perfect'); }
+  if (s.te && s.te.id !== seen.te) { if (fielders[s.te.i]) { fielders[s.te.i].throwT = nowP(); } seen.te = s.te.id; }
+  if (s.ce && s.ce.id !== seen.ce) { if (fielders[s.ce.i]) { fielders[s.ce.i].catchT = nowP(); if (s.ce.i === getRole().fi && getRole().defense) { feedback(s.ce.dive ? '다이빙 캐치!! 나이스!' : s.ce.jump ? '점프 캐치!! 나이스!' : '나이스 캐치!', '#4fd18b'); if (s.ce.dive || s.ce.jump) bus.emit('ui:perfect'); }
     if ((s.ce.dive || s.ce.jump) && cfg.replay !== 0) replay.schedule(nowP() + 1.0, { tEvent: nowP(), pre: 1.2, post: 0.5, speed: 0.45, cam: 'catch', focus: fielders[s.ce.i].p, scene }); if (s.ce.dive) { fx.dustPuff(fielders[s.ce.i].p.root.position.x, fielders[s.ce.i].p.root.position.z, 2, 2); } } seen.ce = s.ce.id; }
   if (s.ce2 && s.ce2.id !== seen.ce2) {
     if (seen.ce2 !== undefined) showCall(s.ce2);
     seen.ce2 = s.ce2.id;
   }
-  if (s.we && s.we.id !== seen.we) { { bus.emit('ball:wall', s.b ? { x: s.b[0], z: s.b[2] } : {}); /* [audio] */ shake = Math.max(shake, 0.15); } seen.we = s.we.id; }
+  if (s.we && s.we.id !== seen.we) { { shake = Math.max(shake, 0.15); } seen.we = s.we.id; }
   // 공
   if (s.b) {
     const [x, y, z, vx, vy, vz, h, st, sx, sy, sz] = s.b;
@@ -696,14 +684,12 @@ function onSnap(s) {
       ballL.x = lerp(ballL.x, sb.x, k); ballL.y = lerp(ballL.y, sb.y, k); ballL.z = lerp(ballL.z, sb.z, k);
       ballL.vx = sb.vx; ballL.vy = sb.vy; ballL.vz = sb.vz; ballL.sx = sb.sx; ballL.sy = sb.sy; ballL.sz = sb.sz; ballL.h = h; ballL.state = sb.state;
     }
-    if (st === 'held' && h !== lastHolder && fielders[h]) { const P = fielders[h].p.root.position; bus.emit('catch', { x: P.x, z: P.z, held: true }); } // [audio]
     lastHolder = h; lastBallSt = st;
   } else { ballL = null; lastBallSt = ''; lastHolder = -1; }
   // 새 타구
   if (s.p && s.p.res === 'hit' && prevS && prevS.ph === 'pitching' && s.ph === 'live') {
     const mine = swungLocal[s.p.id];
     if (!mine) onContact(s.p, s.lh ? s.lh.q : 0.6, s.lh && s.lh.mode === 'bunt');
-    if (s.lh && s.lh.id === s.p.id) bus.emit('contact', { pid: s.p.id, q: s.lh.q, ev: s.lh.ev, la: s.lh.la, mode: s.lh.mode, bunt: s.lh.mode === 'bunt' }); // [audio] 실제 타구 속도·각도로 관중 반응 보정
     fx.trailClear();
     droppedBat.visible = true;
     droppedBat.position.set(0.9 + Math.random() * 0.4, 0, 0.6 + Math.random() * 0.6); droppedBat.rotation.y = Math.random() * Math.PI;
@@ -734,7 +720,6 @@ function showCall(ev) {
   const sp = callSprite(ev.out ? 'OUT' : 'SAFE', ev.out ? '#ff5050' : '#5be08f');
   sp.position.set(ev.x, 2.6, ev.z); scene.add(sp);
   calls.push({ sp, t0: nowP() });
-  bus.emit(ev.out ? 'out' : 'safe', { call: true, k: ev.k, x: ev.x, z: ev.z }); // [audio]
   // 가장 가까운 심판이 판정 동작
   let best = null, bd = 1e9;
   for (const U of umps) { const d = Math.hypot(U.p.root.position.x - ev.x, U.p.root.position.z - ev.z); if (d < bd) { bd = d; best = U; } }
@@ -758,7 +743,6 @@ function updateCalls() {
 function onContact(p, q, bunt) {
   lastContactT = nowP();
   const cp = new THREE.Vector3(p.tx, p.ty, 0);
-  bus.emit('contact', { pid: p.id, q, bunt, mode: bunt ? 'bunt' : (swingInfo[p.id] && swingInfo[p.id].mode) || 'contact', kmh: p.kmh, foul: !bunt && q < 0.1 }); // [audio]
   fx.impact(cp, bunt ? 0.3 : 0.5 + q * 1.1);
   if (!bunt && q > 0.3) {
     shake = Math.max(shake, 0.06 + q * 0.22);
@@ -945,7 +929,6 @@ function showOver(s) {
   show('bAgain', isHost); show('bToLobby', isHost && !net?.local);
   $('overNote').textContent = isHost ? '' : '방장이 다음 경기를 고르는 중…';
   if (king) fx.show(8, [0, 0, 160]);
-  bus.emit('gameEnd', { king: !!king }); // [audio]
 }
 function myTeam() { const p = lobby && lobby.players.find((x) => x.id === myId); return p ? p.team : null; }
 function nameOf(id) { if (!id) return null; const p = lobby && lobby.players.find((x) => x.id === id); return p ? p.name : null; }
@@ -1102,6 +1085,7 @@ function doSwing(mode) {
   const ms = Math.round(dt * 1000);
   const tm = Math.abs(dt) < 0.025 ? '완벽한 타이밍' : dt < 0 ? `${-ms}ms 빠름` : `${ms}ms 늦음`;
   if (mode !== 'bunt') swingReport(dt, a, p, M, contact);
+  bus.emit('localSwing', { pid: p.id, mode, contact, dt: Math.round(dt * 1000), q: contact ? (mode === 'bunt' ? 0.3 : Math.pow(1 - Math.abs(dt) / M.W, 0.5) * Math.pow(1 - d / M.R, 0.6)) : 0 }); // [gameplay] 내 스윙 즉시 피드백(서버 contact/miss는 핑만큼 늦게 옴)
   if (contact) {
     const q = mode === 'bunt' ? 0.3 : Math.pow(1 - Math.abs(dt) / M.W, 0.5) * Math.pow(1 - d / M.R, 0.6);
     contactFreeze = { pid: p.id, until: nowP() + 0.35, pos: [p.tx, p.ty] };
@@ -1111,7 +1095,6 @@ function doSwing(mode) {
     else if (q > 0.82) { bus.emit('ui:perfect'); feedback(`퍼펙트! · ${tm}`, '#4fd18b'); perfectHit = nowP(); }
     else feedback(`${tm} · ${d < 0.08 ? '정타' : a[1] - p.ty > 0.07 ? '공 윗부분 → 땅볼' : a[1] - p.ty < -0.07 ? '공 아랫부분 → 뜬공' : '빗맞음'}`, q > 0.5 ? '#4fd18b' : '#ffcf3f');
   } else {
-    bus.emit('miss', { local: true }); // [audio]
     feedback(Math.abs(dt) > M.W ? (dt < 0 ? `너무 빨라 (${-ms}ms)` : `늦었어 (${ms}ms)`) : '공이랑 안 맞았어', '#ff8a80');
   }
 }
@@ -1156,6 +1139,7 @@ function swingReport(dt, a, p, M, contact) {
 const swingInfo = {};
 // 투구 게이지
 const GAUGE_UP = 0.85, GAUGE_MAX = 1.15;
+const pBand = () => (RULES[S && S.ru] || RULES.real).perfectPitch; // [gameplay]
 function gaugeLevel(t) {
   const u = t / GAUGE_UP * GAUGE_MAX;
   if (u <= GAUGE_MAX) return u;
@@ -1175,9 +1159,10 @@ function pitchClick() {
 }
 function sendPitch(lv) {
   net.send({ t: 'pitch', type: gauge.type, tx: gauge.aim[0], ty: gauge.aim[1], power: lv });
-  const txt = lv > 1.0 ? '과투구! 제구 흔들림' : lv >= 0.84 && lv <= 0.97 ? '퍼펙트 투구!' : lv < 0.6 ? '힘 빠진 공' : '좋아';
-  feedback(`${txt} (${Math.round(lv * 100)}%)`, lv >= 0.84 && lv <= 0.97 ? '#4fd18b' : lv > 1 ? '#ff8a80' : '#ffcf3f');
-  if (lv >= 0.84 && lv <= 0.97) bus.emit('ui:perfect'); // [audio]
+  const [pb0, pb1] = pBand(), pf = lv >= pb0 && lv <= pb1; // [gameplay] 모드별 퍼펙트 구간
+  const txt = lv > 1.0 ? '과투구! 제구 흔들림' : pf ? '퍼펙트 투구! 공 끝 살아있다' : lv < 0.6 ? '힘 빠진 공' : '좋아';
+  feedback(`${txt} (${Math.round(lv * 100)}%)`, pf ? '#4fd18b' : lv > 1 ? '#ff8a80' : '#ffcf3f');
+  if (pf) bus.emit('ui:perfect'); // [audio]
   gauge = null;
 }
 $('buntBtn').onpointerdown = (e) => { e.stopPropagation(); toggleBunt(); };
@@ -1395,7 +1380,7 @@ function updateWorld(dt) {
       if (!bunt && swingK >= 0.3 && swingK <= 0.78) {
         batter.p.root.updateMatrixWorld(true);
         fx.batPush(batter.p.batPoint(0.42, _w), batter.p.batPoint(0.86, _u));
-        if (!batter.swSfx) { batter.swSfx = true; bus.emit('swing', { power: s.p && s.p.mode === 'power' ? 1 : 0.8 }); } // [audio]
+        if (!batter.swSfx) { batter.swSfx = true; bus.emit('cue:swing', { pid: s.p && s.p.id, power: s.p && s.p.mode === 'power' ? 1 : 0.8 }); } // [audio] 화면 스윙 순간
       }
       if (swingK < 0) batter.swSfx = false;
     }
@@ -1425,7 +1410,7 @@ function updateWorld(dt) {
     const dBase = Math.hypot(tb[0] - x, tb[1] - z);
     let slideK = -1;
     // 슬라이딩은 서버 판정과 같게 (flags 4)
-    if ((flags & 4) && s.ph === 'live') { if (!A.slideT) { A.slideT = tp; bus.emit('slide', { x, z }); fx.dustPuff(x, z, 2, 1.5); } } // [audio]
+    if ((flags & 4) && s.ph === 'live') { if (!A.slideT) { A.slideT = tp; bus.emit('cue:slide', { rid, x, z }); fx.dustPuff(x, z, 2, 1.5); } } // [audio]
     if (A.slideT) { slideK = (tp - A.slideT) / 0.6; if (slideK > 1.6 || (sp < 0.3 && slideK > 1)) { A.slideT = 0; slideK = -1; } }
     const nm = nameOf(pid);
     setTag(A, nm || '', pid === myId ? '#ffcf3f' : '#fff');
@@ -1641,7 +1626,7 @@ function updateBall(dt, t, role, pitchPhase) {
       if (sv >= 1.0 && tracerId !== p.id && p.res !== 'hit') showTracer(p);
       if (sv >= 1 && !pitchFb && p.res !== 'hit') {
         pitchFb = true;
-        if (!(contactFreeze && contactFreeze.pid === p.id)) bus.emit('catch', { pitch: true, kmh: p.kmh, x: p.tx, z: 0 }); // [audio]
+        if (!(contactFreeze && contactFreeze.pid === p.id)) bus.emit('cue:mitt', { pid: p.id, kmh: p.kmh }); // [audio] 화면에서 공이 미트에 닿는 순간
       }
       if (sv > 1.0 && (role.batter || role.pitcher || camMode === 'tv')) { crossMark.visible = true; crossMark.position.set(p.tx, p.ty, 0.02); crossMark.material.color.set(p.res === 'take' || p.res === 'miss' || true ? '#ff3b3b' : '#fff'); }
     }
@@ -1654,7 +1639,7 @@ function updateBall(dt, t, role, pitchPhase) {
       const prevY = ballL.y, prevVy = ballL.vy;
       for (let i = 0; i < steps; i++) {
         const ev = integrate(ballL, dt / steps);
-        if (ev.landed && ev.impact > 2.5) { bus.emit('ball:bounce', { impact: ev.impact, surf: ev.surf, x: ballL.x, z: ballL.z }); /* [audio] */ if (ev.surf === 'dirt' && ev.impact > 3) fx.dustPuff(ballL.x, ballL.z, 0.8, 0.8); }
+        if (ev.landed && ev.impact > 2.5) { bus.emit('cue:bounce', { impact: ev.impact, surf: ev.surf, x: ballL.x, z: ballL.z }); /* [audio] */ if (ev.surf === 'dirt' && ev.impact > 3) fx.dustPuff(ballL.x, ballL.z, 0.8, 0.8); }
       }
       ballPos.set(ballL.x, ballL.y, ballL.z);
       fx.trailPush(ballPos, ballL.state === 'thrown' ? '#9fd0ff' : '#ffe6b0');
@@ -1913,7 +1898,7 @@ function updateHUD() {
         pc.classList.toggle('go', go);
         pc.querySelector('.pc-t').textContent = go ? '온다!' : tau < 0.35 ? '투수 셋 포지션' : tau < 1.25 ? '다리 들기…' : tau < 1.45 ? '정점 — 준비!' : '스트라이드!';
         pc.querySelector('i').style.width = Math.min(100, tau / WINDUP * 100) + '%';
-        if (go && seen.rel !== p.id) { seen.rel = p.id; bus.emit('release', { cue: true, kmh: p.kmh }); /* [audio] */ fx.impact(new THREE.Vector3(RELEASE[0] - 0.15, RELEASE[1], RELEASE[2]), 0.22); }
+        if (go && seen.rel !== p.id) { seen.rel = p.id; bus.emit('cue:release', { pid: p.id, kmh: p.kmh }); /* [audio] */ fx.impact(new THREE.Vector3(RELEASE[0] - 0.15, RELEASE[1], RELEASE[2]), 0.22); }
       }
     }
     pc.classList.toggle('hide', !on);
@@ -1943,8 +1928,8 @@ function updateHUD() {
   if (role.batter && s.ph === 'pitching' && s.p && !swungLocal[s.p.id]) {
     const p = s.p, sv = (simNow() - p.t0) / p.T;
     const bunt = buntOn || s.bs;
-    // 쉬움 난이도: 공이 60% 넘게 날아오면 들어올 자리에 작은 점 (막판 보정용)
-    const showLoc = bunt || cfg.assist === 2 ? sv > (bunt ? 0.05 : 0.3) : (cfg.assist > 0 && (s.he ?? 0) === 0 && sv > 0.6);
+    // [gameplay] 공이 들어올 자리 표시(assistDot)는 '공 위치 미리보기 금지' 규칙 위반이라 끔 — 쉬움은 판정 폭·자석 보정으로
+    const showLoc = false;
     if (showLoc && sv < 1.1) {
       assistDot.visible = true; assistDot.position.set(p.tx, p.ty, -0.01); assistDot.lookAt(camera.position);
       const op = clamp((sv - (cfg.assist === 2 ? 0.3 : 0.6)) / 0.15, 0, 1);
@@ -1955,7 +1940,8 @@ function updateHUD() {
     if (cfg.assist === 2 && sv > 0 && sv < 1.15) {
       const R = SWING[bunt ? 'bunt' : 'contact'].R * hitEase();
       const rr = R * 0.6 + Math.max(0, 1 - sv) * 0.5;
-      timeRing.visible = true; timeRing.position.set(p.tx, p.ty, -0.015); timeRing.scale.setScalar(rr); timeRing.lookAt(camera.position);
+      const ap = aimPoint() || [0, 0.8]; // [gameplay] 타이밍 링은 공 자리 대신 내 배트 원 위에 (위치 미리보기 금지)
+      timeRing.visible = true; timeRing.position.set(ap[0], ap[1], -0.015); timeRing.scale.setScalar(rr); timeRing.lookAt(camera.position);
       timeRing.material.color.set(pciHot ? '#4fd18b' : '#ffffff'); timeRing.material.opacity = clamp(sv * 1.5, 0, 0.6);
     }
   }
@@ -1987,7 +1973,7 @@ function updateHUD() {
     const el = nowP() - gauge.t0, lv = gaugeLevel(el);
     const g = $('gauge'), H = g.clientHeight - 8;
     g.querySelector('.fill').style.height = `${clamp(lv / 1.15, 0, 1) * H}px`;
-    g.querySelector('.band').style.cssText = `bottom:${0.84 / 1.15 * H + 4}px;height:${(0.97 - 0.84) / 1.15 * H}px`;
+    { const [b0, b1] = pBand(); g.querySelector('.band').style.cssText = `bottom:${b0 / 1.15 * H + 4}px;height:${(b1 - b0) / 1.15 * H}px`; } // [gameplay]
     g.querySelector('.over').style.height = `${(0.15 / 1.15) * H + 4}px`;
     $('gaugeLbl').textContent = `~${Math.round(PITCHES[gauge.type].v * (0.86 + 0.15 * Math.min(1, lv)))}km`;
     if (el > GAUGE_UP * 2) sendPitch(0.35);

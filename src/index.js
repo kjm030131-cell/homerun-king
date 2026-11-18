@@ -146,7 +146,7 @@ export class Room {
       const dt = Math.min(0.1, (t - last) / 1000);
       last = t;
       try { this.game.tick(dt); } catch (err) { console.error('tick', err); }
-      if (++this.n % SNAP_EVERY === 0) this.broadcast(this.game.snapshot());
+      if (++this.n % SNAP_EVERY === 0) this.broadcast(this.game.snapshot(true)); // true: 게임 이벤트(ev)를 실어 보내고 비움
       if (this.n % 60 === 0) this.report();
     }, TICK);
   }
