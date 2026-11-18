@@ -208,9 +208,9 @@ export class FX {
       if (this.ringT <= 0) this.ring.visible = false;
     }
     // 배트 잔상
-    { const n = this.batPts.length;
-      for (const q of this.batPts) q[2] += dt;
+    { for (const q of this.batPts) q[2] += dt;
       while (this.batPts.length && this.batPts[0][2] > 0.12) this.batPts.shift();
+      const n = this.batPts.length; // [qa] 전엔 shift 전에 길이를 재서, 스윙 직후 한 프레임이 길면(렉) 점이 다 빠진 빈 배열을 읽어 TypeError → 프레임 루프 사망(화면 고정)
       this.batTrail.visible = n > 1;
       if (n > 1) {
         for (let i = 0; i < this.BN; i++) {

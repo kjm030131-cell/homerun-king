@@ -7,7 +7,7 @@ import {
 import { Player, UNIFORMS, setFaceTextures } from './player.js';
 import { loadSkin, attachSkin, syncAllSkins } from './skinned.js';
 import { Replay } from './replay.js';
-import { makeActor } from './anim/actor.js'; // [anim]
+import { makeActor, usingNewCharacter } from './anim/actor.js'; // [anim] ([qa] usingNewCharacter: 팀 캐시 확인용)
 import { CLUBS, clubOf, emblemURL, uniformsFor } from './emblem.js';
 import { TEX_AVG, FACE_SKINS } from './texinfo.js';
 import { Animator, PITCH_DUR, PITCH_RELEASE_K, THROW_DUR, swingTrack, pitchK } from './anim.js';
@@ -177,7 +177,14 @@ const umps = [];
 const coaches = [];
 if (!/noskin/.test(location.search)) loadSkin((window.HR_ASSETS && window.HR_ASSETS.model) || './assets/models/body.bin', (window.HR_ASSETS && window.HR_ASSETS.modelLo) || './assets/models/body_lo.bin');
 function mkActor(opts) { return makeActor(opts, scene); } // [anim] 새 캐릭터(GLB) 있으면 Character, 없으면 옛 몸 — client/anim/actor.js
+// [qa] 공수 교대마다 수비 9명·타자·코치를 새로 만들던 것(유니폼 데칼 캔버스·스켈레톤 복제 → 교대 순간 프레임 40ms+ 멈칫)을 팀별로 보관해 다시 씀
+const teamCache = new Map();
+const runnerPool = new Map(); // [qa] 주자 재사용 (poolKey → 배우 목록)
+function parkRunner(A) { scene.remove(A.p.root); if (A.poolKey) (runnerPool.get(A.poolKey) || runnerPool.set(A.poolKey, []).get(A.poolKey)).push(A); }
+function takeRunner(pk) { const l = runnerPool.get(pk); const A = l && l.pop(); if (!A || (usingNewCharacter() && !A.p.char)) return null; A.init = false; A.slideT = 0; A.p.root.visible = true; scene.add(A.p.root); return A; }
+const cachedTeam = (k) => { const c = teamCache.get(k); return c && (!usingNewCharacter() || c.every((A) => A.p.char)) ? c : null; }; // 늦게 온 새 몸으로 못 바뀐 옛 몸 캐시는 버림
 function clearActors() {
+  teamCache.clear(); runnerPool.clear();
   for (const A of fielders) scene.remove(A.p.root);
   fielders = []; fieldTeamBuilt = null;
   if (batter) scene.remove(batter.p.root); batter = null; batTeamBuilt = null;
@@ -197,17 +204,26 @@ function buildTeams(s) {
   const key = ft + s.fl.map((f) => f[0]).join('');
   if (fieldTeamBuilt !== key) {
     for (const A of fielders) scene.remove(A.p.root);
+    if (fieldTeamBuilt && fielders.length) teamCache.set('f' + fieldTeamBuilt, fielders); // [qa]
     const nums = { P: 18, C: 22, '1B': 25, '2B': 4, '3B': 13, SS: 6, LF: 7, CF: 8, RF: 9 };
-    fielders = s.fl.map((f, i) => { const A = mkActor({ team: ft, num: nums[f[0]], role: f[0] === 'C' ? 'catcher' : 'fielder', seed: i + (ft === 'home' ? 0 : 50) }); A.pos = f[0]; return A; });
+    const c = cachedTeam('f' + key); // [qa]
+    if (c) { fielders = c; for (const A of c) { A.init = false; scene.add(A.p.root); } }
+    else fielders = s.fl.map((f, i) => { const A = mkActor({ team: ft, num: nums[f[0]], role: f[0] === 'C' ? 'catcher' : 'fielder', seed: i + (ft === 'home' ? 0 : 50) }); A.pos = f[0]; return A; });
     fieldTeamBuilt = key;
   }
   if (batTeamBuilt !== bt) {
     if (batter) scene.remove(batter.p.root);
-    batter = mkActor({ team: bt, num: 24, role: 'batter', seed: 99 });
-    for (const A of runners.values()) scene.remove(A.p.root);
+    for (const A of runners.values()) parkRunner(A); // [qa]
     runners.clear();
-    for (const A of coaches) scene.remove(A.p.root); coaches.length = 0;
-    for (const [x, z] of [[-24, 21], [24, 21]]) { const C = mkActor({ team: bt, num: 70 + coaches.length, role: 'fielder', seed: x }); C.p.glove.visible = false; C.p.root.position.set(x, 0, z); C.p.root.rotation.y = Math.atan2(-x, -z + 10); coaches.push(C); }
+    for (const A of coaches) scene.remove(A.p.root);
+    if (batTeamBuilt && batter) teamCache.set('b' + batTeamBuilt, [batter, ...coaches]); // [qa]
+    coaches.length = 0;
+    const c = cachedTeam('b' + bt); // [qa]
+    if (c) { batter = c[0]; batter.init = false; coaches.push(...c.slice(1)); for (const A of c) scene.add(A.p.root); }
+    else {
+      batter = mkActor({ team: bt, num: 24, role: 'batter', seed: 99 });
+      for (const [x, z] of [[-24, 21], [24, 21]]) { const C = mkActor({ team: bt, num: 70 + coaches.length, role: 'fielder', seed: x }); C.p.glove.visible = false; C.p.root.position.set(x, 0, z); C.p.root.rotation.y = Math.atan2(-x, -z + 10); coaches.push(C); }
+    }
     batTeamBuilt = bt;
   }
 }
@@ -229,7 +245,7 @@ function startLocal(name, o) {
   };
   const iv = setInterval(tickFn, 1000 / 60);
   net = { send: (m) => game.handle('me', m), close: () => clearInterval(iv), local: true, game };
-  window.__hr = { game, getRole: () => getRole(), cam: () => camMode, S: () => S, net: () => net, rp: replay, lct: () => lastContactT, scene, tick: tickFn, renderer };
+  window.__hr = { game, getRole: () => getRole(), cam: () => camMode, S: () => S, net: () => net, rp: replay, lct: () => lastContactT, scene, tick: tickFn, renderer, simNow };
   roomCode = null;
   game.start();
   lobby = game.lobbyState();
@@ -257,6 +273,7 @@ function connectWS(code, name, pw = '') {
     if (wsRetry < 30) { wsRetry++; setTimeout(() => { if (net && net.ws === ws) connectWS(code, name); }, Math.min(4000, 400 * wsRetry)); }
   };
   net = { ws, send: (m) => ws.readyState === 1 && ws.send(JSON.stringify(m)), close: () => { net = null; ws.close(); } };
+  window.__hr = { game: null, getRole: () => getRole(), cam: () => camMode, S: () => S, net: () => net, rp: replay, lct: () => lastContactT, scene, tick: () => { }, renderer, simNow }; // [qa] 멀티에서도 테스트 훅 (tools/qa)
   roomCode = code;
   clearInterval(pingIv);
   lastMsgAt = performance.now();
@@ -901,7 +918,11 @@ function updateWorld(dt) {
     const key = rid ? 'r' + rid : name + '|' + (pid || '');
     live.add(key);
     let A = runners.get(key);
-    if (!A) { A = mkActor({ team: batTeamBuilt || 'away', num: (name.charCodeAt(name.length - 1) % 60) + 1, role: 'runner', seed: name.length * 7 + (pid ? pid.length : 0) }); runners.set(key, A); }
+    if (!A) {
+      // [qa] 주자는 출루마다 새로 만들고 버리기만 해서(dispose 없음) 경기 내내 지오메트리·텍스처·스켈레톤이 쌓였음 → 같은 모습(팀·번호·seed)끼리 재사용
+      const o = { team: batTeamBuilt || 'away', num: (name.charCodeAt(name.length - 1) % 60) + 1, role: 'runner', seed: name.length * 7 + (pid ? pid.length : 0) }, pk = `${o.team}|${o.num}|${o.seed}`;
+      A = takeRunner(pk) || mkActor(o); A.poolKey = pk; runners.set(key, A);
+    }
     let x = x0, z = z0;
     if (IP) { const ra = IP[0].rn.get(key), rb = IP[1].rn.get(key); if (ra && rb) { x = lerp(ra[0], rb[0], IP[2]); z = lerp(ra[1], rb[1], IP[2]); } }
     // 리드 (투구 전 베이스에서 살짝 떨어짐)
@@ -926,7 +947,7 @@ function updateWorld(dt) {
     A.a.runner(dt, { speed: sp, slideK, lead: onBase && (s.ph === 'pitch' || s.ph === 'pitching'), cheer: !!(flags & 2), lookW: onBase ? _v.set(0, 1.2, 15) : null });
     A.p.root.visible = !(showBatter && b === 0);
   }
-  for (const [k, A] of runners) if (!live.has(k)) { scene.remove(A.p.root); runners.delete(k); }
+  for (const [k, A] of runners) if (!live.has(k)) { parkRunner(A); runners.delete(k); }
   // 심판/코치
   for (const U of umps) {
     let call = null;

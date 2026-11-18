@@ -331,7 +331,8 @@ export class Character {
   }
   _blob() {
     const h = this.bones.Hips; if (!h || !this.blob) return;
-    this.root.updateMatrixWorld(true);
+    // [qa] root.updateMatrixWorld(true) 를 지움 — 선수마다 매 프레임 뼈 53개+장비 전체 행렬 갱신(렌더가 또 함) → 프레임 JS 시간 최대 원인.
+    //      getWorldPosition 이 Hips 위쪽 부모 사슬만 갱신하므로 결과는 같음
     h.getWorldPosition(_t); this.root.worldToLocal(_t);
     const s = this.root.scale.x || 1, hy = _t.y * s; // 엉덩이 높이(m): 서 있으면 ~1, 점프하면 높고, 다이빙·슬라이딩이면 낮음
     this.blob.position.x = _t.x; this.blob.position.z = _t.z;
@@ -386,12 +387,14 @@ export class Character {
   }
 
   // 리플레이: 지금 재생 상태(클립·시각·가중치) + IK 뼈 회전 → 숫자 배열
-  snapshot() {
-    const out = [this.layers.size];
-    let sum = 0; for (const L of this.layers.values()) sum += L.w;
-    for (const L of this.layers.values()) out.push(L.e.index, L.action.time, sum > 0 ? L.w / sum : 0);
-    for (const b of this.post) { if (b) out.push(b.quaternion.x, b.quaternion.y, b.quaternion.z, b.quaternion.w); else out.push(0, 0, 0, 1); }
-    return Float32Array.from(out);
+  snapshot(out) { // [qa] out: 재사용 버퍼(리플레이 링버퍼가 넘김) — 전엔 매 프레임 선수마다 배열 2개 할당 → GC 멈춤
+    const need = 1 + this.layers.size * 3 + this.post.length * 4;
+    const a = out && out.length >= need ? out : new Float32Array(need + 6);
+    let o = 0, sum = 0; a[o++] = this.layers.size;
+    for (const L of this.layers.values()) sum += L.w;
+    for (const L of this.layers.values()) { a[o++] = L.e.index; a[o++] = L.action.time; a[o++] = sum > 0 ? L.w / sum : 0; }
+    for (const b of this.post) { if (b) { a[o++] = b.quaternion.x; a[o++] = b.quaternion.y; a[o++] = b.quaternion.z; a[o++] = b.quaternion.w; } else { a[o++] = 0; a[o++] = 0; a[o++] = 0; a[o++] = 1; } }
+    return a;
   }
   restore(A, B, u = 0) {
     const list = this.lib.clipList, st = new Map();

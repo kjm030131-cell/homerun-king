@@ -10,19 +10,22 @@ const SZ = 3 + 1 + 1 + 3 + 4 + NJ * 4 + 3 + 4 + 3; // root pos, rotY, vis, body 
 const _q = new THREE.Quaternion(), _q2 = new THREE.Quaternion();
 
 export class Replay {
-  constructor() { this.buf = []; this.active = null; this.pending = null; }
+  constructor() { this.buf = []; this.active = null; this.pending = null; this.pool = []; this.cpool = []; this.fpool = []; }
 
   record(t, players, ballMesh) {
     if (this.active) return;
-    const fr = { t, items: [], ball: ballMesh.visible ? ballMesh.position.toArray() : null };
+    // [qa] 9초 링버퍼에서 밀려난 프레임의 배열을 다시 씀 (전엔 프레임마다 선수 18명 × Float32Array 새로 → 초당 수 MB 쓰레기, GC 멈춤 원인)
+    const fr = this.fpool.pop() || { t: 0, items: [], ball: null, bv: [0, 0, 0] };
+    fr.t = t; fr.items.length = 0;
+    fr.ball = ballMesh.visible ? ballMesh.position.toArray(fr.bv) : null;
     for (const p of players) {
       if (!p || !p.root.parent) continue;
-      const a = new Float32Array(SZ); let o = 0;
+      const a = this.pool.pop() || new Float32Array(SZ); let o = 0;
       const r = p.root, b = p.body;
       a[o++] = r.position.x; a[o++] = r.position.y; a[o++] = r.position.z; a[o++] = r.rotation.y; a[o++] = r.visible ? 1 : 0;
       a[o++] = b.position.x; a[o++] = b.position.y; a[o++] = b.position.z;
       a[o++] = b.quaternion.x; a[o++] = b.quaternion.y; a[o++] = b.quaternion.z; a[o++] = b.quaternion.w;
-      if (p.char) { a[o++] = p.bat.visible ? 1 : 0; a[o++] = p.ball.visible ? 1 : 0; a[o++] = p.glove.visible ? 1 : 0; fr.items.push([p, a, p.char.snapshot()]); continue; } // 새 캐릭터: 클립 상태만 기록(가벼움)
+      if (p.char) { a[o++] = p.bat.visible ? 1 : 0; a[o++] = p.ball.visible ? 1 : 0; a[o++] = p.glove.visible ? 1 : 0; fr.items.push([p, a, p.char.snapshot(this.cpool.pop())]); continue; } // 새 캐릭터: 클립 상태만 기록(가벼움)
       for (const j of JOINTS) { const q = p.J[j].quaternion; a[o++] = q.x; a[o++] = q.y; a[o++] = q.z; a[o++] = q.w; }
       a[o++] = p.bat.position.x; a[o++] = p.bat.position.y; a[o++] = p.bat.position.z;
       a[o++] = p.bat.quaternion.x; a[o++] = p.bat.quaternion.y; a[o++] = p.bat.quaternion.z; a[o++] = p.bat.quaternion.w;
@@ -30,7 +33,11 @@ export class Replay {
       fr.items.push([p, a]);
     }
     this.buf.push(fr);
-    while (this.buf.length && this.buf[0].t < t - KEEP) this.buf.shift();
+    while (this.buf.length && this.buf[0].t < t - KEEP) {
+      const f = this.buf.shift();
+      for (const it of f.items) { this.pool.push(it[1]); if (it[2]) this.cpool.push(it[2]); }
+      f.items.length = 0; this.fpool.push(f);
+    }
   }
 
   // 일정 시간 뒤 리플레이 예약: tEvent(기록 시각 기준), 앞뒤 구간, 속도, 카메라 종류
