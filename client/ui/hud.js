@@ -337,7 +337,7 @@ export function introCard(kind, s, c) {
     else { q('.in-big', s.bat.id ? '-.---' : 'CPU'); q('.in-bigl', s.bat.id ? '타율' : ''); q('.in-car', s.bat.id ? '첫 기록 도전' : ''); }
     const n = (s.occ || []).filter(Boolean).length;
     q('.in-sit', n === 3 ? '만루 찬스' : (s.occ && (s.occ[1] || s.occ[2])) ? '득점권 찬스' : (s.cnt ? `${s.cnt[2]}아웃` : ''));
-    if (s.bat.id === c.myId) c.sound('organ');
+    // 내 타석 오르간은 사운드 매니저가 서버 batterUp으로 처리
   } else {
     const cp = s.cp || ['', 0, 0, 0, 0, 0, 0, null];
     const cr = career[cp[0]];
@@ -366,7 +366,7 @@ export function walkup(s, c) {
   e.querySelector('.wu-st').textContent = line;
   e.classList.toggle('me', me);
   replay(e, 'show');
-  if (me) c.sound('organ');
+  // 오르간: 사운드 매니저(batterUp)
   clearTimeout(wuT); wuT = setTimeout(() => e.classList.remove('show'), 4000);
 }
 export function resetHUD() { slowKey = ''; prevCnt = null; prevSc = null; clubsKey = ''; $('bug')._cnt = ''; $('bigcount')._cnt = ''; }
