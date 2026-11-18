@@ -144,6 +144,25 @@ export function twoBoneIK(upper, lower, end, target, w = 1) {
   upper.updateMatrixWorld(true);
 }
 
+// ── 발밑 접지 그림자(아주 싼 원형 그림자) — 실시간 그림자가 없거나(먼 선수·'낮음') 약할 때 '붕 뜬' 느낌을 없앰 ──
+let BLOB = null;
+function blobAssets() {
+  if (BLOB) return BLOB;
+  let tex = null;
+  if (typeof document !== 'undefined') {
+    const c = document.createElement('canvas'); c.width = c.height = 64;
+    const g = c.getContext('2d'), gr = g.createRadialGradient(32, 32, 0, 32, 32, 32);
+    gr.addColorStop(0, 'rgba(0,0,0,0.62)'); gr.addColorStop(0.55, 'rgba(0,0,0,0.3)'); gr.addColorStop(1, 'rgba(0,0,0,0)');
+    g.fillStyle = gr; g.fillRect(0, 0, 64, 64);
+    tex = new THREE.CanvasTexture(c);
+  }
+  const mat = new THREE.MeshBasicMaterial({ map: tex, color: tex ? 0xffffff : 0x000000, transparent: true, opacity: 0.55, depthWrite: false, polygonOffset: true, polygonOffsetFactor: -2, polygonOffsetUnits: -2, fog: true });
+  // main.js 가 타자 메시를 돌며 material.transparent = false 로 덮어씀(공용 재질이라 전원 사각형 그림자가 됨) → 항상 투명으로 고정
+  Object.defineProperty(mat, 'transparent', { get: () => true, set: () => {}, configurable: true });
+  const geo = new THREE.PlaneGeometry(1, 1); geo.rotateX(-Math.PI / 2);
+  BLOB = { geo, mat }; return BLOB;
+}
+
 // ── 캐릭터 ──
 const POST = ['LeftArm', 'LeftForeArm', 'RightArm', 'RightForeArm', 'Neck', 'Head']; // IK/시선이 건드리는 뼈(리플레이에 같이 기록)
 
@@ -184,6 +203,11 @@ export class Character {
       this.hi.parent.add(lo); lo.bind(this.hi.skeleton, this.hi.bindMatrix);
       this.lo = lo;
     }
+    // 접지 그림자: root(땅 높이)에 붙이고 매 갱신 때 엉덩이 바로 아래로
+    const B = blobAssets();
+    this.blob = new THREE.Mesh(B.geo, B.mat); this.blob.name = 'blob'; this.blob.position.y = 0.012; this.blob.scale.set(0.95, 1, 0.95);
+    this.blob.renderOrder = 1; this.blob.castShadow = false; this.blob.receiveShadow = false;
+    this.root.add(this.blob);
     this.mixer = new THREE.AnimationMixer(this.model);
     this.layers = new Map(); // clipName → { e(클립 항목), action, w, target, rate, scrub }
     this.acc = 0; this.phase = (Math.random() * 64) | 0; this.ran = false;
@@ -284,6 +308,7 @@ export class Character {
     if (run) {
       this.mixer.update(this.acc); this.acc = 0; this.ran = true;
       this._post(dt * every);
+      this._blob();
     }
     this.ikReq.L = this.ikReq.R = null; this.lookReq = null;
     return run;
@@ -303,6 +328,16 @@ export class Character {
       if (u && l && h) twoBoneIK(u, l, h, this.ikT[s], w);
     }
     if (this.lookW > 0.01 && B.Head) this._look(B.Head, this.lookT, this.lookW);
+  }
+  _blob() {
+    const h = this.bones.Hips; if (!h || !this.blob) return;
+    this.root.updateMatrixWorld(true);
+    h.getWorldPosition(_t); this.root.worldToLocal(_t);
+    const s = this.root.scale.x || 1, hy = _t.y * s; // 엉덩이 높이(m): 서 있으면 ~1, 점프하면 높고, 다이빙·슬라이딩이면 낮음
+    this.blob.position.x = _t.x; this.blob.position.z = _t.z;
+    const k = clamp(1.25 - Math.abs(hy - 0.95) * 0.9, 0.35, 1);
+    this.blob.scale.set(0.95 * (hy < 0.5 ? 1.5 : 1), 1, 0.95 * (hy < 0.5 ? 1.9 : 1));
+    this.blob.visible = k > 0.36;
   }
   // 머리가 목표를 보게(최대 65°). 얼굴 앞 방향(머리 뼈 로컬)은 T포즈에서 미리 계산(lib.faceLocal)
   _look(head, target, w) {

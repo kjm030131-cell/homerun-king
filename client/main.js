@@ -1454,15 +1454,11 @@ function drawMinimap() {
 // ═════════════ 메인 루프 ═════════════
 let lastT = performance.now(), frameN = 0;
 const perfAcc = { t: 0, n: 0, skip: 2 };
-// [qa] 프레임 안에서 예외 하나가 나면 다음 rAF 예약을 못 해 화면이 영원히 고정됐음 → 예외가 나도 루프는 계속 (같은 오류는 처음 한 번 + 가끔만 기록)
-const frameErrs = new Map();
+// [fix] 프레임 안에서 예외가 하나라도 나면 requestAnimationFrame 이 다시 안 불려 화면이 영영 멈췄음 → 다음 프레임은 항상 예약하고 오류는 콘솔에만
+let frameErrs = 0;
 function frame(now, manual) {
-  try { frameBody(now, manual); } catch (e) {
-    const k = String(e && e.message), n = (frameErrs.get(k) || 0) + 1; frameErrs.set(k, n);
-    if (n === 1 || n % 600 === 0) console.error('[frame] 프레임 예외 (루프는 계속)', n, e);
-    if (manual) throw e;
-  }
   if (!manual) requestAnimationFrame(frame);
+  try { frameBody(now, manual); } catch (e) { if (frameErrs++ < 20) console.error('[frame]', e); if (manual) throw e; }
 }
 function frameBody(now, manual) {
   if (window.__vclock) now = performance.now(); // 테스트용 가상 시계
@@ -1513,7 +1509,7 @@ function frameBody(now, manual) {
     stadium.drawScoreboard(S, big ? { big: big.big, sub: big.sub } : { lp });
   }
   fx.update(dt, camera);
-  if (window.__noRender) return; // 테스트용 ([qa] rAF 예약은 frame()에서)
+  if (window.__noRender) return; // 테스트용
   syncAllSkins(camera);
   look.render(); // [stadium]
 }

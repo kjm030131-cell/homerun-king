@@ -272,6 +272,34 @@ def retarget(body, fbx, cfg):
     hips_local = (inv @ np.c_[pw, np.ones(nf)].T).T[:, :3]
     return ts, rot, hips_local
 
+FOOT = ('LeftFoot', 'LeftToeBase', 'LeftToe_End', 'RightFoot', 'RightToeBase', 'RightToe_End')
+def floor_clamp(body, rot, hips, clear_m=0.05):
+    """몸이 땅을 뚫지 않게 프레임마다 Hips 를 올림(내리지는 않음). 발 관절은 T포즈 높이, 나머지 관절은 clear_m(살 두께) 이상"""
+    nodes = body.j['nodes']; nf = len(hips)
+    # 몸 월드 단위 ↔ 미터: 메시 높이 = 1.85m 로 맞춰짐(loader). 근사: 발끝~머리끝 대신 T포즈 Head 높이/0.92
+    head_y = body.W0['mixamorig:Head'][1, 3] if 'mixamorig:Head' in body.W0 else 0.9
+    unit = (head_y / 0.92) / 1.85
+    clear = {}
+    for i in body.joints:
+        n = nodes[i]['name'].replace('mixamorig:', '')
+        clear[i] = body.W0[nodes[i]['name']][1, 3] if n in FOOT else clear_m * unit
+    rest = {i: node_local(nodes[i]) for i in body.joints}
+    lift = np.zeros(nf)
+    for f in range(nf):
+        cache = {}
+        def W(i):
+            if i in cache: return cache[i]
+            M = rest[i].copy()
+            if i in rot: M[:3, :3] = rot[i][f]
+            if i == body.hips: M[:3, 3] = hips[f]
+            p = body.par.get(i)
+            M = (W(p) if p in body.jset else body.gw(p)) @ M if p is not None else M
+            cache[i] = M; return M
+        lift[f] = max(0.0, max(clear[i] - W(i)[1, 3] for i in body.joints))
+    if lift.max() <= 1e-4: return hips, 0.0
+    up = np.linalg.inv(ortho(body.armW[:3, :3])) @ np.array([0, 1.0, 0]) / np.linalg.norm(body.armW[:3, 0])
+    return hips + lift[:, None] * up[None, :], float(lift.max() / unit)
+
 def pose_dist(rot, a, b):
     return sum(np.linalg.norm(R[a] - R[b]) for R in rot.values())
 
@@ -374,9 +402,12 @@ def main(argv):
         src = os.path.join(ROOT, 'assets-src/mixamo', cfg['src'])
         ts, rot, hips = retarget(body, src, cfg)
         ts, rot, hips = shape(ts, rot, hips, cfg)
+        if cfg.get('floor', True): hips, lifted = floor_clamp(body, rot, hips)
+        else: lifted = 0.0
         p = os.path.join(outdir, name + '.glb')
         export_clip(body, name, ts, rot, hips, p)
         extra = (' loop=' + str(cfg['_loop'])) if '_loop' in cfg else ''
+        if lifted > 0.005: extra += f' 바닥보정 최대 {lifted * 100:.0f}cm'
         print(f'{name:14s} ← {cfg["src"]:28s} {ts[-1]:5.2f}s {os.path.getsize(p) // 1024:5d}KB{extra}')
 
 if __name__ == '__main__':
