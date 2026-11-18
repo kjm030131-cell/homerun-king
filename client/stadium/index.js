@@ -27,7 +27,24 @@ export const STADIUM_Q = {
   high: { fieldRes: 4096, standSeg: 240, roofRibs: 18, cityBoxes: 110, crowd: 1, trees: true, glows: true },
 };
 
-export function buildStadium(scene, opt = {}) {
+// 사용자가 GPT 이미지로 만들어 public/assets/tex/ 에 넣는 선택 텍스처 (docs/rebuild/stadium.md 5절).
+// 파일을 넣었으면 해당 값을 true 로 → 없으면 절차적 텍스처로 그림(404 요청 안 보냄)
+export const OPTIONAL_TEX = {
+  facade: { file: 'stadium_facade.jpg', on: false },
+  concrete: { file: 'stadium_concrete.jpg', on: false },
+  roof: { file: 'stadium_roof.jpg', on: false },
+  crowdAtlas: { file: 'crowd_atlas.png', on: false },
+  fieldLogo: { file: 'field_logo.png', on: false },
+};
+function withOptionalTex(tex) {
+  const out = { ...(tex || {}) };
+  if (typeof window !== 'undefined' && window.HR_OFFLINE) return out; // 혼자 연습판: 빌드가 넣어준 것만
+  for (const [k, v] of Object.entries(OPTIONAL_TEX)) if (v.on && !out[k]) out[k] = { url: './assets/tex/' + v.file };
+  return out;
+}
+
+export function buildStadium(scene, opt0 = {}) {
+  const opt = { ...opt0, tex: withOptionalTex(opt0.tex) };
   const q0 = STADIUM_Q[opt.quality] ? opt.quality : 'mid';
   const Q = STADIUM_Q[q0];
   const world = new THREE.Group(); world.name = 'stadium';
@@ -43,7 +60,7 @@ export function buildStadium(scene, opt = {}) {
   const flags = buildFlags(world, M);
   const sb = buildScoreboard(world, M, ads);
   const env = buildEnv(world, opt, Q, M);
-  const crowd = buildCrowd(world, seats, Q);
+  const crowd = buildCrowd(world, seats, Q, opt);
   const mergeInfo = mergeStatic(world, [crowd.group, env.pano, env.skyMesh, env.trees]);
   sb.drawScoreboard(null);
 

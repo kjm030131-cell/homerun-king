@@ -51,11 +51,14 @@ function drawPerson(g, col, up) {
   }
 }
 
-export function buildCrowd(world, seats, Q) {
+export function buildCrowd(world, seats, Q, opt = {}) {
   const atlas = canvasTex(FW * COLS, FH * ROWS, (g) => { for (let r = 0; r < ROWS; r++) for (let c = 0; c < COLS; c++) drawPerson(g, c, r); });
   atlas.colorSpace = THREE.NoColorSpace; // 채널 = 마스크(색 아님)
   atlas.premultiplyAlpha = true; // 밉맵에서 가장자리 어두워짐 방지 → 셰이더에서 a로 나눔
   const uni = { uTime: { value: 0 }, uExcite: { value: 0 }, uLight: { value: new THREE.Vector3(1, 1, 1) }, uAtlas: { value: atlas } };
+  // 선택: 사용자 아틀라스(crowd_atlas.png, 같은 채널 규칙) 가 있으면 교체
+  const ca = opt.tex && opt.tex.crowdAtlas;
+  if (ca && ca.url) new THREE.TextureLoader().load(ca.url, (t) => { t.colorSpace = THREE.NoColorSpace; t.premultiplyAlpha = true; t.needsUpdate = true; uni.uAtlas.value = t; }, undefined, () => {});
   const mat = new THREE.ShaderMaterial({
     uniforms: uni,
     vertexShader: `attribute vec3 aPos; attribute vec3 aCol; attribute vec4 aDat; attribute vec2 aSkin;

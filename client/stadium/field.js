@@ -86,6 +86,13 @@ export function buildField(world, opt, Q) {
   const RES = Q.fieldRes;
   const fieldTex = canvasTex(RES, RES, (g, W) => paintField(g, W));
   fieldTex.anisotropy = 16;
+  // 선택: 홈 뒤 잔디 로고(field_logo.png, 투명 배경) — 캔버스에 덧그림
+  const logo = opt.tex && opt.tex.fieldLogo;
+  if (logo && logo.url) {
+    const img = new Image();
+    img.onload = () => { const g = fieldTex.userData.canvas.getContext('2d'), k = RES / FS; g.save(); g.globalAlpha = 0.85; g.setTransform(k, 0, 0, k, -FX0 * k, -FZ0 * k); g.drawImage(img, -4.5, -13.5, 9, 9); g.restore(); fieldTex.needsUpdate = true; };
+    img.src = logo.url;
+  }
   // 작은 무늬(잔디 결·흙 알갱이) 반복 텍스처
   const R = rng(5);
   const detailTex = canvasTex(256, 256, (g, w, h) => { g.fillStyle = '#808080'; g.fillRect(0, 0, w, h); noise(g, w, h, 70, [1, 1, 1], R); g.globalAlpha = 0.25; for (let i = 0; i < 3000; i++) { g.fillStyle = R() < 0.5 ? '#4a4a4a' : '#b8b8b8'; g.fillRect(R() * w, R() * h, 1, 2.5); } }, true);
