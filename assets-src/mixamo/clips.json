@@ -86,6 +86,21 @@
         2.75
       ],
       "note": "야수 송구 전용 클립 받기 전까지 투구 동작의 스트라이드~팔로스루"
+    },
+    "batStepIn": {
+      "src": "Baseball_Step_In.fbx",
+      "yaw": 90,
+      "note": "타자 등장(인트로) 때 타석에 들어서는 동작"
+    },
+    "batStance2": {
+      "src": "Baseball_Idle_1.fbx",
+      "yaw": 90,
+      "note": "타석 대기 변형(타자마다 다르게)"
+    },
+    "batStance3": {
+      "src": "Baseball_Idle_2.fbx",
+      "yaw": 90,
+      "note": "타석 대기 변형"
     }
   }
 }
