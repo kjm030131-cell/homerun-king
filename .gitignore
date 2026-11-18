@@ -8,3 +8,4 @@ dist/
 # [audio] 빌드가 만드는 효과음 목록
 public/assets/sfx/index.json
 __pycache__/
+tools/qa/.out/
