@@ -119,6 +119,9 @@ export const SWING = {
 // 사람 타자 타격 난이도: 판정 폭 배율 / 공 체감 속도 배율 (0 쉬움, 1 보통, 2 어려움)
 export const HIT_EASE = [1.78, 1.55, 1.12]; // 판정 폭(타이밍·배트 원) 배율: 쉬움 / 보통 / 어려움 (재개발: '아직 좀 어렵다' 피드백 → 보통 1.42→1.55)
 export const HIT_SLOW = [1.14, 1.06, 1.0];
+// 사람 타자 발사각 (11-19 '다 땅볼·뜬공 기준 모르겠다' 피드백): 원 중심 정타 → 라인드라이브~뜬공, 원 아래쪽 → 뜬공, 위쪽 → 땅볼
+export let LIFT_H = { contact: 12, power: 21 }, LIFT_SLOPE_H = 34, LIFT_NOISE_H = 8, SWEET_H = 15;
+export function setLift(o) { if (o.lift) LIFT_H = o.lift; if (o.slope) LIFT_SLOPE_H = o.slope; if (o.noise) LIFT_NOISE_H = o.noise; if (o.sweet) SWEET_H = o.sweet; }
 // human: 사람 타자 보정 켜기, hq/pull: 모드별(RULES) 맞힌 공 질 보정·스윗스팟 모으기
 export function evalSwing(mode, dt, ax, ay, pitchV = 40, ease = 1, human = false, hq = 0.85, pull = 0.35) {
   const M0 = SWING[mode] || SWING.contact;
@@ -141,9 +144,12 @@ export function evalSwing(mode, dt, ax, ay, pitchV = 40, ease = 1, human = false
   if (qa < 0.3 && Math.random() < (human ? 0.55 : 0.7)) return { v: rand(18, 30), launch: ay > 0 ? rand(-20, 5) : human ? rand(18, 55) : rand(45, 75), spray: clamp(-(dt / M.W) * 40 + gauss() * 12, -78, 78), q: q * 0.5 };
   // 타구 속도: 메이저리그 인플레이 타구 분포(중앙값 ~146km/h, 상위10% ~167km/h, 최고 ~190km/h)에 맞춤
   const v = (31.5 + 20.2 * q) * M.pow + 0.1 * (pitchV - 35) + rand(-1.2, 1.2);
-  let launch = clamp(M.lift - (ay / M.R) * (human ? 32 : 42) + gauss() * (human ? 5 : 6), -25, 70);
-  // 사람 타자: 잘 맞힌 공(q>0.55)은 '스윗스팟(10~25°)' 쪽으로 살짝 모아줌 → 정타가 뜬공 아웃보다 라인드라이브가 되게
-  if (human && q > 0.55) launch += (15 - launch) * Math.min(pull, (q - 0.55) * 0.9);
+  // 발사각: 배트 원 중심이 공보다 아래(ay<0)면 공 아랫면을 때려 뜸, 위(ay>0)면 윗면을 때려 땅볼.
+  // 사람 타자는 원 중심에 맞히면 라인드라이브~뜬공 경계(LIFT_H), 원 반지름의 절반만큼 아래를 맞히면 확실한 뜬공이 되게 기울기를 키움
+  const lift = human ? (LIFT_H[mode] ?? M.lift) : M.lift;
+  let launch = clamp(lift - (ay / M.R) * (human ? LIFT_SLOPE_H : 42) + gauss() * (human ? LIFT_NOISE_H : 6), -25, 70);
+  // 사람 타자: 잘 맞힌 공(q>0.55)은 '스윗스팟' 쪽으로 살짝 모아줌
+  if (human && q > 0.55) launch += (SWEET_H - launch) * Math.min(pull, (q - 0.55) * 0.9);
   const spray = clamp(-(dt / M.W) * 52 - (ax / M.R) * 20 + 5 + gauss() * 12, -78, 78); // 우타자: 빠르면 당겨서 좌측(+x)
   return { v, launch, spray, q };
 }
