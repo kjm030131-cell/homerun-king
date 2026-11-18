@@ -1,4 +1,6 @@
 import { CLUBS } from './clubs.js';
+import { RULES, rulesOf } from './rules.js';
+export { RULES, rulesOf };
 // sim.js — 홈런왕 규칙/물리 엔진 (서버 Durable Object와 브라우저 연습모드 공용)
 // 좌표계: 홈플레이트 원점, +z = 중견수 방향, +x = 3루(좌익) 방향, y = 위. 포수 시점에서 1루가 오른쪽.
 // 단위: m, 초, rad/s
@@ -115,9 +117,10 @@ export const SWING = {
   bunt: { W: 0.3, R: 0.32 },
 };
 // 사람 타자 타격 난이도: 판정 폭 배율 / 공 체감 속도 배율 (0 쉬움, 1 보통, 2 어려움)
-export const HIT_EASE = [1.65, 1.42, 1.08]; // 판정 폭(타이밍·배트 원) 배율: 쉬움 / 보통 / 어려움
+export const HIT_EASE = [1.78, 1.55, 1.12]; // 판정 폭(타이밍·배트 원) 배율: 쉬움 / 보통 / 어려움 (재개발: '아직 좀 어렵다' 피드백 → 보통 1.42→1.55)
 export const HIT_SLOW = [1.14, 1.06, 1.0];
-export function evalSwing(mode, dt, ax, ay, pitchV = 40, ease = 1, human = false) {
+// human: 사람 타자 보정 켜기, hq/pull: 모드별(RULES) 맞힌 공 질 보정·스윗스팟 모으기
+export function evalSwing(mode, dt, ax, ay, pitchV = 40, ease = 1, human = false, hq = 0.85, pull = 0.35) {
   const M0 = SWING[mode] || SWING.contact;
   const M = ease === 1 ? M0 : { ...M0, W: M0.W * ease, R: M0.R * ease };
   const d = Math.hypot(ax, ay);
@@ -132,7 +135,7 @@ export function evalSwing(mode, dt, ax, ay, pitchV = 40, ease = 1, human = false
   }
   const qt = 1 - Math.abs(dt) / M.W, qa = 1 - d / M.R;
   let q = Math.pow(qt, 0.5) * Math.pow(qa, 0.6);
-  if (human) q = 1 - (1 - q) * 0.85; // 사람 타자: 맞힌 공의 질을 조금 후하게 (같은 실수라도 타구가 덜 죽음)
+  if (human) q = 1 - (1 - q) * hq; // 사람 타자: 맞힌 공의 질을 조금 후하게 (같은 실수라도 타구가 덜 죽음)
   if (q < 0.2 || (qt < 0.3 && Math.random() < 0.6)) return { v: rand(14, 24), launch: rand(25, 70), spray: (Math.random() < 0.5 ? -1 : 1) * rand(60, 125), q, foul: true };
   // 배트 끝/손잡이에 맞으면 빗맞은 타구
   if (qa < 0.3 && Math.random() < (human ? 0.55 : 0.7)) return { v: rand(18, 30), launch: ay > 0 ? rand(-20, 5) : human ? rand(18, 55) : rand(45, 75), spray: clamp(-(dt / M.W) * 40 + gauss() * 12, -78, 78), q: q * 0.5 };
@@ -140,7 +143,7 @@ export function evalSwing(mode, dt, ax, ay, pitchV = 40, ease = 1, human = false
   const v = (31.5 + 20.2 * q) * M.pow + 0.1 * (pitchV - 35) + rand(-1.2, 1.2);
   let launch = clamp(M.lift - (ay / M.R) * (human ? 32 : 42) + gauss() * (human ? 5 : 6), -25, 70);
   // 사람 타자: 잘 맞힌 공(q>0.55)은 '스윗스팟(10~25°)' 쪽으로 살짝 모아줌 → 정타가 뜬공 아웃보다 라인드라이브가 되게
-  if (human && q > 0.55) launch += (15 - launch) * Math.min(0.35, (q - 0.55) * 0.9);
+  if (human && q > 0.55) launch += (15 - launch) * Math.min(pull, (q - 0.55) * 0.9);
   const spray = clamp(-(dt / M.W) * 52 - (ax / M.R) * 20 + 5 + gauss() * 12, -78, 78); // 우타자: 빠르면 당겨서 좌측(+x)
   return { v, launch, spray, q };
 }
@@ -278,6 +281,8 @@ export const DEFAULT_SETTINGS = {
   clubs: [0, 1],
   tod: 'night', // 경기 시간대: night | day
   hitEase: 1, // 사람 타격 난이도 0 쉬움 1 보통 2 어려움
+  rules: 'real', // 'real' 리얼 | 'casual' 캐주얼 (shared/rules.js)
+  timeLim: 0, // 시간제(분): 지나면 진행 중 이닝이 마지막 이닝. 0 = 없음
 };
 export const CLUB_N = CLUBS.length;
 
@@ -305,9 +310,15 @@ export class Game {
     this.play = null;
     this.stats = new Map(); this.pstats = new Map(); this.pa0 = null;
     this.stam = new Map();
+    this.events = []; // 게임 이벤트 (docs/rebuild/events.md) — snapshot(true)가 ev 로 실어 보내고 비움
+    if (opts.rules && RULES[opts.rules]) { this.set.rules = opts.rules; this.set.innings = RULES[opts.rules].innings; }
   }
   get mode() { return this.set.mode; }
-  get innings() { return this.set.innings; }
+  get innings() { return this.innLim || this.set.innings; }
+  get R() { return rulesOf(this.set.rules); }
+  // 이벤트 발생: UI·애니메이션·사운드는 구독만 한다. 아무도 안 가져가면(테스트·AI 경기) 오래된 것부터 버림
+  ev(e, d) { const o = { e, at: r2(this.now), ...d }; this.events.push(o); if (this.events.length > 400) this.events.splice(0, this.events.length - 300); return o; }
+  takeEvents() { const a = this.events; this.events = []; return a; }
   get D() { return DIFF[this.set.diff] || DIFF[1]; }
 
   // ───────── 플레이어 ─────────
@@ -459,6 +470,13 @@ export class Game {
     if (m.pub != null) s.pub = !!m.pub;
     if (Array.isArray(m.teams)) s.teams = [0, 1].map((i) => String(m.teams[i] || DEFAULT_SETTINGS.teams[i]).trim().slice(0, 8) || DEFAULT_SETTINGS.teams[i]);
     if (typeof m.pw === 'string') this.password = m.pw.slice(0, 20);
+    if (RULES[m.rules] && m.rules !== s.rules) {
+      s.rules = m.rules;
+      if (m.innings == null) s.innings = RULES[m.rules].innings;
+      this.ev('modeChange', { rules: s.rules, innings: s.innings });
+    }
+    if (m.timeLim != null) s.timeLim = clamp(m.timeLim | 0, 0, 60);
+    if (this.R.forceAutoField) s.fieldCtl = 'auto';
   }
   // 인원 제한이 줄면 넘치는 사람은 반대팀/관전으로
   rebalance() {
@@ -492,7 +510,10 @@ export class Game {
     this.stam = new Map();
     this.ball = null; this.pitch = null; this.play = null; this.walkoff = false;
     this.lastPitch = null; this.lastHit = null; this.hrEv = null;
+    this.innLim = 0; this.startT = this.now; this.mercy = false;
+    if (this.R.forceAutoField) this.set.fieldCtl = 'auto';
     for (const p of this.players.values()) p.ready = false;
+    this.ev('modeChange', { rules: this.set.rules, mode: this.mode, innings: this.set.innings, start: 1 });
     this.emitLobby();
     if (this.mode === 'derby') return this.startDerby();
     this.startHalf();
@@ -522,8 +543,18 @@ export class Game {
     this.fielders = POS.map((pos) => { const f = this.mkFielder(pos, taken.get(pos) || null); f.home = f.ctrl; return f; });
     this.buildLineup(this.batTeam);
     for (const st of this.stam.values()) st.sta = Math.min(100, st.sta + 12);
-    this.say(`${this.inning}회${this.half === 0 ? '초' : '말'} · ${this.set.teams[this.half]} 공격`);
+    // 시간제: 제한 시간이 지난 뒤 시작하는 이닝이 마지막 이닝
+    const lim = (this.set.timeLim || this.R.timeLim) * 60;
+    let lastNote = '';
+    if (lim && this.half === 0 && !this.innLim && this.inning > 1 && this.inning < this.set.innings && this.now - this.startT >= lim) { this.innLim = this.inning; lastNote = ' · 시간 종료, 마지막 이닝!'; }
+    this.say(`${this.inning}회${this.half === 0 ? '초' : '말'} · ${this.set.teams[this.half]} 공격${lastNote}`);
+    this.ev('inningStart', { inning: this.inning, half: this.half, last: this.inning >= this.innings ? 1 : 0, extra: this.inning > this.innings ? 1 : 0 });
     this.nextBatter();
+    // 연장 승부치기: 정해진 루에 주자를 두고 시작
+    if (this.mode === 'game' && this.inning > this.innings && this.R.ghost) {
+      for (const b of this.R.ghost) this.runners.push({ rid: ++this.seq, pid: null, name: '승부치기 주자', b, target: b, start: b, forced: false, mustReturn: false, out: false, scored: false, manual: 0, batter: false, steal: false, trot: false });
+      this.say(`${this.inning}회${this.half === 0 ? '초' : '말'} · 승부치기 (무사 ${this.R.ghost.join('·')}루)`);
+    }
     this.pause(2.4, 'pitch');
   }
   mkFielder(pos, ctrl) {
@@ -547,9 +578,11 @@ export class Game {
     }
     this.lineIdx[team]++;
     if (this.set.pitRot === 'batter' && this.mode === 'game' && this.fielders.length && n > 1) this.rotatePitcher();
-    this.balls = 0; this.strikes = 0; this.pickCount = 0;
+    [this.balls, this.strikes] = this.mode === 'game' ? this.R.startCount : [0, 0];
+    this.pickCount = 0; this.seqHist = [];
     this.buntStance = false;
     this.openPA();
+    this.ev('batterUp', { id: this.batter.id, name: this.batter.name, n: this.batter.n, slot: this.batter.slot, team: team, cnt: [this.balls, this.strikes] });
   }
   // 9인 타순: 지정한 타순 우선, 나머지 사람은 빈 타순 앞에서부터
   buildLineup(team) {
@@ -716,29 +749,34 @@ export class Game {
     const P = PITCHES[type];
     const st = this.stamina();
     const tired = clamp((50 - st.sta) / 50, 0, 1);
-    const pw = Math.min(1, power);
-    let err = errOverride ?? (human ? 0.018 + 0.11 * Math.max(0, power - 0.95) + 0.035 * Math.max(0, 0.8 - power) : this.D.pitchErr);
+    const pw = Math.min(1, power), R = this.R;
+    const perfect = human && power >= R.perfectPitch[0] && power <= R.perfectPitch[1];
+    let err = errOverride ?? (human ? (0.018 + 0.11 * Math.max(0, power - 0.95) + 0.035 * Math.max(0, 0.8 - power)) * R.humanPitchErr * (perfect ? R.perfectBonus.err : 1) : this.D.pitchErr);
     err += tired * 0.05;
     const kmh = P.v * (0.86 + 0.15 * pw) * (1 - tired * 0.06) * (human ? 1 : this.D.speed) + gauss() * 1.2;
     const speed = kmh / 3.6;
     tx = clamp(tx + gauss() * err, -0.95, 0.95);
     ty = clamp(ty + gauss() * err, 0.05, 1.85);
     // 체력 소모
-    if (type !== 'BP') { st.sta = Math.max(0, st.sta - (0.9 + 1.1 * pw)); st.pc++; }
+    if (type !== 'BP') { st.sta = Math.max(0, st.sta - (0.9 + 1.1 * pw) * R.staminaMul); st.pc++; }
     const T = RELEASE[2] / speed / (this.mode === 'derby' ? 0.85 : this.D.pitchT) * (this.batterIsCPU() ? 1 : HIT_SLOW[this.set.hitEase] || 1);
     const t0 = this.now + WINDUP;
-    const brkScale = 0.85 + 0.15 * pw;
+    const brkScale = (0.85 + 0.15 * pw) * (perfect ? R.perfectBonus.brk : 1);
     this.pitch = {
       id: ++this.seq, type, tx: r2(tx), ty: r2(ty), bx: r2(P.brk[0] * brkScale * (1 + gauss() * 0.08)), by: r2(P.brk[1] * brkScale * (1 + gauss() * 0.08)), k: P.k, dc: P.v < 125 ? 0.12 : P.v < 140 ? 0.06 : 0, t0: r2(t0),
       T: Math.round(T * 1000) / 1000, kmh: Math.round(kmh), swung: false, swingAt: null, res: null, mode: null,
     };
     this.pitch.arrive = this.pitch.t0 + this.pitch.T;
+    if (perfect) this.pitch.pf = 1;
     this.phase = 'pitching';
+    // 투구 시간표(WINDUP 1.85s): 세트 0~0.35 · 레그킥 0.35~1.25 · 정점 멈춤 1.25~1.45 · 스트라이드 1.45~1.85 · 릴리스 1.85 (docs/rebuild/events.md)
+    // 코스(tx,ty)는 이벤트에 넣지 않는다 (공 위치 미리보기 금지)
+    this.ev('windup', { pid: this.pitch.id, rel: this.pitch.t0, arr: r2(this.pitch.arrive), human: human ? 1 : 0, set: 0.35, kick: 1.25, peak: 1.45, dur: WINDUP });
     this.runnersBefore = this.runners.map((r) => ({ ...r }));
     // CPU 도루
     if (this.mode === 'game' && this.batterIsCPU() && this.humans(this.batTeam).length === 0 && this.outs < 2) {
       const r1 = this.runners.find((r) => r.b === 1 && !this.runners.some((o) => o.b === 2));
-      if (r1 && Math.random() < 0.04) r1.steal = true;
+      if (r1 && Math.random() < 0.04) { r1.steal = true; this.ev('steal', { rid: r1.rid, from: 1, to: 2, cpu: 1 }); }
     }
     for (const r of this.runners) if (r.steal) { r.target = r.b + 1; r.stealT = t0 - 0.95; }
     // 몸에 맞는 공 (우타자는 +x 쪽에 섬)
@@ -756,9 +794,12 @@ export class Game {
       if (this.balls >= 2 && this.strikes === 0 && !zone) p *= 0.5;
       if (this.buntStance) p = zone ? 0.92 : 0.25;
       if (Math.random() < p) {
-        const mode = this.buntStance ? 'bunt' : this.strikes === 2 ? 'contact' : (Math.random() < 0.16 ? 'power' : 'contact');
+        const mode = this.buntStance ? 'bunt' : this.strikes === 2 ? 'contact' : (Math.random() < R.cpuPower ? 'power' : 'contact');
         const M = SWING[mode];
-        let whiff = D.whiff * (breaking ? 1.45 : 1) * (zone ? 1 : 1.9) * (mode === 'power' ? 1.35 : 1) * (pw > 0.97 ? 1.15 : 1);
+        let whiff = D.whiff * (breaking ? 1.45 : 1) * (zone ? 1 : 1.9) * (mode === 'power' ? 1.35 : 1) * (pw > 0.97 ? 1.15 : 1) * (perfect ? 1.12 : 1);
+        // 볼 배합: 같은 구종을 연달아 던지면 타자가 눈에 익힘(헛스윙↓·정타↑), 완급(속구↔느린 공) 바꾸면 헛스윙↑
+        const sq = R.seqEffect ? this.seqFactor(type) : 1;
+        whiff *= sq;
         if (mode === 'bunt') whiff = 0.12;
         let dt, ax, ay;
         if (Math.random() < whiff) { // 헛스윙: 타이밍이 크게 어긋남
@@ -766,7 +807,7 @@ export class Game {
         } else {
           // CPU 타격 오차는 판정 폭에 비례 (판정 폭을 바꿔도 CPU 실력은 그대로)
           const kw = M.W / 0.15, kr = M.R / 0.34 * 1.22;
-          dt = clamp(gauss() * 0.068 * D.bat * kw, -M.W * 0.95, M.W * 0.95);
+          dt = clamp(gauss() * 0.068 * D.bat * kw * (sq < 1 ? 0.88 : 1), -M.W * 0.95, M.W * 0.95);
           ax = gauss() * 0.1 * D.bat * kr;
           ay = clamp((gauss() * 0.15 + (mode === 'power' ? -0.02 : 0.01)) * kr, -M.R * 0.85, M.R * 0.85);
           if (mode === 'bunt') { ax = gauss() * 0.08; ay = 0.02 + gauss() * 0.04; }
@@ -774,12 +815,35 @@ export class Game {
         this.aiSwing = { at: this.pitch.arrive + dt, dt, ax, ay, mode };
       }
     }
+    if (type !== 'BP') (this.seqHist ||= []).push(type);
+  }
+  // 직전 투구들과 비교한 볼 배합 효과 (CPU 타자에게만): 1보다 작으면 타자에게 유리
+  seqFactor(type) {
+    const h = this.seqHist || [], n = h.length;
+    if (!n) return 1;
+    const v = (k) => PITCHES[k].v, last = h[n - 1];
+    if (n >= 2 && h[n - 1] === type && h[n - 2] === type) return 0.72; // 3연속 같은 공
+    if (last === type) return 0.88;
+    if (Math.abs(v(last) - v(type)) >= 20) return 1.18; // 완급 조절 (예: 포심 → 커브)
+    return 1.04;
+  }
+  // 막판 역전 기회 보정 (캐주얼): 마지막 이닝 이후 지고 있는 팀 타자
+  clutchOn() {
+    const c = this.R.clutch;
+    if (!c || this.mode !== 'game' || this.inning < this.innings) return false;
+    const d = this.score[this.half === 0 ? 1 : 0] - this.score[this.half];
+    return d >= 1 && d <= c.deficit;
+  }
+  // 사람 타자 실제 판정 폭 배율 (클라 접촉 미리 계산도 이 값을 씀 → 스냅샷 hx)
+  humanEase(mode) {
+    if (mode === 'bunt') return 1;
+    return (HIT_EASE[this.set.hitEase] || 1) * this.R.hitEase * (this.clutchOn() ? this.R.clutch.ease : 1);
   }
 
   onSwing(id, m) {
     if (this.phase !== 'pitching' || !this.pitch || this.pitch.swung || this.batter.id !== id || m.pid !== this.pitch.id) return;
     const mode = this.mode === 'game' && (this.buntStance || m.mode === 'bunt') ? 'bunt' : (m.mode === 'power' ? 'power' : 'contact');
-    this.resolveSwing(Number(m.dt), Number(m.ax), Number(m.ay), mode, mode === 'bunt' ? 1 : HIT_EASE[this.set.hitEase] || 1, true);
+    this.resolveSwing(Number(m.dt), Number(m.ax), Number(m.ay), mode, this.humanEase(mode), true);
   }
 
   resolveSwing(dt, ax, ay, mode = 'contact', ease = 1, human = false) {
@@ -787,16 +851,23 @@ export class Game {
     p.swung = true;
     p.mode = mode;
     p.swingAt = r2(p.arrive + (isFinite(dt) ? clamp(dt, -0.5, 0.5) : 0));
-    const res = evalSwing(mode, dt, ax, ay, p.kmh / 3.6, ease, human);
+    const R = this.R;
+    const res = evalSwing(mode, dt, ax, ay, p.kmh / 3.6, ease, human, R.humanQ, R.sweetPull);
     this.lastPitch = { type: p.type, kmh: p.kmh, id: p.id };
+    const dms = isFinite(dt) ? Math.round(clamp(dt, -0.5, 0.5) * 1000) : 0;
+    this.ev('swing', { pid: p.id, mode, human: human ? 1 : 0, dt: dms, bid: this.batter.id || null });
     if (!res) {
       p.res = 'miss';
+      { const M = SWING[mode] || SWING.contact, W = M.W * ease; this.ev('miss', { pid: p.id, mode, dt: dms, why: Math.abs(dt) > W ? (dt < 0 ? 'early' : 'late') : 'off', human: human ? 1 : 0 }); }
       if (this.mode === 'derby') return this.derbyOut('헛스윙');
       if (mode === 'bunt') { this.say(this.strikes >= 2 ? '번트 실패 · 삼진' : '번트 헛스윙', this.strikes >= 2); }
       return this.countStrike(true, true);
     }
-    if (res.foul && this.strikes === 2 && this.mode === 'game' && Math.random() < 0.22) {
+    if (!res.bunt && !res.foul) res.v *= R.evMul * (this.clutchOn() ? R.clutch.ev : 1);
+    this.ev('contact', this.contactInfo(p, res, mode, dms, ax, ay, human));
+    if (res.foul && this.strikes === 2 && this.mode === 'game' && Math.random() < R.foulTipK) {
       p.res = 'miss';
+      this.ev('foul', { pid: p.id, kind: 'tip', k: 1 });
       this.say('파울팁 삼진!');
       return this.countStrike(true, true, true);
     }
@@ -807,12 +878,25 @@ export class Game {
     this.lastHit = { id: p.id, ev: this.ball.ev, la: Math.round(res.launch), q: r2(res.q), mode };
     this.startPlay();
   }
+  // 맞는 순간 피드백 데이터: 등급(grade) · 세기(pow 0~1, 히트스톱·흔들림·소리 세기용) · 타구 종류(kind)
+  contactInfo(p, res, mode, dms, ax, ay, human) {
+    const q = res.q, la = res.launch, kmh = Math.round(res.v * 3.6);
+    const grade = res.foul ? 'tip' : res.bunt ? 'bunt' : q > 0.82 ? 'perfect' : q > 0.55 ? 'good' : q > 0.3 ? 'ok' : 'weak';
+    const kind = res.foul ? 'foul' : res.bunt ? 'bunt' : la < 10 ? 'grounder' : la < 25 ? 'liner' : la < 50 ? 'fly' : 'popup';
+    let xd = 0;
+    if (!res.foul && !res.bunt && la > 8) { const b = battedBall(0, 0.9, { ...res, spray: 0 }); xd = carry(b); }
+    const pow = clamp((kmh - 90) / 90, 0, 1) * (grade === 'perfect' ? 1 : grade === 'good' ? 0.85 : 0.6);
+    return { pid: p.id, mode, grade, kind, q: r2(q), ev: kmh, la: Math.round(la), spray: Math.round(res.spray), xd, pow: r2(pow), dt: dms, off: [Math.round((ax || 0) * 100), Math.round((ay || 0) * 100)], human: human ? 1 : 0, x: p.tx, y: p.ty };
+  }
 
   countStrike(swinging, afterSwing, keepMsg) {
     this.strikes++;
     const st = this.stamina();
+    const pid = this.pitch ? this.pitch.id : 0;
+    this.ev('strikeCall', { pid, swinging: swinging ? 1 : 0, looking: swinging ? 0 : 1, b: this.balls, s: Math.min(3, this.strikes), k: this.strikes >= 3 ? 1 : 0 });
     if (this.strikes >= 3) {
       this.outs++;
+      this.ev('out', { kind: 'k', looking: swinging ? 0 : 1, outs: this.outs, bid: this.batter.id || null, name: this.batter.name });
       st.k++;
       const bs = this.stat(); bs.pa++; bs.k++;
       if (!keepMsg && (!/번트/.test(this.msg) || !afterSwing)) this.say(swinging ? '헛스윙 삼진!' : '루킹 삼진!');
@@ -823,6 +907,7 @@ export class Game {
   }
   countBall() {
     this.balls++;
+    this.ev('ballCall', { pid: this.pitch ? this.pitch.id : 0, b: Math.min(4, this.balls), s: this.strikes, walk: this.balls >= 4 ? 1 : 0 });
     if (this.balls >= 4) {
       this.say('볼넷');
       const bs = this.stat(); bs.pa++; bs.bb++;
@@ -843,6 +928,7 @@ export class Game {
     this.pause(dur, after);
   }
   hitByPitch() {
+    this.ev('ballCall', { pid: this.pitch ? this.pitch.id : 0, b: this.balls, s: this.strikes, walk: 1, hbp: 1 });
     this.say('몸에 맞는 공');
     const bs = this.stat(); bs.pa++; bs.bb++;
     for (const r of this.runners) if (r.steal) { r.b = r.target; r.steal = false; }
@@ -855,15 +941,15 @@ export class Game {
     let n = 0;
     for (const r of [...this.runners].filter((x) => !x.out && !x.scored).sort((a, b) => b.b - a.b)) {
       r.target = Math.min(4, Math.round(r.b) + 1); r.b = r.target; r.steal = false; n++;
-      if (r.target >= 4) { r.scored = true; this.addRun(); }
+      if (r.target >= 4) { r.scored = true; this.addRun(r); }
     }
-    if (n) { this.say('폭투! 주자 진루'); this.pause(1.8, 'pitch'); }
+    if (n) { this.ev('wildPitch', { n }); this.say('폭투! 주자 진루'); this.pause(1.8, 'pitch'); }
   }
   forceAdvance() {
     const occ = (k) => this.runners.find((r) => r.target === k && !r.out && !r.scored);
     let k = 1; const chain = [];
     while (occ(k)) { chain.push(occ(k)); k++; }
-    for (const r of chain.reverse()) { r.target++; r.b = r.target; if (r.target >= 4) { r.scored = true; this.addRun(); } }
+    for (const r of chain.reverse()) { r.target++; r.b = r.target; if (r.target >= 4) { r.scored = true; this.addRun(r); } }
     this.runners.push(this.mkRunner(1, false));
   }
   mkRunner(b, batter) {
@@ -873,11 +959,14 @@ export class Game {
   pause(dur, after) { if (this.mode !== 'derby' && dur < 4) dur *= TEMPO; this.phase = 'result'; this.phaseUntil = this.now + dur; this.after = after; }
   endPA(dur) { this.pause(dur, this.outs >= 3 ? 'half' : 'next'); }
 
-  addRun() {
+  addRun(r) {
     this.score[this.half]++;
     this.halfRuns++;
     if (this.play) this.play.runs++;
+    const lead = this.score[this.half] - this.score[1 - this.half];
     if (this.half === 1 && this.inning >= this.innings && this.score[1] > this.score[0]) this.walkoff = true;
+    // lead: 득점 후 점수 차(공격팀 기준) — 1이면 역전/앞서는 점수, 0이면 동점
+    this.ev('score', { half: this.half, sc: [...this.score], rid: r ? r.rid : 0, name: r ? r.name : '', lead, go: lead === 1 ? 1 : 0, tie: lead === 0 ? 1 : 0, walkoff: this.walkoff ? 1 : 0 });
   }
 
   // ───────── 기록 ─────────
@@ -983,6 +1072,7 @@ export class Game {
     if (this.dy.pr) { this.dy.sw++; this.dy.xh += 1; }
     this.say(`홈런! ${dist}m`);
     this.hrEv = { id: ++this.seq, dist, name: this.batter.name };
+    this.ev('hr', { dist, n: 1, name: this.batter.name, bid: this.batter.id || null, derby: 1, ev: this.ball.ev });
     this.pause(3.2, 'pitch');
   }
   derbyNext() {
@@ -1052,6 +1142,7 @@ export class Game {
     for (const r of [...this.runners].sort((a, b) => b.b - a.b)) {
       if (r.b >= 3 || occ.has(r.b + 1) && !this.runners.find((o) => o.b === r.b + 1)?.steal) continue;
       r.steal = true; any = true;
+      this.ev('steal', { rid: r.rid, from: r.b, to: r.b + 1 });
       if (this.phase === 'pitching') { r.target = r.b + 1; r.stealT = this.pitch.t0 - 0.95; }
     }
     if (any) this.say('도루 시도!', false);
@@ -1086,7 +1177,8 @@ export class Game {
     this.startDive(f, m.dx / l, m.dz / l);
     f.act = this.now;
   }
-  startDive(f, dx, dz) { f.dv = this.now; f.dvx = dx; f.dvz = dz; f.ry = Math.atan2(dx, dz); }
+  startDive(f, dx, dz) { f.dv = this.now; f.dvx = dx; f.dvz = dz; f.ry = Math.atan2(dx, dz); const l = Math.hypot(dx, dz) || 1; this.ev('dive', { i: this.fielders.indexOf(f), pos: f.pos, dx: r2(dx / l), dz: r2(dz / l), human: f.ctrl && this.isLive(f.ctrl) ? 1 : 0 }); }
+  slide(r, base) { r.slide = this.now; this.ev('slide', { rid: r.rid, base, back: base <= r.b ? 1 : 0 }); }
 
   // 커트맨이 자리 잡았으면 커트맨에게, 아니면 false (직접 송구)
   throwRelay(i, k, pw = 0.5) {
@@ -1140,7 +1232,7 @@ export class Game {
     for (const r of this.alive()) {
       if (r.b === r.target || r.slide) continue;
       const dir = r.target > r.b ? 1 : -1, nb = dir > 0 ? Math.ceil(r.b) : Math.floor(r.b);
-      if (nb >= 1 && Math.abs(nb - r.b) * BASE_D < 4.5) { r.slide = this.now; any = true; }
+      if (nb >= 1 && Math.abs(nb - r.b) * BASE_D < 4.5) { this.slide(r, nb); any = true; }
     }
     if (any) this.sendTo(id, { t: 'toast', text: '슬라이딩!' });
   }
@@ -1162,6 +1254,8 @@ export class Game {
     b.state = 'thrown'; b.batted = false; b.holder = -1; b.thrower = i; b.throwAt = this.now; b.tx = x; b.tz = z;
     this.play.traj = null; this.play.nextRole = 0;
     this.throwEv = { id: ++this.seq, i };
+    let base = -1; for (let k = 0; k < 4; k++) if (dist2(x, z, BASES[k][0], BASES[k][1]) < 6) base = k === 0 ? 4 : k;
+    this.ev('throw', { i, pos: f.pos, from: [r2(f.x), r2(f.z)], to: [r2(x), r2(z)], base, T: r2(T), pw: r2(pw), relay: this.play.relay && this.play.relay.at === this.now ? 1 : 0, pick: this.play.kind === 'pick' ? 1 : 0 });
   }
 
   // 포구 가능 여부
@@ -1177,7 +1271,7 @@ export class Game {
     if (b.batted && this.play && !(f.ctrl && this.isLive(f.ctrl)) && !(da > 0.05 && da < 0.55)) {
       // CPU 수비: 손 닿는 범위를 조금 줄이고, 빠른 타구일수록 더 줄임(160km/h 직선타는 거의 정면만) — 사람 조작 수비는 그대로
       const sp = Math.hypot(b.vx, b.vz);
-      h = !b.bounced ? 1.12 * clamp(1.2 - (sp - 15) / 22, 0.5, 1) : 1.42; // 뜬 공(직선타)만 줄임, 땅볼은 거의 그대로
+      h = (!b.bounced ? 1.12 * clamp(1.2 - (sp - 15) / 22, 0.5, 1) : 1.42) * this.R.cpuReach; // 뜬 공(직선타)만 줄임, 땅볼은 거의 그대로
     }
     if (b.batted && this.play) { // 반응 시간: 강한 타구는 몸 가까이만 잡힘
       const el = t - this.play.t0;
@@ -1204,6 +1298,7 @@ export class Game {
       if (b.batted && b.fair === null) { const phi = Math.atan2(b.x, b.z); if (Math.abs(phi) <= FOUL) b.fair = true; }
       this.play.err = true;
       this.errs[this.half === 0 ? 1 : 0]++;
+      this.ev('error', { i, pos: f.pos, kind: 'field', dive: diving ? 1 : 0 });
       this.say(diving ? '다이빙! 공이 빠졌다' : `${POS_KO[f.pos]} 실책!`, !diving);
       this.play.traj = null;
       return;
@@ -1212,6 +1307,7 @@ export class Game {
       f.fum = this.now;
       b.vx *= -0.15; b.vz *= -0.15; b.vy = 1.5; b.state = 'ground';
       this.errs[this.half === 0 ? 1 : 0]++; this.play.err = true;
+      this.ev('error', { i, pos: f.pos, kind: 'catch' });
       this.say('포구 실책!', false);
       return;
     }
@@ -1223,6 +1319,8 @@ export class Game {
     this.play.nextAI = this.now + (fromThrow ? rand(0.4, 0.66) : this.D.react * 0.6 + rand(0.35, 0.6));
     f.v = 0;
     this.catchEv = { id: ++this.seq, i, dive: diving, jump: this.now - f.jt < 0.7 };
+    { const fr = Math.hypot(b.x, b.z), fp = Math.atan2(b.x, b.z);
+      this.ev('catch', { i, pos: f.pos, fly: wasFly ? 1 : 0, dive: diving ? 1 : 0, jump: this.catchEv.jump ? 1 : 0, thrown: fromThrow ? 1 : 0, robbed: wasFly && Math.abs(fp) <= FOUL && fr > fenceR(fp) - 1.5 && b.y > WALL_H - 0.3 ? 1 : 0, x: r2(b.x), y: r2(b.y), z: r2(b.z), human: f.ctrl && this.isLive(f.ctrl) ? 1 : 0 }); }
     if (wasFly && (diving || this.catchEv.jump)) this.play.highlight = true;
     if (b.batted && b.fair === null && !wasFly) {
       const phi = Math.atan2(b.x, b.z);
@@ -1232,7 +1330,7 @@ export class Game {
     b.touched = true;
     if (wasFly) {
       const br = this.runners.find((r) => r.batter && !r.out);
-      if (br) { br.out = true; this.outs++; }
+      if (br) { br.out = true; this.outs++; this.ev('out', { kind: 'fly', rid: br.rid, i, pos: f.pos, outs: this.outs, name: br.name }); }
       const r = Math.hypot(b.x, b.z), phi = Math.atan2(b.x, b.z);
       const robbed = Math.abs(phi) <= FOUL && r > fenceR(phi) - 1.5 && b.y > WALL_H - 0.3;
       this.say(robbed ? '홈런 강탈!!' : diving ? '다이빙 캐치!' : `${POS_KO[f.pos]} ${b.vy > -8 && Math.hypot(b.x, b.z) < 40 && b.ev > 120 ? '직선타' : '플라이'} 아웃`);
@@ -1246,10 +1344,11 @@ export class Game {
   }
 
   foulBall() {
+    this.ev('foul', { pid: this.pitch ? this.pitch.id : 0, kind: this.ball && this.ball.bunt ? 'bunt' : 'ball', s: Math.min(2, this.strikes + 1), x: this.ball ? r2(this.ball.x) : 0, z: this.ball ? r2(this.ball.z) : 0 });
     this.say(this.ball && this.ball.bunt ? '번트 파울' : '파울', false);
     this.runners = this.runnersBefore.map((r) => ({ ...r, steal: false, b: r.start ?? r.b, target: r.start ?? r.target }));
     if (this.strikes < 2) this.strikes++;
-    else if (this.ball && this.ball.bunt) { this.ball.ghost = true; this.play = null; this.strikes = 3; this.outs++; const bs = this.stat(); bs.k++; this.say('스리번트 파울 · 삼진'); return this.endPA(1.8); }
+    else if (this.ball && this.ball.bunt) { this.ball.ghost = true; this.play = null; this.strikes = 3; this.outs++; this.ev('out', { kind: 'k', bunt: 1, outs: this.outs, bid: this.batter.id || null, name: this.batter.name }); const bs = this.stat(); bs.k++; this.say('스리번트 파울 · 삼진'); return this.endPA(1.8); }
     this.ball.ghost = true;
     this.play = null;
     this.pause(1.4, 'pitch');
@@ -1262,7 +1361,9 @@ export class Game {
     const st = this.stat(); st.hr++; st.h++; st.max = Math.max(st.max, dist);
     const al = this.alive();
     const n = al.length;
-    for (const r of al) { r.trot = true; r.target = 4; r.manual = 0; this.addRun(); }
+    const sc0 = [...this.score];
+    this.ev('hr', { dist, n, name: this.batter.name, bid: this.batter.id || null, ev: this.ball.ev, la: this.lastHit ? this.lastHit.la : 0, x: r2(this.ball.x), z: r2(this.ball.z), before: sc0 });
+    for (const r of al) { r.trot = true; r.target = 4; r.manual = 0; this.addRun(r); }
     st.rbi += n;
     this.say(`${n >= 4 ? '만루 홈런!!!' : n > 1 ? `${n}점 홈런!` : '솔로 홈런!'} ${dist}m`);
     this.hrEv = { id: ++this.seq, dist, name: this.batter.name, n };
@@ -1277,6 +1378,10 @@ export class Game {
     r.out = true;
     this.outs++;
     this.play.outs = (this.play.outs || 0) + 1;
+    { const h = this.ball ? this.ball.holder : -1, hf = this.fielders[h], base = kind === 'force' ? r.target : Math.round(r.b);
+      const k2 = this.play.kind === 'pick' ? 'pick' : this.play.kind === 'steal' ? 'cs' : kind;
+      if (kind === 'tag') this.ev('tag', { i: h, pos: hf ? hf.pos : '', rid: r.rid, base });
+      this.ev('out', { kind: k2, rid: r.rid, base: r.target, i: h, pos: hf ? hf.pos : '', outs: this.outs, dp: this.play.outs, name: r.name }); }
     const where = r.target >= 4 ? '홈' : `${r.target}루`;
     const steal = this.play.kind === 'steal';
     this.say(this.play.kind === 'pick' ? `견제사! ${r.start ?? r.target}루 주자 아웃` : steal ? `도루 저지! ${where}에서 아웃` : kind === 'force' ? `${where} 포스아웃` : `${where} 태그아웃`, true);
@@ -1285,6 +1390,7 @@ export class Game {
     if (this.outs >= 3) {
       if ((kind === 'force' || r.batter) && this.play.runs > 0) {
         this.score[this.half] -= this.play.runs; this.halfRuns -= this.play.runs; this.walkoff = false;
+        this.ev('scoreVoid', { half: this.half, runs: this.play.runs, sc: [...this.score] });
         this.say('쓰리아웃 · 득점 무효');
       }
       this.endPlay();
@@ -1296,7 +1402,7 @@ export class Game {
     const P = this.play;
     if (P.kind === 'pick') {
       for (const r of this.alive()) { r.b = r.start ?? Math.round(r.b); r.target = r.b; r.steal = false; r.mustReturn = false; }
-      if (!/견제사/.test(this.msg)) this.say('세이프! 귀루 성공', false);
+      if (!/견제사/.test(this.msg)) { this.say('세이프! 귀루 성공', false); const b0 = BASES[P.pickBase % 4]; this.ev('safe', { base: P.pickBase, pick: 1, x: r2(b0[0]), z: r2(b0[1]) }); }
       this.play = null;
       if (this.ball && this.ball.state !== 'held') this.ball.ghost = true;
       return this.pause(1.3, this.outs >= 3 ? 'half' : 'pitch');
@@ -1305,6 +1411,7 @@ export class Game {
       for (const r of this.alive()) { if (r.b !== Math.floor(r.b)) r.target = Math.floor(r.b); r.b = r.target; }
       if (!/저지|아웃/.test(this.msg)) {
         this.say('도루 성공!');
+        this.ev('safe', { steal: 1, base: Math.max(0, ...this.alive().filter((r) => r.sbTry).map((r) => r.b)) });
         for (const r of this.alive()) if (r.sbTry) { const st = this.stat({ id: r.pid, name: r.name }); st.sb++; }
       }
       this.play = null;
@@ -1321,6 +1428,7 @@ export class Game {
         this.stat().h++;
         const names = ['', '안타', '2루타', '3루타', '그라운드 홈런!'];
         if (!/아웃|실책/.test(this.msg) || this.outs < 3) this.say(this.ball.bunt && reached === 1 ? '번트 안타!' : names[Math.min(4, reached)] || '안타');
+        this.ev('hit', { bases: Math.min(4, reached), bunt: this.ball.bunt ? 1 : 0, rbi: P.runs, name: this.batter.name, bid: this.batter.id || null });
       } else if (P.err && !/아웃/.test(this.msg)) this.say('실책으로 출루');
     } else if (br && br.out && this.ball.bunt && P.runs === 0 && this.alive().some((r) => r.target > r.start)) this.say('희생번트 성공');
     this.stat().rbi += P.err ? 0 : Math.max(0, P.runs);
@@ -1328,6 +1436,7 @@ export class Game {
     for (const r of this.alive()) { if (r.b !== Math.floor(r.b)) r.target = Math.floor(r.b); r.b = r.target; }
     this.play = null;
     if (this.ball && this.ball.state !== 'held') this.ball.ghost = true;
+    this.ev('playEnd', { runs: P.runs, outs: this.outs, hl: P.highlight ? 1 : 0 });
     this.endPA(P.highlight ? 4.6 : 2.0); // 호수비 리플레이 시간 확보
   }
 
@@ -1345,6 +1454,7 @@ export class Game {
         break;
       case 'pitching': {
         const p = this.pitch;
+        if (!p.rel && this.now >= p.t0) { p.rel = 1; this.ev('release', { pid: p.id, type: p.type, kmh: p.kmh, arr: r2(p.arrive), T: p.T, pf: p.pf || 0 }); }
         this.buntDefense(dt);
         this.stealCover(dt);
         // 도루 주자 출발
@@ -1420,6 +1530,7 @@ export class Game {
     this.phase = 'live';
     this.play = { t0: this.now, runs: 0, settleSince: -1, holderSince: this.now, nextAI: this.now + 99, nextRole: 0, traj: null, chaser: -1, result: null, kind: 'pick', after: 'pitch', outs: 0, pickAt: this.now + 0.32, pickFrom: pi, pickBase: base };
     this.say(`${base}루 견제!`, false);
+    this.ev('pick', { base, cpu: id === 'cpu' ? 1 : 0 });
   }
   cpuPickoff() {
     this.pickTried = true;
@@ -1475,12 +1586,19 @@ export class Game {
     this.closePA();
     this.line[this.half][this.inning - 1] = this.halfRuns;
     const [aw, hm] = this.score;
+    this.ev('inningEnd', { inning: this.inning, half: this.half, runs: this.halfRuns, sc: [aw, hm] });
+    // 콜드게임 (캐주얼): 2회 이후 점수 차가 mercy 이상이고 뒤진 팀 공격이 끝났으면
+    const M = this.R.mercy;
+    if (M && this.mode === 'game' && this.inning >= 2 && this.inning < this.innings && Math.abs(aw - hm) >= M && (this.half === 1 || hm > aw)) {
+      if (this.half === 0) this.line[1][this.inning - 1] = 'X';
+      this.mercy = true; this.say(`${M}점 차 콜드게임`); return this.gameOver();
+    }
     if (this.half === 0) {
       if (this.inning >= this.innings && hm > aw) { this.line[1][this.inning - 1] = 'X'; return this.gameOver(); }
       this.half = 1;
     } else {
       if (this.inning >= this.innings && aw !== hm) return this.gameOver();
-      if (this.inning >= this.innings + 3) return this.gameOver();
+      if (this.inning >= this.innings + this.R.maxExtra) return this.gameOver();
       this.half = 0; this.inning++;
     }
     this.startHalf();
@@ -1493,11 +1611,13 @@ export class Game {
     if (this.mode === 'derby') {
       const best = [...this.dy.order].sort((a, b) => b.hr - a.hr || b.max - a.max)[0];
       this.say(best ? `홈런왕 · ${best.name}` : '더비 종료');
+      this.ev('gameEnd', { derby: 1, best: best ? best.name : null, hr: best ? best.hr : 0 });
       this.emitLobby();
       return;
     }
     const [aw, hm] = this.score;
     this.winner = aw > hm ? 'away' : hm > aw ? 'home' : null;
+    this.ev('gameEnd', { sc: [aw, hm], win: this.winner, walkoff: this.walkoff ? 1 : 0, mercy: this.mercy ? 1 : 0, inning: this.inning, rules: this.set.rules });
     this.say(this.winner ? `경기 종료 · ${this.set.teams[this.winner === 'away' ? 0 : 1]} 승리` : '경기 종료 · 무승부');
     try { this.onGameOver(this.careerSummary()); } catch (e) { /* 기록 저장 실패해도 경기는 계속 */ }
     this.emitLobby();
@@ -1534,7 +1654,7 @@ export class Game {
         for (let i = 0; i < this.fielders.length; i++) if (this.reach(this.fielders[i], b)) { this.catchBall(i); if (!this.play || this.play.result) return; }
         if (b.holder < 0) return this.homeRun();
       }
-      if (ev.wall) { b.bounced = true; if (b.batted && b.fair === null) b.fair = true; P.traj = null; this.wallEv = { id: ++this.seq }; }
+      if (ev.wall) { b.bounced = true; if (b.batted && b.fair === null) b.fair = true; P.traj = null; this.wallEv = { id: ++this.seq }; this.ev('wall', { x: r2(b.x), y: r2(b.y), z: r2(b.z), impact: r2(ev.impact) }); }
       if (ev.landed && b.batted && !b.bounced) {
         b.bounced = true;
         const r = Math.hypot(b.x, b.z), phi = Math.atan2(b.x, b.z);
@@ -1620,10 +1740,10 @@ export class Game {
     for (const r of this.alive()) {
       const t = Math.min(4, (r.batter ? 0 : r.start) + 2);
       r.target = t; r.b = t;
-      if (t >= 4) { r.scored = true; this.addRun(); }
+      if (t >= 4) { r.scored = true; this.addRun(r); }
     }
     this.play.result = 'gr';
-    if (this.ball.batted) { this.hits[this.half]++; const st = this.stat(); st.h++; st.rbi += this.play.runs; }
+    if (this.ball.batted) { this.hits[this.half]++; const st = this.stat(); st.h++; st.rbi += this.play.runs; this.ev('hit', { bases: 2, gr: 1, rbi: this.play.runs, name: this.batter.name, bid: this.batter.id || null }); }
     for (const r of this.runners) delete r.batter;
     this.play = null;
     this.ball.ghost = true;
@@ -1757,7 +1877,7 @@ export class Game {
     }
     if (b.holder >= 0) {
       const f = this.fielders[b.holder];
-      const waitT = f.swT > 0 && f.act <= f.swT ? 1.0 : 2.5; // 자동 전환으로 받은 공은 사람이 가만 있으면 금방 CPU가 처리
+      const waitT = f.swT > 0 && f.act <= f.swT ? this.R.autoThrowWaitSwitched : this.R.autoThrowWait; // 사람이 공 들고 가만있으면 CPU가 대신 송구 (조작 부담↓)
       const human = this.isHumanActive(f) || (f.ctrl && this.isLive(f.ctrl) && this.now - P.holderSince < waitT);
       if (!human && this.now >= P.nextAI) { P.nextAI = this.now + 0.25; this.holderAI(b.holder); }
     }
@@ -1844,7 +1964,7 @@ export class Game {
         if (this.now < (r.pickWait || 0) || r.b <= r.target) continue;
         const v = 6.4 / BASE_D * Math.min(1, (this.now - r.pickWait) / 0.3 + 0.4);
         r.b = Math.max(r.target, r.b - v * dt);
-        if ((r.b - r.target) * BASE_D < 2.4 && !r.slide) r.slide = this.now;
+        if ((r.b - r.target) * BASE_D < 2.4 && !r.slide) this.slide(r, r.target);
         continue;
       }
       // 잡힐 것 같은 뜬공(2아웃 전): 주자는 하프웨이까지만 / 깊은 뜬공이면 베이스에서 태그업 대기
@@ -1870,7 +1990,7 @@ export class Game {
         let close = false;
         if (b.holder >= 0) { const f = this.fielders[b.holder]; close = dist2(f.x, f.z, base[0], base[1]) < 7; }
         else if (b.state === 'thrown') close = dist2(b.tx, b.tz, base[0], base[1]) < 4 && dist2(b.x, b.z, base[0], base[1]) < 22;
-        if (close && r.target >= 1) { this.call(false, r.target, base[0], base[1]); if (r.target < 4) this.say('세이프!', false); }
+        if (close && r.target >= 1) { this.call(false, r.target, base[0], base[1]); this.ev('safe', { rid: r.rid, base: r.target, x: r2(base[0]), z: r2(base[1]), close: 1 }); if (r.target < 4) this.say('세이프!', false); }
       }
       if (r.b !== r.target) r.arrived = 0;
       // 슬라이딩: 다음 베이스 3m 앞인데 공 든 수비수나 송구가 그 베이스 근처면
@@ -1880,12 +2000,12 @@ export class Game {
         if (left < 3.2 && nb >= 1) {
           const base = BASES[nb % 4];
           const threat = (b.holder >= 0 && dist2(this.fielders[b.holder].x, this.fielders[b.holder].z, base[0], base[1]) < 9) || (b.state === 'thrown' && dist2(b.tx, b.tz, base[0], base[1]) < 5);
-          if (threat && !(nb === 1 && dir > 0 && r.batter)) { r.slide = this.now; }
+          if (threat && !(nb === 1 && dir > 0 && r.batter)) this.slide(r, nb);
         }
       }
       if (r.b === r.target || (r.slide && this.now - r.slide > 1.2)) r.slide = 0;
       if (r.b === r.target) { r.forced = false; r.mustReturn = false; }
-      if (r.b >= 4 && !r.scored) { r.scored = true; this.addRun(); this.say('득점!', false); continue; }
+      if (r.b >= 4 && !r.scored) { r.scored = true; this.addRun(r); this.say('득점!', false); continue; }
       if (this.now < r.manual) continue;
       let ahead = null, behind = null;
       for (const o of alive) {
@@ -1900,7 +2020,7 @@ export class Game {
       if (approaching && !blocked && !r.mustReturn && !(flyPending && this.outs < 2)) {
         const tRun = (nk - r.b) * BASE_D / Math.max(RUN_SPEED, (r.v || 0) * BASE_D); // 달리는 중이면 현재 속도 기준
         const tDef = this.defTime(nk);
-        if (tDef > tRun + (r.target === 3 ? (this.outs === 2 ? -0.3 : -0.05) : 0.3)) /* 3루 코치: 홈은 접전이어도 돌림(2아웃이면 더 과감) */ { r.target = nk; r.forced = false; continue; }
+        if (tDef > tRun + (r.target === 3 ? (this.outs === 2 ? -0.3 : this.R.sendHome) : 0.3)) /* 3루 코치: 홈은 접전이어도 돌림(2아웃이면 더 과감) */ { r.target = nk; r.forced = false; continue; }
       }
       if (r.b < r.target && !r.forced && b.holder >= 0 && r.b > Math.floor(r.b)) {
         const remain = (r.target - r.b) * BASE_D / RUN_SPEED;
@@ -1928,9 +2048,12 @@ export class Game {
   }
 
   // ───────── 스냅샷 ─────────
-  snapshot() {
+  // drain=true: 쌓인 게임 이벤트를 ev 로 실어 보내고 비움 (Room 브로드캐스트·혼자하기 틱에서만. 접속 직후 개별 전송은 false)
+  snapshot(drain = false) {
     const s = { t: 's', now: r2(this.now), ph: this.phase };
+    if (drain && this.events.length) s.ev = this.takeEvents();
     if (this.phase === 'lobby') return s;
+    s.ru = this.set.rules; s.hx = r2(this.humanEase('contact'));
     const age = (t) => (this.now - t < 3 ? r2(this.now - t) : -1);
     s.mode = this.mode;
     s.inn = this.inning; s.half = this.half; s.sc = this.score; s.ls = this.line; s.hits = this.hits; s.errs = this.errs;

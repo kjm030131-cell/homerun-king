@@ -17,6 +17,7 @@ import { Animator, PITCH_DUR, PITCH_RELEASE_K, THROW_DUR, swingTrack, pitchK } f
 import { buildStadium, glowTex } from './stadium.js';
 import { FX } from './fx.js';
 import { sfx, audio, setVolume, crowdAmbience } from './audio.js';
+import { bus } from './core/bus.js'; // [gameplay] 게임 이벤트 → bus
 
 const OFFLINE = !!window.HR_OFFLINE;
 const $ = (id) => document.getElementById(id);
@@ -188,7 +189,7 @@ let zoneMesh = null;
 scene.add(zoneGroup);
 const pci = new THREE.Group();
 let pciHot = false;
-const hitEase = () => HIT_EASE[(S && S.he) ?? 0] || 1;
+const hitEase = () => (S && S.hx) || HIT_EASE[(S && S.he) ?? 0] || 1; // [gameplay] hx = 서버가 쓰는 실제 판정 폭(모드·난이도 반영)
 const mode2 = () => (buntOn || (S && S.bs) ? 'bunt' : keys.f ? 'power' : 'contact');
 // 배트 중심(PCI): 얇은 타원 테두리 + 아주 옅은 채움 + 가운데 점 하나. 타이밍 맞을 때만 테두리가 초록으로
 const pciOuter = new THREE.Mesh(new THREE.RingGeometry(0.93, 1, 64), new THREE.MeshBasicMaterial({ color: '#ffffff', transparent: true, opacity: 0.55, depthTest: false, side: THREE.DoubleSide }));
@@ -270,14 +271,14 @@ function startLocal(name, o) {
   myId = 'me'; myName = name;
   game.addPlayer('me', name);
   const me = game.players.get('me'); me.team = o.team; me.pos = o.pos;
-  game.applySettings({ mode: o.mode, innings: o.inn, derbyOuts: o.mode === 'derby' ? Math.max(5, o.inn * 3) : 10, diff: o.diff, clubs: o.clubs || [0, 1], pitRot: 'fixed', fieldCtl: o.fld || 'pos', tod: o.tod || 'night', hitEase: o.hitEase ?? 1 });
+  game.applySettings({ mode: o.mode, innings: o.inn, derbyOuts: o.mode === 'derby' ? Math.max(5, o.inn * 3) : 10, diff: o.diff, clubs: o.clubs || [0, 1], pitRot: 'fixed', fieldCtl: o.fld || 'pos', tod: o.tod || 'night', hitEase: o.hitEase ?? 1, rules: o.rules }); // [gameplay] rules: 'real' | 'casual' (ui가 메뉴에서 넘겨줄 것)
   applyClubs(game.set.clubs);
   let last = performance.now();
   const tickFn = () => {
     const t = performance.now(); const dt = Math.min(0.1, (t - last) / 1000); last = t;
     if (dt <= 0) return;
     game.tick(dt);
-    handleMsg(game.snapshot());
+    handleMsg(game.snapshot(true)); // [gameplay] true: 이벤트(ev)도 같이
   };
   const iv = setInterval(tickFn, 1000 / 60);
   net = { send: (m) => game.handle('me', m), close: () => clearInterval(iv), local: true, game };
@@ -333,7 +334,7 @@ function handleMsg(m) {
     case 'chat': addChat(m.name, m.text, m.team); break;
     case 'kicked': toTitle(); showErr('방장이 내보냈어'); break;
     case 'toast': toast(m.text); break;
-    case 's': onSnap(m); break;
+    case 's': onSnap(m); if (m.ev) for (const x of m.ev) bus.emit(x.e, x); break; // [gameplay] 게임 이벤트 연결 지점 (docs/rebuild/events.md)
   }
 }
 
@@ -1117,6 +1118,7 @@ function doSwing(mode) {
   const ms = Math.round(dt * 1000);
   const tm = Math.abs(dt) < 0.025 ? '완벽한 타이밍' : dt < 0 ? `${-ms}ms 빠름` : `${ms}ms 늦음`;
   if (mode !== 'bunt') swingReport(dt, a, p, M, contact);
+  bus.emit('localSwing', { pid: p.id, mode, contact, dt: Math.round(dt * 1000), q: contact ? (mode === 'bunt' ? 0.3 : Math.pow(1 - Math.abs(dt) / M.W, 0.5) * Math.pow(1 - d / M.R, 0.6)) : 0 }); // [gameplay] 내 스윙 즉시 피드백(서버 contact/miss는 핑만큼 늦게 옴)
   if (contact) {
     const q = mode === 'bunt' ? 0.3 : Math.pow(1 - Math.abs(dt) / M.W, 0.5) * Math.pow(1 - d / M.R, 0.6);
     contactFreeze = { pid: p.id, until: nowP() + 0.35, pos: [p.tx, p.ty] };
