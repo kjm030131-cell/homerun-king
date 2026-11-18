@@ -129,7 +129,8 @@ export class ClipAnimator {
     if (st === 'sprint') { if (speed < 5.4) st = speed > 0.35 ? 'run' : base; }
     else if (st === 'run') { if (speed > 6.2 && C.has('sprint')) st = 'sprint'; else if (speed < 0.35) st = base; }
     else st = speed > 0.6 ? 'run' : base;
-    if (st === 'run' || st === 'sprint') C.play(st, { fade: 0.22, speed: clamp(speed / (CLIPS[st].speed || 4), 0.55, 1.7), sync: true });
+    // 재생 속도 = 실제 속도/클립 원래 속도. 너무 느리게 돌리면 슬로모션처럼 보여서(조깅도 발 구르는 템포는 빠름) 최소 0.8
+    if (st === 'run' || st === 'sprint') C.play(st, { fade: 0.22, speed: clamp(speed / (CLIPS[st].speed || 4), 0.8, 1.7), sync: true });
     else C.play(st, { fade: 0.3 });
     this.loco = st;
   }
@@ -171,10 +172,23 @@ export class ClipAnimator {
   batter(dt, c) {
     motionEvents(this.ev, this.p, 'batter', c);
     const C = this.c;
+    // 타자마다 대기 자세를 조금씩 다르게(등번호로 고정) — 9명이 똑같이 서 있으면 어색함
+    const who = String(c.who ?? this.p.look.num ?? '');
+    if (!this.stance || this.who !== who) {
+      this.who = who;
+      const opts = ['batStance', 'batStance2', 'batStance3'].filter((n) => C.has(n));
+      const h = [...who].reduce((a, ch) => (a * 31 + ch.charCodeAt(0)) | 0, 7);
+      this.stance = opts[Math.abs(h) % opts.length] || 'batStance';
+    }
+    // 등장(인트로): 타석에 걸어 들어와 자리 잡기 → 끝나면 대기 자세
+    if (c.intro && !this.stepT && C.has('batStepIn')) { this.stepT = 1e-6; C.play('batStepIn', { fade: 0.2, restart: true }); }
+    if (this.stepT) { this.stepT += dt; if (!c.intro && this.stepT > 0.3) this.stepT = 0; }
+    const stepping = this.stepT > 0 && this.stepT < (C.duration ? C.duration('batStepIn') : 3.7) - 0.25;
     if (c.bunt) C.play('buntStance', { fade: 0.25 });
     else if (c.swingK >= 0) C.scrubK(c.power ? 'powerSwing' : 'swing', c.swingK, { fade: 0.06 });
     else if (c.loadK > 0.02) C.scrubK('swing', 0.25 * clamp(c.loadK, 0, 1), { fade: 0.2 });
-    else C.play('batStance', { fade: 0.25 });
+    else if (stepping) { /* 등장 동작 계속 */ }
+    else C.play(this.stance, { fade: 0.35 });
     if (c.lookW && !(c.swingK >= 0)) C.look(c.lookW, 0.4);
     C.update(dt);
   }

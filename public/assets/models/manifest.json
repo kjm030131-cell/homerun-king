@@ -1,6 +1,25 @@
 {
   "clips": {
-    "run": { "speed": 5.66 },
-    "sprint": { "speed": 5.66 }
+    "run": {
+      "speed": 5.66
+    },
+    "sprint": {
+      "speed": 5.66
+    },
+    "batStepIn": {
+      "loop": false,
+      "lockXZ": true,
+      "fallback": "batStance"
+    },
+    "batStance2": {
+      "loop": true,
+      "lockXZ": true,
+      "fallback": "batStance"
+    },
+    "batStance3": {
+      "loop": true,
+      "lockXZ": true,
+      "fallback": "batStance"
+    }
   }
 }

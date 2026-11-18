@@ -228,6 +228,7 @@ export class Character {
   current() { let best = null, bw = -1; for (const L of this.layers.values()) if (L.target > bw) { bw = L.target; best = L; } return best; }
 
   // 클립 재생(크로스페이드). 같은 클립을 다시 부르면 속도만 바뀜(restart: true 면 처음부터)
+  duration(name) { const e = this.resolve(name); return e ? e.clip.duration : 0; }
   play(name, { fade = 0.2, speed = 1, loop, restart = false, sync = false } = {}) {
     const e = this.resolve(name); if (!e) return null;
     const cur = this.current();

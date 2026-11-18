@@ -45,7 +45,15 @@ export async function makeLod(glbPath, outPath, ratio = 0.3, force = false) {
   const { MeshoptSimplifier } = await import('meshoptimizer');
   await MeshoptSimplifier.ready;
   const target = Math.floor(idx.length * ratio / 3) * 3;
-  const [lo, err] = MeshoptSimplifier.simplify(idx, pos, 3, target, 0.02, []);
+  // 먼 선수 전용(화면에서 수십 픽셀). 일반 simplify 는 UV 이음매를 지켜서 49% 에서 멈춤 →
+  // 새 meshoptimizer 는 'Permissive'(이음매 넘어 단순화, 품질 좋음), 옛 버전(0.21)은 simplifySloppy 로 목표(30%)까지
+  let lo, err;
+  try { [lo, err] = MeshoptSimplifier.simplify(idx, pos, 3, target, 0.06, ['Permissive']); } catch { [lo, err] = MeshoptSimplifier.simplify(idx, pos, 3, target, 0.06, []); }
+  if (lo.length > target * 1.4 && MeshoptSimplifier.simplifySloppy) {
+    const sl = MeshoptSimplifier.simplifySloppy;
+    const r = sl.length >= 6 ? sl(idx, pos, 3, null, target, 0.06) : sl(idx, pos, 3, target, 0.06);
+    if (r && r[0] && r[0].length < lo.length) [lo, err] = r;
+  }
   const out = Buffer.alloc(8 + lo.length * 4);
   out.writeUInt32LE(0x314c5248, 0); out.writeUInt32LE(lo.length, 4);
   Buffer.from(lo.buffer, lo.byteOffset, lo.byteLength).copy(out, 8);
