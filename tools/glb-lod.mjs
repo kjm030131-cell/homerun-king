@@ -45,7 +45,7 @@ export async function makeLod(glbPath, outPath, ratio = 0.3, force = false) {
   const { MeshoptSimplifier } = await import('meshoptimizer');
   await MeshoptSimplifier.ready;
   const target = Math.floor(idx.length * ratio / 3) * 3;
-  const [lo, err] = MeshoptSimplifier.simplify(idx, pos, 3, target, 0.02, []);
+  const [lo, err] = MeshoptSimplifier.simplify(idx, pos, 3, target, 0.06, []); // 오차 한도 0.02 면 49% 에서 멈춰서 0.06 (먼 선수 전용 — 화면에서 수십 픽셀)
   const out = Buffer.alloc(8 + lo.length * 4);
   out.writeUInt32LE(0x314c5248, 0); out.writeUInt32LE(lo.length, 4);
   Buffer.from(lo.buffer, lo.byteOffset, lo.byteLength).copy(out, 8);
