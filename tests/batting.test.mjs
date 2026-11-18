@@ -1,7 +1,7 @@
 // 사람 타자 PCI + 타이밍 위주 타격 (docs/rebuild/gameplay.md 5절) · 바운드/경계 (6절)
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { Game, inZone, PCI, pciJudge, evalSwing, integrate, surface, standR, battedBall, FOUL, WALL_FOUL } from '../shared/sim.js';
+import { Game, inZone, PCI, pciJudge, evalSwing, integrate, surface, standR, FOUL, WALL_FOUL } from '../shared/sim.js';
 
 // 결정적 난수 (사람 흉내 테스트가 CI에서 운에 따라 깨지지 않게)
 const seeded = (s) => () => { s |= 0; s = (s + 0x6D2B79F5) | 0; let t = Math.imul(s ^ (s >>> 15), 1 | s); t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t; return ((t ^ (t >>> 14)) >>> 0) / 4294967296; };
@@ -103,6 +103,6 @@ test('사람 타구는 스윙 순간부터 굴려서 시작 (핑 지연만큼 �
   if (g.phase !== 'pitching') return; // 드물게 견제 등
   g.handle('me', { t: 'swing', pid: g.pitch.id, dt: 0, ax: 0, ay: 0, mode: 'contact' }); // 0.08초 늦게 도착한 '딱 맞는' 스윙
   if (g.phase !== 'live' || !g.ball || g.ball.holder >= 0) return;
-  const b0 = battedBall(g.pitch.tx, g.pitch.ty, { v: g.ball.ev / 3.6, launch: g.lastHit.la, spray: 0 });
-  assert.ok(Math.hypot(g.ball.x - b0.x, g.ball.z - b0.z) > 1.5, '0.08초만큼 앞에서 출발');
+  const d = Math.hypot(g.ball.x - g.pitch.tx, g.ball.y - Math.max(0.3, g.pitch.ty), g.ball.z - 0.3), v = Math.hypot(g.ball.vx, g.ball.vy, g.ball.vz);
+  assert.ok(d > v * 0.08 * 0.6, `0.08초만큼 앞에서 출발 (${d.toFixed(2)}m, 속도 ${v.toFixed(1)}m/s)`);
 });

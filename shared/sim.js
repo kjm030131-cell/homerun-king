@@ -133,6 +133,9 @@ export const SWING = {
 // 사람 타자 타격 난이도: 판정 폭 배율 / 공 체감 속도 배율 (0 쉬움, 1 보통, 2 어려움)
 export const HIT_EASE = [1.2, 1.0, 0.82]; // 사람 타자 판정 배율(PCI 크기·타이밍 창 둘 다): 쉬움 / 보통 / 어려움 — PCI 기준값에 곱함 (CPU 타자는 SWING 그대로)
 export const HIT_SLOW = [1.14, 1.06, 1.0];
+// 사람 타자 발사각 (11-19 '다 땅볼·뜬공 기준 모르겠다' 피드백): 원 중심 정타 → 라인드라이브~뜬공, 원 아래쪽 → 뜬공, 위쪽 → 땅볼
+export let LIFT_H = { contact: 12, power: 21 }, LIFT_SLOPE_H = 34, LIFT_NOISE_H = 8, SWEET_H = 15;
+export function setLift(o) { if (o.lift) LIFT_H = o.lift; if (o.slope) LIFT_SLOPE_H = o.slope; if (o.noise) LIFT_NOISE_H = o.noise; if (o.sweet) SWEET_H = o.sweet; }
 // human: 사람 타자 보정 켜기, hq/pull: 모드별(RULES) 맞힌 공 질 보정·스윗스팟 모으기
 export function evalSwing(mode, dt, ax, ay, pitchV = 40, ease = 1, human = false, hq = 0.85, pull = 0.35) {
   if (human && mode !== 'bunt') return evalPCI(mode, dt, ax, ay, pitchV, ease, hq, pull);
@@ -156,9 +159,12 @@ export function evalSwing(mode, dt, ax, ay, pitchV = 40, ease = 1, human = false
   if (qa < 0.3 && Math.random() < (human ? 0.55 : 0.7)) return { v: rand(18, 30), launch: ay > 0 ? rand(-20, 5) : human ? rand(18, 55) : rand(45, 75), spray: clamp(-(dt / M.W) * 40 + gauss() * 12, -78, 78), q: q * 0.5 };
   // 타구 속도: 메이저리그 인플레이 타구 분포(중앙값 ~146km/h, 상위10% ~167km/h, 최고 ~190km/h)에 맞춤
   const v = (31.5 + 20.2 * q) * M.pow + 0.1 * (pitchV - 35) + rand(-1.2, 1.2);
-  let launch = clamp(M.lift - (ay / M.R) * (human ? 32 : 42) + gauss() * (human ? 5 : 6), -25, 70);
-  // 사람 타자: 잘 맞힌 공(q>0.55)은 '스윗스팟(10~25°)' 쪽으로 살짝 모아줌 → 정타가 뜬공 아웃보다 라인드라이브가 되게
-  if (human && q > 0.55) launch += (15 - launch) * Math.min(pull, (q - 0.55) * 0.9);
+  // 발사각: 배트 원 중심이 공보다 아래(ay<0)면 공 아랫면을 때려 뜸, 위(ay>0)면 윗면을 때려 땅볼.
+  // 사람 타자는 원 중심에 맞히면 라인드라이브~뜬공 경계(LIFT_H), 원 반지름의 절반만큼 아래를 맞히면 확실한 뜬공이 되게 기울기를 키움
+  const lift = human ? (LIFT_H[mode] ?? M.lift) : M.lift;
+  let launch = clamp(lift - (ay / M.R) * (human ? LIFT_SLOPE_H : 42) + gauss() * (human ? LIFT_NOISE_H : 6), -25, 70);
+  // 사람 타자: 잘 맞힌 공(q>0.55)은 '스윗스팟' 쪽으로 살짝 모아줌
+  if (human && q > 0.55) launch += (SWEET_H - launch) * Math.min(pull, (q - 0.55) * 0.9);
   const spray = clamp(-(dt / M.W) * 52 - (ax / M.R) * 20 + 5 + gauss() * 12, -78, 78); // 우타자: 빠르면 당겨서 좌측(+x)
   return { v, launch, spray, q };
 }
@@ -171,8 +177,8 @@ export function evalSwing(mode, dt, ax, ay, pitchV = 40, ease = 1, human = false
 //  · 타이밍 빠름 → 당겨치기(좌측), 늦음 → 밀어치기(우측)
 // RX/RY = 반폭/반높이(m, 보통 난이도·리얼 기준), W = 타이밍 반폭(초). 모드·난이도 배율(ease)을 크기·타이밍 둘 다에 곱한다.
 export const PCI = {
-  contact: { RX: 0.215, RY: 0.16, W: 0.145, pow: 0.98, lift: 11 },
-  power: { RX: 0.165, RY: 0.12, W: 0.11, pow: 1.08, lift: 16 },
+  contact: { RX: 0.215, RY: 0.16, W: 0.145, pow: 0.98 },
+  power: { RX: 0.165, RY: 0.12, W: 0.11, pow: 1.08 }, // 발사각 기준은 LIFT_H(정타 12°·강타 21°)·LIFT_SLOPE_H 공통
   grow: 0.6, // 타이밍 정확도에 따른 판정 커서 확대 (tq=1 → ×1.6)
   P: 3, // 둥근 사각 지수 (2 = 타원, 클수록 사각형)
   qT: 0.85, qN: 0.45, qE: 0.4, // 타구 질 q = tq^qT · (1 - qN·n²): 타이밍이 주, 커서 중심 거리는 보조
@@ -207,8 +213,9 @@ export function evalPCI(mode, dt, ax, ay, pitchV = 40, ease = 1, hq = 0.85, pull
   // 커서 맨 가장자리(손잡이·배트 끝): 빗맞은 약한 타구
   if (J.n > 0.88 && Math.random() < 0.5) return { v: rand(19, 31), launch: J.ny > 0 ? rand(-18, 4) : rand(25, 58), spray: clamp(-(dt / J.W) * 40 + gauss() * 12, -78, 78), q: q * 0.5 };
   const v = (31.5 + 20.2 * q) * P.pow + 0.1 * (pitchV - 35) + rand(-1.2, 1.2);
-  let launch = clamp(P.lift - J.ny * 30 + gauss() * 5, -25, 70);
-  if (q > 0.55) launch += (15 - launch) * Math.min(pull, (q - 0.55) * 0.9); // 정타는 라인드라이브 쪽으로 모음
+  // 발사각: 커서 중심 = LIFT_H(정타 12°·강타 21°), 공이 커서 위쪽(ny<0)일수록 뜸, 아래쪽일수록 땅볼 (11-19 '뜬공 기준 명확' 피드백 값 그대로)
+  let launch = clamp((LIFT_H[mode] ?? 12) - J.ny * LIFT_SLOPE_H + gauss() * LIFT_NOISE_H, -25, 70);
+  if (q > 0.55) launch += (SWEET_H - launch) * Math.min(pull, (q - 0.55) * 0.9); // 정타는 스윗스팟 쪽으로 살짝 모음
   const spray = clamp(-(dt / J.W) * 46 - J.nx * 10 + 4 + gauss() * 10, -78, 78); // 빠르면 당겨서 좌측(+x)
   return { v, launch, spray, q };
 }
@@ -363,7 +370,7 @@ export const DEFAULT_SETTINGS = {
   size: 0, // 팀당 인원 제한 (0=자유, 1·2·3 = 1:1·2:2·3:3)
   lineup: 'humans', // humans: 사람만 돌아가며 타격 · nine: 9인 타순(빈 타순은 CPU)
   pitRot: 'inning', // inning: 이닝마다 투수 교대 · batter: 타자마다 교대 · fixed: 고정 · cpu: CPU 투수
-  fieldCtl: 'pos', // auto: 공 가까운 수비수로 자동 전환 · pos: 내 포지션만
+  fieldCtl: 'auto', // auto: 공 가까운 수비수로 자동 전환(기본, 11-19: 'pos' 기본이면 혼자하기 수비 때 투수만 잡혀 아무것도 못 함) · pos: 내 포지션만
   clubs: [0, 1],
   tod: 'night', // 경기 시간대: night | day
   hitEase: 1, // 사람 타격 난이도 0 쉬움 1 보통 2 어려움

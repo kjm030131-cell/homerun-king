@@ -214,7 +214,7 @@ function startLocal(name, o) {
   myId = 'me'; myName = name; bus.emit('ui:me', { id: myId }); // [audio] 내 타석 오르간(batterUp)용
   game.addPlayer('me', name);
   const me = game.players.get('me'); me.team = o.team; me.pos = o.pos;
-  game.applySettings({ mode: o.mode, innings: o.inn, derbyOuts: o.mode === 'derby' ? Math.max(5, o.inn * 3) : 10, diff: o.diff, clubs: o.clubs || [0, 1], pitRot: 'fixed', fieldCtl: o.fld || 'pos', tod: o.tod || 'night', hitEase: o.hitEase ?? 1, rules: o.rules }); // [gameplay] rules: 'real' | 'casual' (ui가 메뉴에서 넘겨줄 것)
+  game.applySettings({ mode: o.mode, innings: o.inn, derbyOuts: o.mode === 'derby' ? Math.max(5, o.inn * 3) : 10, diff: o.diff, clubs: o.clubs || [0, 1], pitRot: 'fixed', fieldCtl: o.fld || 'auto', tod: o.tod || 'night', hitEase: o.hitEase ?? 1, rules: o.rules }); // [gameplay] rules: 'real' | 'casual' (ui가 메뉴에서 넘겨줄 것)
   applyClubs(game.set.clubs);
   let last = performance.now();
   const tickFn = () => {
@@ -878,7 +878,7 @@ function updateWorld(dt) {
       if (contactL && batter.tr && swingInfo[s.p.id]) batter.tr = swingTrack(contactL);
       const bunt = !!s.bs || (role.batter && buntOn);
       const aimY = s.p && s.ph === 'pitching' && t > s.p.t0 ? s.p.ty - 0.8 : role.batter ? (aimPoint() || [0, 0.8])[1] - 0.8 : 0;
-      batter.a.batter(dt, { swingK, loadK, bunt, track: batter.tr, aimY, lookW: _v.set(0, 1.6, 18) });
+      batter.a.batter(dt, { swingK, loadK, bunt, track: batter.tr, aimY, lookW: _v.set(0, 1.6, 18), intro: !!(intro && camMode === 'intro'), who: s.bat && (s.bat.id || s.bat.name) });
       batter.p.bat.visible = true;
       // 스윙 잔상 + 바람 가르는 소리
       if (!bunt && swingK >= 0.3 && swingK <= 0.78) {
@@ -1205,16 +1205,19 @@ function smoothDamp(cur, target, vel, smoothTime, dt) {
 function tpsCam(me, tx, ty, tz, dt) {
   let yaw = Math.atan2(tx - me.x, tz - me.z);
   const dd = Math.hypot(tx - me.x, tz - me.z);
-  if (dd < 2.5) yaw = fcam.yaw ?? yaw; // 목표가 바로 옆이면 시점 고정 (빙글빙글 방지)
+  // [gameplay 11-19] 목표가 가까우면(뜬공이 내 머리 위 등) 홈→나 방향으로 고정: 화면 위쪽 = 외야로 항상 같고 빙글빙글 안 돎
+  if (dd < 4) yaw = Math.hypot(me.x, me.z) > 3 ? Math.atan2(me.x, me.z) : (fcam.yaw ?? yaw);
   if (fcam.yaw == null) fcam.yaw = yaw;
   let d = yaw - fcam.yaw; d = Math.atan2(Math.sin(d), Math.cos(d));
   fcam.yaw += d * Math.min(1, dt * 2.2);
   if (nowP() - fcam.dragT > 2.5) { fcam.yawOff *= Math.exp(-dt * 1.2); fcam.pitchOff *= Math.exp(-dt * 1.2); }
   const Y = fcam.yaw + fcam.yawOff;
-  const back = 6.2, up = 2.6 + fcam.pitchOff * 5;
+  // 공이 높이 뜰수록 뒤로·위로 빠져서 '내 선수 + 공'이 같이 보이게 (전엔 고개만 들어서 선수가 화면 밖으로 사라지고 관중석만 보였음)
+  const hb = clamp(ty, 0, 14);
+  const back = 6.2 + hb * 0.35, up = 2.6 + hb * 0.28 + fcam.pitchOff * 5;
   tPos.set(me.x - Math.sin(Y) * back, up, me.z - Math.cos(Y) * back);
-  const lookD = Math.min(Math.max(dd, 8), 30);
-  tLook.set(me.x + Math.sin(Y) * lookD, Math.max(0.6, ty * 0.5), me.z + Math.cos(Y) * lookD);
+  const lookD = clamp(dd, 5, 30);
+  tLook.set(me.x + Math.sin(Y) * lookD, 0.9 + hb * 0.32, me.z + Math.cos(Y) * lookD);
 }
 // [gameplay] 타구 직후 중계 카메라: 홈 뒤 높은 곳에 고정, 시선은 공이 화면 데드존(가로 ±50%, 위·아래 60%)을 벗어날 때만 따라감.
 // 데드존 안에선 배경이 멈춰 있어 공이 실제 속도로 보인다. 화각 고정 54°(줌으로 공 움직임이 상쇄되지 않게)
@@ -1296,7 +1299,8 @@ function updateCamera(dt, time) {
       // 투수 어깨 너머(3루 쪽 뒤): 와인드업·팔 스윙이 보이고 포수 미트까지 보이게
       // 조준할 땐 존이 크게 보이게, 던지는 순간부터는 뒤로 빠져서 투구 폼 + 공 궤적이 보이게
       // 투수 뒤 높은 곳: 투수 전신이 화면 아래, 홈플레이트·타자가 화면 가운데 (조준 ↔ 투구 동안 시점 고정)
-      if (ph === 'pitch') { tPos.set(0.85, 4.3, 30.2); tLook.set(0.12, 0.62, 6); fov = 23.5; k = 6; }
+      // [gameplay 11-19] 조준 중: 존이 화면 높이의 ~15%(전엔 ~5%)로 보이게 투수 머리 위로 가깝게 + 망원. 시선은 투수 머리 위로 지나가서 존을 안 가림
+      if (ph === 'pitch') { tPos.set(0.5, 3.2, 24.6); tLook.set(0.02, 0.8, 0); fov = 9.5; k = 6; }
       else { tPos.set(0.95, 4.4, 30.8); tLook.set(0.1, 0.58, 6); fov = 25; k = 4; }
       camMode = 'pitch';
     }
@@ -1325,7 +1329,7 @@ function updateCamera(dt, time) {
       // 3인칭: 내 선수 뒤에서 공(또는 낙구 지점) 쪽을 봄
       const me = fielders[role.fi].p.root.position;
       const tgt = landRing.visible ? landRing.position : ballMesh.visible ? ballPos : null;
-      if (tgt) tpsCam(me, tgt.x, Math.min(ballMesh.visible ? ballPos.y : 1, 12), tgt.z, dt);
+      if (tgt) tpsCam(me, tgt.x, ballMesh.visible ? ballPos.y : 1, tgt.z, dt);
       else tpsCam(me, 0, 1, 0, dt);
       k = 4.5; camMode = 'field'; fov = 56;
     } else if (role.fi >= 0 && fielders[role.fi] && (ph === 'live' || (ph === 'result' && S.b))) {
