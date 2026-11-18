@@ -13,7 +13,7 @@
 
 ## 2. 브랜치
 - `rebuild` = 통합 브랜치 (총괄 세션만 merge). `main`은 완성 전까지 건드리지 않는다 → 라이브 사이트는 v20 유지.
-- 파트별 브랜치: `rebuild/ui`, `rebuild/gameplay`, `rebuild/anim`, `rebuild/audio`, `rebuild/stadium`. 각 작업자는 **자기 브랜치에만 push**. `main`·`rebuild`에 직접 push 금지, force push 금지.
+- 파트별 브랜치: `rb-ui`, `rb-gameplay`, `rb-anim`, `rb-audio`, `rb-stadium`. 각 작업자는 **자기 브랜치에만 push**. `main`·`rebuild`에 직접 push 금지, force push 금지.
 - push 하면 `qa.yml`(빌드+문법+테스트)이 돈다. `gh run watch`로 통과 확인 후 보고.
 - 이 클라우드 환경은 npm 설치가 막혀 있다(esbuild·three·playwright 없음). `node --test tests/*.test.mjs`는 로컬에서 되고, 빌드 검증은 CI(qa)로 한다.
 
