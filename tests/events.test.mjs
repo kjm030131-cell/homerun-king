@@ -41,6 +41,14 @@ test('이벤트 공통 필드(e, at)와 주요 데이터 필드', () => {
   for (const k of ['kind', 'outs']) assert.ok(k in R.seen.get('out'), `out.${k}`);
   for (const k of ['i', 'pos', 'to']) assert.ok(k in R.seen.get('throw'), `throw.${k}`);
   for (const k of ['sc', 'win']) assert.ok(k in R.seen.get('gameEnd'), `gameEnd.${k}`);
+  // 사운드 파트 요청 필드
+  for (const k of ['pid', 'q', 'ev', 'la', 'mode', 'foul']) assert.ok(k in c, `contact.${k}`);
+  for (const k of ['b', 's', 'o', 'on', 'sc']) assert.ok(k in w, `windup.${k}`);
+  for (const k of ['pitch', 'kmh', 'x', 'z', 'dive']) assert.ok(k in R.seen.get('catch'), `catch.${k}`);
+  for (const n of ['out', 'safe']) for (const k of ['call', 'x', 'z', 'k']) assert.ok(k in R.seen.get(n), `${n}.${k}`);
+  for (const k of ['dist', 'n', 'walkoff']) assert.ok(k in R.seen.get('hr'), `hr.${k}`);
+  assert.ok(R.all.some((e) => e.e === 'catch' && e.pitch === 1), '포수 투구 포구 이벤트');
+  assert.ok('rules' in R.seen.get('modeChange'));
 });
 
 test('투구 전 이벤트(windup·release)에 코스가 없음 — 공 위치 미리보기 금지', () => {

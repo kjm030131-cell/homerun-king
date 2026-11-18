@@ -44,7 +44,7 @@ UI·애니메이션·사운드는 이 이벤트를 **구독만** 한다(`bus.on(
 ### 투구·타격
 | 이벤트 | 언제 | 데이터 |
 |---|---|---|
-| `windup` | 투수가 투구 시작 | `pid, rel, arr, human, set, kick, peak, dur` — **코스(tx,ty)·구종 없음** (공 위치 미리보기 금지) |
+| `windup` | 투수가 투구 시작 | `pid, rel, arr, human, set, kick, peak, dur`, 상황 `b, s, o`(볼·스트라이크·아웃), `on:[1루,2루,3루]`(1 = 주자), `sc:[원정,홈]` — **코스(tx,ty)·구종 없음** (공 위치 미리보기 금지) |
 | `release` | `at = rel` 순간 | `pid, type`(FB·TS·SL·CB·CH·SP·BP), `kmh, arr, T, pf`(1 = 퍼펙트 게이지 투구) |
 | `swing` | 스윙 판정 순간(서버) | `pid, mode`(contact·power·bunt), `human, dt`(ms, 음수 = 빠름), `bid`(타자 id, CPU면 null) |
 | `miss` | 헛스윙 | `pid, mode, dt, why`(early·late·off = 타이밍은 맞았는데 위치 빗나감), `human` |
@@ -56,6 +56,8 @@ UI·애니메이션·사운드는 이 이벤트를 **구독만** 한다(`bus.on(
 `contact` 데이터 (맞는 순간 타격감용):
 | 필드 | 뜻 |
 |---|---|
+| `foul` | 1 = 파울 타구(빗맞은 파울/파울팁 후보) |
+| `pid, q, ev, la, mode` | 투구 id · 맞힌 질 · 타구 속도 · 발사각 · 스윙 종류 |
 | `grade` | `perfect`(q>0.82) · `good`(>0.55) · `ok`(>0.3) · `weak` · `tip`(파울 타구) · `bunt` |
 | `kind` | `grounder`(<10°) · `liner`(10~25°) · `fly`(25~50°) · `popup` · `foul` · `bunt` |
 | `pow` | 0~1 연출 세기(타구 속도·등급). 히트스톱 길이·화면 흔들림·타격음 세기·관중 반응에 그대로 쓰면 됨 |
@@ -68,11 +70,11 @@ UI·애니메이션·사운드는 이 이벤트를 **구독만** 한다(`bus.on(
 ### 수비·주루
 | 이벤트 | 언제 | 데이터 |
 |---|---|---|
-| `catch` | 포구 성공 | `i, pos, fly`(1 = 노바운드 타구), `dive, jump, thrown`(1 = 송구 받음), `robbed`(홈런 강탈), `x, y, z, human` |
+| `catch` | 포구 성공. **투구가 포수 미트에 들어갈 때도**(`pitch:1`, 안 맞은 공의 도착 시각 `arr`, 사구 제외) | `pitch`(1 = 포수가 투구 받음), `kmh`(투구 구속, 타구면 타구 속도), `i, pos, fly`(1 = 노바운드 타구), `dive, jump, thrown`(1 = 송구 받음), `robbed`(홈런 강탈), `x, y, z, human` |
 | `throw` | 송구 | `i, pos, from:[x,z], to:[x,z], base`(-1 = 베이스 아님/커트맨), `T`(예상 비행 시간), `pw`(0~1 세기), `relay`(1 = 커트맨에게), `pick`(1 = 견제구) |
 | `tag` | 태그 아웃 | `i, pos, rid, base` (`out`보다 먼저 옴) |
-| `out` | 아웃 | `kind`(k·fly·force·tag·pick·cs = 도루 저지), `outs`(아웃 뒤 아웃카운트), `dp`(이 플레이 아웃 수, 2 = 병살), `rid, base, i, pos, name`, 삼진이면 `looking, bunt, bid` |
-| `safe` | 세이프 | 접전 도착 `rid, base, x, z, close:1` / 견제 귀루 `pick:1, base` / 도루 성공 `steal:1, base` |
+| `out` | 아웃 | `call:'out'`, `k`(베이스 1~4, 삼진·뜬공은 0), `x, z`(판정 위치), `kind`(k·fly·force·tag·pick·cs = 도루 저지), `outs`(아웃 뒤 아웃카운트), `dp`(이 플레이 아웃 수, 2 = 병살), `rid, base, i, pos, name`, 삼진이면 `looking, bunt, bid` |
+| `safe` | 세이프 | 공통 `call:'safe', k`(베이스), `x, z` / 접전 도착 `rid, base, x, z, close:1` / 견제 귀루 `pick:1, base` / 도루 성공 `steal:1, base` |
 | `steal` | 도루 시작 | `rid, from, to, cpu` |
 | `slide` | 슬라이딩 시작 | `rid, base, back`(1 = 귀루 슬라이딩) |
 | `dive` | 다이빙 시작 | `i, pos, dx, dz`(방향 단위벡터), `human` |
@@ -80,11 +82,11 @@ UI·애니메이션·사운드는 이 이벤트를 **구독만** 한다(`bus.on(
 ### 점수·경기
 | 이벤트 | 언제 | 데이터 |
 |---|---|---|
-| `hr` | 홈런 확정(득점 전) | `dist, n`(타점), `name, bid, ev, la, x, z, before`(홈런 전 점수) / 더비: `derby:1` |
+| `hr` | 홈런 확정(득점 전) | `dist, n`(타점), `walkoff`(1 = 끝내기 홈런), `name, bid, ev, la, x, z, before`(홈런 전 점수) / 더비: `derby:1` |
 | `score` | 1점마다 | `half, sc:[원정,홈], rid, name, lead`(득점 뒤 점수 차, 공격팀 기준), `go`(1 = 앞서가는 점수 = 역전/결승점 후보), `tie`(1 = 동점), `walkoff` |
 | `inningEnd` | 이닝 초/말 끝 | `inning, half, runs, sc` |
 | `gameEnd` | 경기 끝 | `sc, win`(away·home·null), `walkoff, mercy`(콜드), `inning, rules` / 더비: `derby, best, hr` |
-| `modeChange` | 경기 시작(`start:1`) · 방 설정에서 규칙 변경 | `rules`(real·casual), `mode`(game·derby), `innings` |
+| `modeChange` | 경기 시작(`start:1`) · 방 설정에서 규칙 변경 | `rules`(real·casual, 항상 있음), `mode`(game·derby), `innings` |
 
 ### 추가 이벤트 (최소 목록 밖, 있으면 편한 것)
 | 이벤트 | 데이터 |

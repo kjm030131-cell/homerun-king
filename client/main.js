@@ -6,7 +6,7 @@ import { UnrealBloomPass } from 'three/addons/postprocessing/UnrealBloomPass.js'
 import { OutputPass } from 'three/addons/postprocessing/OutputPass.js';
 import {
   Game, HIT_EASE, pitchPos, integrate, fenceR, BASES, MOUND, ZONE, PITCHES, PITCH_KEYS, POS_KO, HOME_SPOT, FOUL, SPRINT_SPEED, FIELD_SPEED,
-  RELEASE, WINDUP, SWING, BALL_R, runnerXZ,
+  RELEASE, WINDUP, SWING, BALL_R, runnerXZ, RULES, // [gameplay] RULES: 모드별 퍼펙트 투구 구간
 } from '../shared/sim.js';
 import { Player, UNIFORMS, setFaceTextures } from './player.js';
 import { loadSkin, attachSkin, syncAllSkins } from './skinned.js';
@@ -1173,6 +1173,7 @@ function swingReport(dt, a, p, M, contact) {
 const swingInfo = {};
 // 투구 게이지
 const GAUGE_UP = 0.85, GAUGE_MAX = 1.15;
+const pBand = () => (RULES[S && S.ru] || RULES.real).perfectPitch; // [gameplay]
 function gaugeLevel(t) {
   const u = t / GAUGE_UP * GAUGE_MAX;
   if (u <= GAUGE_MAX) return u;
@@ -1192,9 +1193,10 @@ function pitchClick() {
 }
 function sendPitch(lv) {
   net.send({ t: 'pitch', type: gauge.type, tx: gauge.aim[0], ty: gauge.aim[1], power: lv });
-  const txt = lv > 1.0 ? '과투구! 제구 흔들림' : lv >= 0.84 && lv <= 0.97 ? '퍼펙트 투구!' : lv < 0.6 ? '힘 빠진 공' : '좋아';
-  feedback(`${txt} (${Math.round(lv * 100)}%)`, lv >= 0.84 && lv <= 0.97 ? '#4fd18b' : lv > 1 ? '#ff8a80' : '#ffcf3f');
-  if (lv >= 0.84 && lv <= 0.97) sfx.perfect();
+  const [pb0, pb1] = pBand(), pf = lv >= pb0 && lv <= pb1; // [gameplay] 모드별 퍼펙트 구간
+  const txt = lv > 1.0 ? '과투구! 제구 흔들림' : pf ? '퍼펙트 투구! 공 끝 살아있다' : lv < 0.6 ? '힘 빠진 공' : '좋아';
+  feedback(`${txt} (${Math.round(lv * 100)}%)`, pf ? '#4fd18b' : lv > 1 ? '#ff8a80' : '#ffcf3f');
+  if (pf) sfx.perfect();
   gauge = null;
 }
 $('buntBtn').onpointerdown = (e) => { e.stopPropagation(); toggleBunt(); };
@@ -1960,8 +1962,8 @@ function updateHUD() {
   if (role.batter && s.ph === 'pitching' && s.p && !swungLocal[s.p.id]) {
     const p = s.p, sv = (simNow() - p.t0) / p.T;
     const bunt = buntOn || s.bs;
-    // 쉬움 난이도: 공이 60% 넘게 날아오면 들어올 자리에 작은 점 (막판 보정용)
-    const showLoc = bunt || cfg.assist === 2 ? sv > (bunt ? 0.05 : 0.3) : (cfg.assist > 0 && (s.he ?? 0) === 0 && sv > 0.6);
+    // [gameplay] 공이 들어올 자리 표시(assistDot)는 '공 위치 미리보기 금지' 규칙 위반이라 끔 — 쉬움은 판정 폭·자석 보정으로
+    const showLoc = false;
     if (showLoc && sv < 1.1) {
       assistDot.visible = true; assistDot.position.set(p.tx, p.ty, -0.01); assistDot.lookAt(camera.position);
       const op = clamp((sv - (cfg.assist === 2 ? 0.3 : 0.6)) / 0.15, 0, 1);
@@ -1972,7 +1974,8 @@ function updateHUD() {
     if (cfg.assist === 2 && sv > 0 && sv < 1.15) {
       const R = SWING[bunt ? 'bunt' : 'contact'].R * hitEase();
       const rr = R * 0.6 + Math.max(0, 1 - sv) * 0.5;
-      timeRing.visible = true; timeRing.position.set(p.tx, p.ty, -0.015); timeRing.scale.setScalar(rr); timeRing.lookAt(camera.position);
+      const ap = aimPoint() || [0, 0.8]; // [gameplay] 타이밍 링은 공 자리 대신 내 배트 원 위에 (위치 미리보기 금지)
+      timeRing.visible = true; timeRing.position.set(ap[0], ap[1], -0.015); timeRing.scale.setScalar(rr); timeRing.lookAt(camera.position);
       timeRing.material.color.set(pciHot ? '#4fd18b' : '#ffffff'); timeRing.material.opacity = clamp(sv * 1.5, 0, 0.6);
     }
   }
@@ -2004,7 +2007,7 @@ function updateHUD() {
     const el = nowP() - gauge.t0, lv = gaugeLevel(el);
     const g = $('gauge'), H = g.clientHeight - 8;
     g.querySelector('.fill').style.height = `${clamp(lv / 1.15, 0, 1) * H}px`;
-    g.querySelector('.band').style.cssText = `bottom:${0.84 / 1.15 * H + 4}px;height:${(0.97 - 0.84) / 1.15 * H}px`;
+    { const [b0, b1] = pBand(); g.querySelector('.band').style.cssText = `bottom:${b0 / 1.15 * H + 4}px;height:${(b1 - b0) / 1.15 * H}px`; } // [gameplay]
     g.querySelector('.over').style.height = `${(0.15 / 1.15) * H + 4}px`;
     $('gaugeLbl').textContent = `~${Math.round(PITCHES[gauge.type].v * (0.86 + 0.15 * Math.min(1, lv)))}km`;
     if (el > GAUGE_UP * 2) sendPitch(0.35);
