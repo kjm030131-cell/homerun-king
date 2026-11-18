@@ -6,7 +6,7 @@ import { UnrealBloomPass } from 'three/addons/postprocessing/UnrealBloomPass.js'
 import { OutputPass } from 'three/addons/postprocessing/OutputPass.js';
 import {
   Game, HIT_EASE, pitchPos, integrate, fenceR, BASES, MOUND, ZONE, PITCHES, PITCH_KEYS, POS_KO, HOME_SPOT, FOUL, SPRINT_SPEED, FIELD_SPEED,
-  RELEASE, WINDUP, SWING, BALL_R, runnerXZ,
+  RELEASE, WINDUP, SWING, BALL_R, runnerXZ, RULES, // [gameplay] RULES: 모드별 퍼펙트 투구 구간
 } from '../shared/sim.js';
 import { Player, UNIFORMS, setFaceTextures } from './player.js';
 import { loadSkin, attachSkin, syncAllSkins } from './skinned.js';
@@ -18,6 +18,7 @@ import { Animator, PITCH_DUR, PITCH_RELEASE_K, THROW_DUR, swingTrack, pitchK } f
 import { buildStadium, glowTex } from './stadium.js';
 import { FX } from './fx.js';
 import { sfx, audio, setVolume, crowdAmbience } from './audio.js';
+import { bus } from './core/bus.js'; // [gameplay] 게임 이벤트 → bus
 
 const OFFLINE = !!window.HR_OFFLINE;
 const $ = (id) => document.getElementById(id);
@@ -189,7 +190,7 @@ let zoneMesh = null;
 scene.add(zoneGroup);
 const pci = new THREE.Group();
 let pciHot = false;
-const hitEase = () => HIT_EASE[(S && S.he) ?? 0] || 1;
+const hitEase = () => (S && S.hx) || HIT_EASE[(S && S.he) ?? 0] || 1; // [gameplay] hx = 서버가 쓰는 실제 판정 폭(모드·난이도 반영)
 const mode2 = () => (buntOn || (S && S.bs) ? 'bunt' : keys.f ? 'power' : 'contact');
 // 배트 중심(PCI): 얇은 타원 테두리 + 아주 옅은 채움 + 가운데 점 하나. 타이밍 맞을 때만 테두리가 초록으로
 const pciOuter = new THREE.Mesh(new THREE.RingGeometry(0.93, 1, 64), new THREE.MeshBasicMaterial({ color: '#ffffff', transparent: true, opacity: 0.55, depthTest: false, side: THREE.DoubleSide }));
@@ -271,14 +272,14 @@ function startLocal(name, o) {
   myId = 'me'; myName = name;
   game.addPlayer('me', name);
   const me = game.players.get('me'); me.team = o.team; me.pos = o.pos;
-  game.applySettings({ mode: o.mode, innings: o.inn, derbyOuts: o.mode === 'derby' ? Math.max(5, o.inn * 3) : 10, diff: o.diff, clubs: o.clubs || [0, 1], pitRot: 'fixed', fieldCtl: o.fld || 'pos', tod: o.tod || 'night', hitEase: o.hitEase ?? 1 });
+  game.applySettings({ mode: o.mode, innings: o.inn, derbyOuts: o.mode === 'derby' ? Math.max(5, o.inn * 3) : 10, diff: o.diff, clubs: o.clubs || [0, 1], pitRot: 'fixed', fieldCtl: o.fld || 'pos', tod: o.tod || 'night', hitEase: o.hitEase ?? 1, rules: o.rules }); // [gameplay] rules: 'real' | 'casual' (ui가 메뉴에서 넘겨줄 것)
   applyClubs(game.set.clubs);
   let last = performance.now();
   const tickFn = () => {
     const t = performance.now(); const dt = Math.min(0.1, (t - last) / 1000); last = t;
     if (dt <= 0) return;
     game.tick(dt);
-    handleMsg(game.snapshot());
+    handleMsg(game.snapshot(true)); // [gameplay] true: 이벤트(ev)도 같이
   };
   const iv = setInterval(tickFn, 1000 / 60);
   net = { send: (m) => game.handle('me', m), close: () => clearInterval(iv), local: true, game };
@@ -334,7 +335,7 @@ function handleMsg(m) {
     case 'chat': addChat(m.name, m.text, m.team); break;
     case 'kicked': toTitle(); showErr('방장이 내보냈어'); break;
     case 'toast': toast(m.text); break;
-    case 's': onSnap(m); break;
+    case 's': onSnap(m); if (m.ev) for (const x of m.ev) bus.emit(x.e, x); break; // [gameplay] 게임 이벤트 연결 지점 (docs/rebuild/events.md)
   }
 }
 
@@ -1118,6 +1119,7 @@ function doSwing(mode) {
   const ms = Math.round(dt * 1000);
   const tm = Math.abs(dt) < 0.025 ? '완벽한 타이밍' : dt < 0 ? `${-ms}ms 빠름` : `${ms}ms 늦음`;
   if (mode !== 'bunt') swingReport(dt, a, p, M, contact);
+  bus.emit('localSwing', { pid: p.id, mode, contact, dt: Math.round(dt * 1000), q: contact ? (mode === 'bunt' ? 0.3 : Math.pow(1 - Math.abs(dt) / M.W, 0.5) * Math.pow(1 - d / M.R, 0.6)) : 0 }); // [gameplay] 내 스윙 즉시 피드백(서버 contact/miss는 핑만큼 늦게 옴)
   if (contact) {
     const q = mode === 'bunt' ? 0.3 : Math.pow(1 - Math.abs(dt) / M.W, 0.5) * Math.pow(1 - d / M.R, 0.6);
     contactFreeze = { pid: p.id, until: nowP() + 0.35, pos: [p.tx, p.ty] };
@@ -1172,6 +1174,7 @@ function swingReport(dt, a, p, M, contact) {
 const swingInfo = {};
 // 투구 게이지
 const GAUGE_UP = 0.85, GAUGE_MAX = 1.15;
+const pBand = () => (RULES[S && S.ru] || RULES.real).perfectPitch; // [gameplay]
 function gaugeLevel(t) {
   const u = t / GAUGE_UP * GAUGE_MAX;
   if (u <= GAUGE_MAX) return u;
@@ -1191,9 +1194,10 @@ function pitchClick() {
 }
 function sendPitch(lv) {
   net.send({ t: 'pitch', type: gauge.type, tx: gauge.aim[0], ty: gauge.aim[1], power: lv });
-  const txt = lv > 1.0 ? '과투구! 제구 흔들림' : lv >= 0.84 && lv <= 0.97 ? '퍼펙트 투구!' : lv < 0.6 ? '힘 빠진 공' : '좋아';
-  feedback(`${txt} (${Math.round(lv * 100)}%)`, lv >= 0.84 && lv <= 0.97 ? '#4fd18b' : lv > 1 ? '#ff8a80' : '#ffcf3f');
-  if (lv >= 0.84 && lv <= 0.97) sfx.perfect();
+  const [pb0, pb1] = pBand(), pf = lv >= pb0 && lv <= pb1; // [gameplay] 모드별 퍼펙트 구간
+  const txt = lv > 1.0 ? '과투구! 제구 흔들림' : pf ? '퍼펙트 투구! 공 끝 살아있다' : lv < 0.6 ? '힘 빠진 공' : '좋아';
+  feedback(`${txt} (${Math.round(lv * 100)}%)`, pf ? '#4fd18b' : lv > 1 ? '#ff8a80' : '#ffcf3f');
+  if (pf) sfx.perfect();
   gauge = null;
 }
 $('buntBtn').onpointerdown = (e) => { e.stopPropagation(); toggleBunt(); };
@@ -1959,8 +1963,8 @@ function updateHUD() {
   if (role.batter && s.ph === 'pitching' && s.p && !swungLocal[s.p.id]) {
     const p = s.p, sv = (simNow() - p.t0) / p.T;
     const bunt = buntOn || s.bs;
-    // 쉬움 난이도: 공이 60% 넘게 날아오면 들어올 자리에 작은 점 (막판 보정용)
-    const showLoc = bunt || cfg.assist === 2 ? sv > (bunt ? 0.05 : 0.3) : (cfg.assist > 0 && (s.he ?? 0) === 0 && sv > 0.6);
+    // [gameplay] 공이 들어올 자리 표시(assistDot)는 '공 위치 미리보기 금지' 규칙 위반이라 끔 — 쉬움은 판정 폭·자석 보정으로
+    const showLoc = false;
     if (showLoc && sv < 1.1) {
       assistDot.visible = true; assistDot.position.set(p.tx, p.ty, -0.01); assistDot.lookAt(camera.position);
       const op = clamp((sv - (cfg.assist === 2 ? 0.3 : 0.6)) / 0.15, 0, 1);
@@ -1971,7 +1975,8 @@ function updateHUD() {
     if (cfg.assist === 2 && sv > 0 && sv < 1.15) {
       const R = SWING[bunt ? 'bunt' : 'contact'].R * hitEase();
       const rr = R * 0.6 + Math.max(0, 1 - sv) * 0.5;
-      timeRing.visible = true; timeRing.position.set(p.tx, p.ty, -0.015); timeRing.scale.setScalar(rr); timeRing.lookAt(camera.position);
+      const ap = aimPoint() || [0, 0.8]; // [gameplay] 타이밍 링은 공 자리 대신 내 배트 원 위에 (위치 미리보기 금지)
+      timeRing.visible = true; timeRing.position.set(ap[0], ap[1], -0.015); timeRing.scale.setScalar(rr); timeRing.lookAt(camera.position);
       timeRing.material.color.set(pciHot ? '#4fd18b' : '#ffffff'); timeRing.material.opacity = clamp(sv * 1.5, 0, 0.6);
     }
   }
@@ -2003,7 +2008,7 @@ function updateHUD() {
     const el = nowP() - gauge.t0, lv = gaugeLevel(el);
     const g = $('gauge'), H = g.clientHeight - 8;
     g.querySelector('.fill').style.height = `${clamp(lv / 1.15, 0, 1) * H}px`;
-    g.querySelector('.band').style.cssText = `bottom:${0.84 / 1.15 * H + 4}px;height:${(0.97 - 0.84) / 1.15 * H}px`;
+    { const [b0, b1] = pBand(); g.querySelector('.band').style.cssText = `bottom:${b0 / 1.15 * H + 4}px;height:${(b1 - b0) / 1.15 * H}px`; } // [gameplay]
     g.querySelector('.over').style.height = `${(0.15 / 1.15) * H + 4}px`;
     $('gaugeLbl').textContent = `~${Math.round(PITCHES[gauge.type].v * (0.86 + 0.15 * Math.min(1, lv)))}km`;
     if (el > GAUGE_UP * 2) sendPitch(0.35);
