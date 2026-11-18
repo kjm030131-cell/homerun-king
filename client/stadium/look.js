@@ -98,7 +98,10 @@ export function createLook(renderer, scene, camera) {
     const ms = q === 'high' ? 4096 : 2048;
     key.shadow.mapSize.set(ms, ms);
     if (key.shadow.map) { key.shadow.map.dispose(); key.shadow.map = null; }
-    bloom.enabled = q !== 'low';
+    // [perf] 블룸(후처리)은 '높음'에서만: 켜지면 화면 전체를 4x MSAA·HalfFloat 버퍼에 한 번 더 그리고 블룸 밉 5단계를 돌림 →
+    //        맥북에어 같은 내장 GPU에서 가장 큰 비용. '중간'은 캔버스 기본 안티에일리어싱으로 바로 그림
+    bloom.enabled = q === 'high';
+    composer.setPixelRatio(renderer.getPixelRatio());
     useEnv = q !== 'low';
     applyEnv();
   }

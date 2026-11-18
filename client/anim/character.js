@@ -63,6 +63,16 @@ if (uTintOn > 0.5) {
   };
   return m;
 }
+// 먼 거리용: 같은 유니폼 셰이더(uniform 공유)에서 노멀맵·거칠기/금속 맵만 뺀 복제
+function lightMaterial(m) {
+  const U = m.userData.uni;
+  const src = m.clone();
+  src.normalMap = null; src.roughnessMap = null; src.metalnessMap = null; src.roughness = 0.85; src.metalness = 0;
+  const lm = bodyMaterial(src, U.uRest.value, U);
+  lm.side = THREE.FrontSide;
+  lm.customProgramCacheKey = () => 'hrChar1lo' + (U.uMaskOn.value ? 'm' : '');
+  return lm;
+}
 function uniforms(restMatrix, lib) {
   const T = BODY.tint, H = BODY.height;
   return {
@@ -156,6 +166,7 @@ export class Character {
       const U = uniforms(info.rest, lib);
       const src = Array.isArray(mesh.material) ? mesh.material[0] : mesh.material;
       mesh.material = bodyMaterial(src, info.rest, U);
+      mesh.material.side = THREE.FrontSide; // Tripo 원본이 양면(doubleSided) → 뒷면까지 그리던 것 제거(조각 셰이더·그림자 부담 절반)
       this.mats.push(mesh.material);
       mesh.castShadow = true; mesh.receiveShadow = false;
       // 고정 경계구(애니메이션으로 팔다리가 뻗어도 잘리지 않게 넉넉히) → 일반 절두체 컬링 그대로 사용
@@ -164,9 +175,12 @@ export class Character {
     // 저폴리(먼 거리): 같은 정점 버퍼 + 줄인 인덱스, 같은 뼈대
     this.hi = this.meshes[0] || null; this.lo = null;
     if (this.hi && lib.loGeo) {
-      const lo = new THREE.SkinnedMesh(lib.loGeo, this.hi.material);
+      // 먼 선수: 저폴리 + 가벼운 재질(노멀·거칠기 맵 없음, 유니폼 색 uniform 은 공유) + 그림자 없음
+      const loMat = lightMaterial(this.hi.material);
+      this.mats.push(loMat);
+      const lo = new THREE.SkinnedMesh(lib.loGeo, loMat);
       lo.name = 'bodyLo'; lo.position.copy(this.hi.position); lo.quaternion.copy(this.hi.quaternion); lo.scale.copy(this.hi.scale);
-      lo.castShadow = true; lo.visible = false; lo.boundingSphere = this.hi.boundingSphere.clone();
+      lo.castShadow = false; lo.visible = false; lo.boundingSphere = this.hi.boundingSphere.clone();
       this.hi.parent.add(lo); lo.bind(this.hi.skeleton, this.hi.bindMatrix);
       this.lo = lo;
     }
@@ -324,8 +338,10 @@ export class Character {
   // 유니폼 색. colors: { jersey, pants, sock, (num, accent, word, …: 데칼용) }
   setUniform(colors, num = this._num, name = this._name) {
     this._num = num; this._name = name;
+    const done = new Set(); // 저폴리 재질은 같은 uniform 을 공유 → 데칼 텍스처를 두 번 만들지 않게
     for (const m of this.mats) {
       const U = m.userData.uni;
+      if (done.has(U)) continue; done.add(U);
       if (colors.jersey) U.uJersey.value.set(colors.jersey);
       if (colors.pants) U.uPants.value.set(colors.pants);
       if (colors.sock) U.uSock.value.set(colors.sock);

@@ -4,9 +4,9 @@
 
 ## 0. 현재 상태 (2026-11-18 밤)
 - **몸 들어옴**: `assets-src/models/player.glb`(Tripo 리깅, `mixamorig:*` 뼈 53개, 삼각형 1.8만) → `public/assets/models/player.glb`(텍스처 2048/1024 JPEG, 8.9MB → 2.8MB).
-- **클립 15개 들어옴** (`public/assets/models/anim/`): idle, ready, run(임시), sprint, batStance, swing, powerSwing, buntStance, pitch, dive, slide, catcherSquat, celebrate, disappointed, umpireCall.
+- **클립 16개 들어옴** (`public/assets/models/anim/`): idle, ready, run(임시), sprint, throw(임시), batStance, swing, powerSwing, buntStance, pitch, dive, slide, catcherSquat, celebrate, disappointed, umpireCall.
 - **필수 5개가 다 있어서 새 캐릭터로 바뀜.** 단 `run` 은 Running 을 받기 전까지 Fast_Run 을 같이 씀(manifest.json 에서 원래 속도 5.66m/s → 느리게 뛰면 재생도 느려짐).
-- 없는 것: throw(→ idle 로 대체), catchHigh·catchLow(→ ready), umpireSafe(→ idle). 필수 클립이 빠져도 `?animlab` 은 열리게 바꿔 둠.
+- 없는 것: catchHigh·catchLow(→ ready + 글러브 IK), umpireSafe(→ idle). 필수 클립이 빠져도 `?animlab` 은 열리게 바꿔 둠.
 - 장비(모자·헬멧·배트·글러브) GLB 아직 없음 → 단순 대체 장비.
 
 ### 새 변환 방식: `tools/mixamo-retarget.py` (Blender 필요 없음, Python + numpy)
@@ -32,12 +32,19 @@
 | slide | Running_Slide | 전체(발부터, 착지 ≈ 0.3초) |
 | celebrate | Victory | 8.5초 반복 |
 | disappointed | Defeated | 전체 |
+| throw | Baseball_Pitching(5.2초 버전) | 1.45~2.75초(스트라이드 → 릴리스 → 팔로스루). 야수 송구 클립 받기 전 임시 |
 
 쓰지 않고 원본만 둔 것: Baseball_Hit_2, Pitching(5.2초 버전), Idle_1/Idle_2(타석 대기 변형), Strike(타자가 타석 벗어났다 돌아옴), Step_In, Walk_In/Out, Milling_Idle(타석 밖 대기, 21초). 필요하면 clips.json 에 한 줄 추가.
 
 ### 다음에 받아야 할 Mixamo (아래 3-3 표 이름 그대로, `assets-src/mixamo/` 에 두고 clips.json 에 등록)
 - `run`(Running, In Place 체크) — 지금은 Fast_Run 임시
-- `throw`(Throw / Goalkeeper Overhand Throw), `catchHigh`(Goalkeeper Catch), `catchLow`(Goalkeeper Scoop), (선택) `umpireSafe`
+- `throw`(Throw / Goalkeeper Overhand Throw — 지금은 투구 동작 잘라 씀), `catchHigh`(Goalkeeper Catch), `catchLow`(Goalkeeper Scoop), (선택) `umpireSafe`
+
+### 렉 줄이기 (11-18 배포 후 '렉 심함' 피드백)
+- 선수 재질 단면(FrontSide): Tripo 원본이 양면이라 뒷면까지 그리던 것 제거.
+- 먼 선수(26m+, 저폴리): 노멀·거칠기 맵 없는 가벼운 재질 + 그림자 안 그림. 유니폼 색 uniform 은 공유(데칼 텍스처도 선수당 1장으로).
+- 블룸 후처리는 그래픽 '높음'에서만(`client/stadium/look.js`, [perf] 태그). '중간'(기본)은 4x MSAA HalfFloat 후처리 버퍼 + 블룸 5단계를 건너뛰고 바로 그림 → 밤 경기 조명 번짐이 약해짐. 원하면 설정에서 '높음'.
+- 실측은 맥에서: 오른쪽 위 fps (전/후 비교). 그래도 낮으면 다음 후보 = 리플레이 매 프레임 기록 할당, 선수 그림자 전부 끄기, 몸 삼각형 더 줄이기.
 
 ## 1. 구조
 
