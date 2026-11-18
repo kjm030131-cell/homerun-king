@@ -157,7 +157,7 @@ export function voice(o = {}) {
     for (let i = 0; i < active.length; i++) if (active[i].prio <= prio && (w < 0 || active[i].prio < active[w].prio || (active[i].prio === active[w].prio && active[i].t0 < active[w].t0))) w = i;
     if (w < 0) { stats.dropped++; return null; }
     const v = active[w]; active.splice(w, 1);
-    try { v.out.gain.setTargetAtTime(0, now, 0.015); setTimeout(() => { try { v.out.disconnect(); } catch { } }, 120); } catch { }
+    try { v.out.gain.setTargetAtTime(0, now, 0.015); setTimeout(() => v.free(), 120); } catch { }
   }
   const G = E.groups[o.group || 'sfx'];
   const dist = Math.max(0, o.dist || 0);
@@ -167,18 +167,21 @@ export function voice(o = {}) {
   const inp = a.createGain(); inp.gain.value = (o.gain ?? 1);
   const out = a.createGain(); out.gain.value = att;
   let node = inp;
-  if (dist > 18) { const lp = a.createBiquadFilter(); lp.type = 'lowpass'; lp.frequency.value = Math.max(1400, 16000 / (1 + (dist - 18) / 22)); lp.Q.value = 0.5; node.connect(lp); node = lp; }
+  const nodes = [inp, out]; // [qa] 끝나면 전부 끊음 — 전엔 out 만 끊어서 패너·잔향 게인이 그룹 버스에 계속 연결된 채 남았음(Chrome 은 출력 연결이 있는 노드를 안 치움 → 소리마다 노드 누적)
+  if (dist > 18) { const lp = a.createBiquadFilter(); lp.type = 'lowpass'; lp.frequency.value = Math.max(1400, 16000 / (1 + (dist - 18) / 22)); lp.Q.value = 0.5; node.connect(lp); node = lp; nodes.push(lp); }
   node.connect(out);
   let fin = out;
-  if (o.pan && a.createStereoPanner) { const p = a.createStereoPanner(); p.pan.value = Math.max(-1, Math.min(1, o.pan)); out.connect(p); fin = p; }
+  if (o.pan && a.createStereoPanner) { const p = a.createStereoPanner(); p.pan.value = Math.max(-1, Math.min(1, o.pan)); out.connect(p); fin = p; nodes.push(p); }
   const wetAmt = Math.min(0.95, (o.wet ?? 0.18) + dist / 220);
   fin.connect(G.dry);
-  if (wetAmt > 0.01) { const w = a.createGain(); w.gain.value = wetAmt; fin.connect(w).connect(G.wet); }
+  if (wetAmt > 0.01) { const w = a.createGain(); w.gain.value = wetAmt; fin.connect(w).connect(G.wet); nodes.push(w); }
   const dur = o.dur ?? 1;
-  const rec = { t0: now, end: t + dur, prio, out };
+  let freed = false;
+  const free = () => { if (freed) return; freed = true; for (const n of nodes) try { n.disconnect(); } catch { } };
+  const rec = { t0: now, end: t + dur, prio, out, free };
   active.push(rec);
   stats.voices = active.length; stats.peak = Math.max(stats.peak, active.length);
-  setTimeout(() => { try { out.disconnect(); } catch { } }, (delay + dur + 1.5) * 1000);
+  setTimeout(free, (delay + dur + 1.5) * 1000);
   return { in: inp, t, a };
 }
 

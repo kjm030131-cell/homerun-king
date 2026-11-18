@@ -31,7 +31,7 @@ export async function bundle() {
 
 const MIME = { '.html': 'text/html; charset=utf-8', '.js': 'application/javascript', '.mjs': 'application/javascript', '.json': 'application/json', '.jpg': 'image/jpeg', '.png': 'image/png', '.glb': 'model/gltf-binary', '.bin': 'application/octet-stream', '.ogg': 'audio/ogg', '.mp3': 'audio/mpeg', '.wav': 'audio/wav', '.svg': 'image/svg+xml', '.wasm': 'application/wasm' };
 
-export function serve({ port = 0, noGlb = false } = {}) {
+export function serve({ port = 0, noGlb = false, api = null } = {}) {
   if (!threeDir) throw new Error('three r160 을 못 찾음 (THREE_DIR 지정)');
   const stats = { req: 0, bytes: 0, miss: [] };
   const srv = createServer((q, r) => {
@@ -46,7 +46,10 @@ export function serve({ port = 0, noGlb = false } = {}) {
     }
     if (p === '/app.js') file = join(outDir, 'app.js');
     else if (p.startsWith('/three/')) file = threeDirs.map((d) => join(d, p.slice(7))).find((f) => existsSync(f)) || join(threeDir, p.slice(7));
-    else if (p.startsWith('/api/')) { r.writeHead(200, { 'content-type': 'application/json' }); r.end(p === '/api/rooms' ? '{"rooms":[]}' : '{}'); return; }
+    else if (p.startsWith('/api/')) {
+      Promise.resolve(api ? api(p, q) : null).then((j) => { r.writeHead(200, { 'content-type': 'application/json' }); r.end(JSON.stringify(j ?? (p === '/api/rooms' ? { rooms: [] } : {}))); });
+      return;
+    }
     else file = join(root, 'public', p);
     if (noGlb && /player\.glb$/.test(p)) file = null;
     if (!file || !existsSync(file) || statSync(file).isDirectory()) { stats.miss.push(p); r.writeHead(404, { 'content-type': 'text/plain' }); r.end('nf'); return; }
