@@ -1,0 +1,7 @@
+node_modules/
+.wrangler/
+.dev.vars
+# 빌드 결과물 (CI가 매번 새로 만듦)
+public/app.js
+dist/
+.DS_Store

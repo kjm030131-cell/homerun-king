@@ -1,0 +1,567 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no,viewport-fit=cover">
+<meta name="theme-color" content="#070d1c">
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 64'%3E%3Ccircle cx='32' cy='32' r='30' fill='%23f6f3ea'/%3E%3Cpath d='M14 12c8 10 8 30 0 40M50 12c-8 10-8 30 0 40' stroke='%23d4213d' stroke-width='3' fill='none'/%3E%3C/svg%3E">
+<title>홈런왕</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Black+Han+Sans&family=Noto+Sans+KR:wght@400;500;700;900&family=Oswald:wght@500;600;700&display=swap" rel="stylesheet">
+<style>
+/* 레이아웃: 풀스크린 3D 캔버스 위에 중계 그래픽 스타일 오버레이 */
+:root{
+  --night:#070d1c; --panel:rgba(11,19,40,.92); --panel2:rgba(255,255,255,.05); --line:rgba(255,255,255,.12);
+  --text:#f3efe6; --dim:#93a0bf; --accent:#ff6a2b; --gold:#ffcf3f; --ok:#4fd18b; --bad:#ff5a5a;
+  --away:#d13a43; --home:#3a6ee0;
+  --display:'Black Han Sans','Noto Sans KR',sans-serif; --body:'Noto Sans KR',system-ui,sans-serif; --num:'Oswald','Arial Narrow',sans-serif;
+  color-scheme:dark;
+}
+*{box-sizing:border-box;margin:0;padding:0}
+html,body{height:100%;overflow:hidden;background:var(--night);color:var(--text);font-family:var(--body);-webkit-font-smoothing:antialiased;user-select:none;-webkit-user-select:none;touch-action:none}
+canvas#c{position:fixed;inset:0;width:100%;height:100%;display:block}
+button{font:inherit;cursor:pointer;border:0;color:inherit;background:none}
+input,select{font:inherit;color:inherit;user-select:text;-webkit-user-select:text}
+.hide{display:none!important}
+button:focus-visible,input:focus-visible,select:focus-visible{outline:2px solid var(--gold);outline-offset:2px}
+
+.btn{border-radius:10px;padding:12px 18px;font-weight:700;font-size:15px;background:var(--panel2);border:1px solid var(--line);transition:background .15s,transform .08s;white-space:nowrap}
+.btn:hover{background:rgba(255,255,255,.12)}
+.btn:active{transform:translateY(1px)}
+.btn.pri{background:var(--accent);border-color:var(--accent);color:#1d0a02}
+.btn.pri:hover{background:#ff7f47}
+.btn.gold{background:var(--gold);border-color:var(--gold);color:#2a1d00}
+.btn.sm{padding:7px 12px;font-size:13px;border-radius:8px}
+.btn[disabled]{opacity:.45;pointer-events:none}
+.inp,.sel{width:100%;background:rgba(255,255,255,.06);border:1px solid var(--line);border-radius:10px;padding:12px 14px;outline:none;font-size:15px}
+.inp:focus,.sel:focus{border-color:var(--accent)}
+.sel option{background:#0e1730}
+.lbl{display:block;font-size:12px;color:var(--dim);margin-bottom:6px;letter-spacing:.04em}
+.row{display:flex;gap:10px;align-items:center}
+.col{display:flex;flex-direction:column;gap:10px}
+.seg{display:flex;background:rgba(255,255,255,.05);border:1px solid var(--line);border-radius:10px;padding:3px;gap:3px}
+.seg button{flex:1;padding:9px 10px;border-radius:7px;font-weight:700;font-size:14px;color:var(--dim)}
+.seg button.on{background:var(--accent);color:#1d0a02}
+.seg.ro button{pointer-events:none}
+.note{color:var(--dim);font-size:13px;line-height:1.55}
+.kbd{font-family:var(--num);background:rgba(255,255,255,.14);border-radius:5px;padding:1px 6px;font-size:12px;letter-spacing:.02em}
+.card{background:var(--panel);border:1px solid var(--line);border-radius:18px;box-shadow:0 30px 80px rgba(0,0,0,.5)}
+.screen{position:fixed;inset:0;display:flex;align-items:center;justify-content:center;padding:max(16px,env(safe-area-inset-top)) 16px max(16px,env(safe-area-inset-bottom))}
+.modal{position:fixed;inset:0;display:flex;align-items:center;justify-content:center;background:rgba(4,8,18,.6);backdrop-filter:blur(3px);z-index:30;padding:16px}
+.modal .card{width:min(460px,100%);padding:24px;max-height:92vh;overflow:auto}
+.modal h3{font-family:var(--display);font-weight:400;font-size:26px;margin-bottom:16px}
+
+/* ── 타이틀 ── */
+#title{justify-content:flex-start;padding-left:max(16px,6vw);background:linear-gradient(90deg,rgba(5,9,20,.92) 0%,rgba(5,9,20,.62) 34%,rgba(5,9,20,0) 62%),linear-gradient(0deg,rgba(5,9,20,.55),rgba(5,9,20,0) 30%),url(./assets/ui/keyart.jpg) 62% 40%/cover no-repeat #050914;overflow-y:auto}
+.tbox{width:min(430px,100%);margin:auto 0}
+.kicker{font-family:var(--num);letter-spacing:.34em;font-size:12px;color:var(--gold);margin-bottom:46px}
+.logo{font-family:var(--display);font-weight:400;font-size:clamp(68px,min(12vw,15vh),132px);line-height:.88;letter-spacing:-.03em;position:relative;display:inline-block}
+.logo .crown{position:absolute;left:.04em;top:-.36em;width:.62em;height:.36em;color:var(--gold)}
+.logo b{font-weight:400;color:var(--accent)}
+.sub{color:var(--dim);margin:14px 0 22px;font-size:15px;line-height:1.6}
+.menu{display:grid;gap:10px}
+.menu > .btn{text-align:left;display:flex;justify-content:space-between;align-items:center;padding:14px 18px;font-size:16px}
+.menu .btn small{font-weight:500;color:inherit;opacity:.7;font-size:12px}
+.err{color:#ff9a8e;font-size:13px;min-height:18px;margin-top:10px}
+.credit{position:fixed;right:20px;bottom:16px;font-family:var(--num);font-size:11px;letter-spacing:.24em;color:rgba(255,255,255,.35)}
+
+/* ── 방 목록 ── */
+#browser .card{width:min(720px,100%);padding:24px;max-height:90vh;display:flex;flex-direction:column}
+#browser h2,#room h2{font-family:var(--display);font-weight:400;font-size:32px}
+.rlist{overflow:auto;margin:16px 0;display:flex;flex-direction:column;gap:8px;min-height:120px}
+.ritem{display:grid;grid-template-columns:1fr auto auto auto;gap:14px;align-items:center;padding:14px 16px;border-radius:12px;background:var(--panel2);border:1px solid var(--line);text-align:left}
+.ritem:hover{background:rgba(255,255,255,.1)}
+.ritem b{font-size:16px;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.ritem .tag{font-size:12px;padding:3px 8px;border-radius:999px;background:rgba(255,255,255,.08);color:var(--dim)}
+.ritem .tag.live{background:rgba(255,106,43,.18);color:var(--accent)}
+.ritem .cnt{font-family:var(--num);font-size:16px}
+.empty{color:var(--dim);text-align:center;padding:40px 0}
+
+/* ── 대기실 ── */
+#room .card{width:min(1080px,100%);padding:20px;height:min(94vh,860px);display:flex;flex-direction:column;gap:14px;overflow:hidden}
+#room .card > *{flex:none}
+#room .rbody{flex:1 1 auto;min-height:0;overflow:auto;padding-right:4px}
+@media (min-width:761px){#room .rbody{overflow:hidden}#room .rbody > .col{overflow:auto;min-height:0;max-height:100%;padding-right:4px}}
+.rhead{display:flex;align-items:flex-end;justify-content:space-between;gap:16px;flex-wrap:wrap}
+.code{font-family:var(--num);font-size:15px;color:var(--dim);display:flex;align-items:center;gap:8px;margin-top:4px}
+.code b{font-size:28px;color:var(--text);letter-spacing:.14em}
+.rbody{display:grid;grid-template-columns:1.6fr 1fr;gap:16px;min-height:0}
+.teams{display:grid;grid-template-columns:1fr 1fr;gap:12px}
+.team{border-radius:14px;padding:14px;background:var(--panel2);border:1px solid var(--line);display:flex;flex-direction:column;gap:8px;min-height:200px;min-width:0}
+.team h4{font-family:var(--display);font-weight:400;font-size:22px;display:flex;align-items:center;gap:8px}
+.team h4 i{width:12px;height:12px;border-radius:3px}
+.team.away h4 i{background:var(--away)} .team.home h4 i{background:var(--home)}
+.team ul{list-style:none;display:flex;flex-direction:column;gap:6px;flex:1}
+.pl{display:flex;align-items:center;gap:8px;padding:9px 10px;border-radius:9px;background:rgba(255,255,255,.05);font-weight:500;font-size:14px;min-width:0}
+.pl .nm{flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.pl .rd{width:9px;height:9px;border-radius:50%;background:rgba(255,255,255,.2);flex:none}
+.pl .rd.on{background:var(--ok);box-shadow:0 0 8px var(--ok)}
+.pl .pos{font-size:11px;color:var(--gold);font-family:var(--num);letter-spacing:.06em}
+.pl .ping{font-size:11px;color:var(--dim);font-family:var(--num)}
+.pl .host{font-size:10px;color:#1d0a02;background:var(--gold);border-radius:4px;padding:1px 5px;font-weight:900}
+.pl .x{color:var(--dim);font-size:13px;padding:0 4px}
+.pl .x:hover{color:var(--bad)}
+.pl.me{outline:1px solid rgba(255,207,63,.45)}
+.cpu{color:var(--dim);font-size:13px;padding:6px 2px}
+.specbar{display:flex;gap:6px;flex-wrap:wrap;align-items:center;font-size:13px;color:var(--dim)}
+.specbar span{background:rgba(255,255,255,.06);border-radius:999px;padding:4px 10px;color:var(--text)}
+.sets{display:grid;grid-template-columns:1fr 1fr;gap:12px;padding:16px;border-radius:14px;background:var(--panel2);border:1px solid var(--line);align-content:start}
+.sets > h5,.sets > .full{grid-column:1/-1}
+.sets h5{font-size:13px;color:var(--dim);font-weight:700;letter-spacing:.06em}
+.chatbox{display:flex;flex-direction:column;gap:6px;border-radius:14px;background:var(--panel2);border:1px solid var(--line);padding:12px;min-height:150px}
+.chatbox .log{flex:1;overflow:auto;font-size:13px;line-height:1.55;max-height:180px;user-select:text}
+.chatbox .log div b{color:var(--gold);margin-right:6px}
+.rfoot{display:flex;gap:10px;align-items:center;flex-wrap:wrap}
+.team .th{display:flex;align-items:center;gap:12px;margin-bottom:10px}
+.team .emb{width:58px;height:58px;border-radius:14px;background:rgba(255,255,255,.04);border:1px solid var(--line);display:flex;align-items:center;justify-content:center;cursor:pointer;flex:none;transition:transform .15s,border-color .15s}
+.team .emb:hover{transform:translateY(-2px);border-color:rgba(255,255,255,.3)}
+.team .emb img{width:50px;height:50px}
+.team .tt{display:flex;flex-direction:column;min-width:0}
+.team .tt span{font-weight:800;font-size:17px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.team .tt b{color:var(--text);font-weight:700;margin-left:4px}
+.pl .bo{font-family:var(--num);font-size:12px;min-width:26px;text-align:center;background:rgba(255,255,255,.08);border-radius:5px;padding:1px 4px;color:var(--gold)}
+.clubgrid{display:grid;grid-template-columns:repeat(5,1fr);gap:10px}
+.clubgrid button{display:flex;flex-direction:column;align-items:center;gap:6px;padding:10px 4px;border-radius:12px;background:var(--panel2);border:1px solid var(--line);cursor:pointer;color:var(--text);font-size:12.5px;font-weight:700}
+.clubgrid button:hover{border-color:rgba(255,255,255,.35)}
+.clubgrid button.on{border-color:var(--gold);box-shadow:0 0 0 1px var(--gold) inset}
+.clubgrid button:disabled{opacity:.35;cursor:not-allowed}
+.clubgrid img{width:64px;height:64px}
+.clubsel{display:flex;align-items:center;gap:8px;width:100%;padding:6px 10px;border-radius:10px;background:var(--panel2);border:1px solid var(--line);color:var(--text);font-weight:700;cursor:pointer}
+.clubsel img{width:34px;height:34px}
+.card.wide{max-width:640px;width:calc(100vw - 32px)}
+@media (max-width:560px){.clubgrid{grid-template-columns:repeat(3,1fr)}}
+.rfoot .sp{flex:1}
+
+/* ── 경기 HUD ── */
+#hud{position:fixed;inset:0;pointer-events:none}
+#bug{position:absolute;left:16px;top:max(16px,env(safe-area-inset-top));display:flex;background:var(--panel);border:1px solid var(--line);border-radius:10px;overflow:hidden;box-shadow:0 8px 30px rgba(0,0,0,.35)}
+#bug .tm{display:flex;flex-direction:column}
+#bug .tr{display:flex;align-items:center;height:32px;padding-right:10px}
+#bug .tr i{width:5px;height:100%;margin-right:8px}
+#bug .tr .em{width:24px;height:24px;margin-right:7px;object-fit:contain}
+#bug .tr.away i{background:var(--away)} #bug .tr.home i{background:var(--home)}
+#bug .tr span{font-weight:700;font-size:14px;width:62px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+#bug .tr strong{font-family:var(--num);font-size:22px;width:26px;text-align:right}
+#bug .tr.bat span:after{content:"";display:inline-block;width:6px;height:6px;border-radius:50%;background:var(--gold);margin-left:6px;vertical-align:middle}
+#bug .inn{display:flex;flex-direction:column;align-items:center;justify-content:center;padding:0 12px;border-left:1px solid var(--line);font-family:var(--num);font-size:20px;min-width:54px}
+#bug .inn small{font-size:11px;color:var(--gold);line-height:1}
+#bug .dia{border-left:1px solid var(--line);padding:6px 10px;display:flex;align-items:center}
+#bug .cnt{border-left:1px solid var(--line);padding:6px 12px;display:flex;flex-direction:column;justify-content:center;gap:3px;font-family:var(--num);font-size:12px}
+.dots{display:flex;align-items:center;gap:4px}
+.dots label{width:12px;color:var(--dim)}
+.dots i{width:9px;height:9px;border-radius:50%;background:rgba(255,255,255,.15)}
+.dots.b i.on{background:var(--ok)} .dots.s i.on{background:var(--gold)} .dots.o i.on{background:var(--bad)}
+#matchup{position:absolute;left:16px;top:calc(max(16px,env(safe-area-inset-top)) + 76px);display:flex;flex-direction:column;gap:6px}
+.mu{background:var(--panel);border:1px solid var(--line);border-radius:9px;padding:7px 12px;font-size:13px;display:flex;align-items:center;gap:10px;min-width:210px}
+.mu b{color:var(--dim);font-weight:700;font-size:11px;letter-spacing:.06em;width:28px}
+.mu span{font-weight:700;flex:1;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:120px}
+.mu em{font-style:normal;font-family:var(--num);color:var(--dim);font-size:12px}
+.sta{width:58px;height:6px;border-radius:3px;background:rgba(255,255,255,.12);overflow:hidden}
+.sta i{display:block;height:100%;background:linear-gradient(90deg,var(--bad),var(--gold),var(--ok))}
+#role{position:absolute;right:16px;top:max(16px,env(safe-area-inset-top));background:var(--panel);border:1px solid var(--line);border-radius:9px;padding:8px 14px;font-size:14px;font-weight:700;text-align:right}
+#role small{display:block;font-weight:400;color:var(--dim);font-size:12px}
+#ping{position:absolute;right:16px;top:calc(max(16px,env(safe-area-inset-top)) + 56px);font-family:var(--num);font-size:11px;color:var(--dim);text-align:right;line-height:1.5;text-shadow:0 1px 3px rgba(0,0,0,.7);pointer-events:none}
+#banner{position:absolute;left:0;right:0;top:24%;text-align:center;font-family:var(--display);font-size:clamp(40px,7.5vw,96px);letter-spacing:-.01em;color:#fff;text-shadow:0 6px 0 rgba(0,0,0,.35),0 0 50px rgba(255,106,43,.45);opacity:0;transform:scale(.86);transition:opacity .22s,transform .3s cubic-bezier(.2,1.6,.4,1);padding:0 16px}
+#banner.show{opacity:1;transform:scale(1)}
+#walkup{position:absolute;left:16px;top:180px;display:flex;align-items:stretch;transform:translate(-24px,0);opacity:0;transition:opacity .25s,transform .35s cubic-bezier(.2,1.3,.4,1);pointer-events:none;filter:drop-shadow(0 10px 24px rgba(0,0,0,.45))}
+#walkup.show{opacity:1;transform:translate(0,0)}
+#coach{position:absolute;right:16px;top:90px;max-width:330px;background:rgba(10,14,24,.9);border:1px solid rgba(255,210,58,.35);border-left:4px solid #ffd23a;border-radius:12px;padding:12px 14px;color:#e8ecf4;font-size:13.5px;line-height:1.55;opacity:0;transform:translateX(20px);transition:opacity .3s,transform .35s;pointer-events:none}
+#coach.show{opacity:1;transform:translateX(0)}
+#coach b{display:block;color:#ffd23a;font-size:12px;letter-spacing:.06em;margin-bottom:4px}
+#tbar{position:absolute;left:50%;bottom:120px;transform:translateX(-50%);display:flex;align-items:center;gap:10px;background:rgba(10,14,24,.85);border:1px solid rgba(255,255,255,.1);border-radius:10px;padding:8px 12px;font-size:12px;color:#aab3c5}
+#tbar b{display:block;width:180px;height:8px;border-radius:4px;background:linear-gradient(90deg,#4fd18b 0 55%,#ffd23a 55% 80%,#ff5a4f 80%);opacity:.35;position:relative;overflow:hidden}
+#tbar i{position:absolute;left:0;top:0;bottom:0;background:linear-gradient(90deg,#4fd18b 0 55%,#ffd23a 55% 80%,#ff5a4f 80%);background-size:180px 100%;width:0}
+#tbar b{opacity:1;background:rgba(255,255,255,.12)}
+#walkup .wu-no{background:var(--accent,#ff6a2b);color:#111;font-family:var(--display);font-size:34px;line-height:1;padding:10px 14px;display:flex;align-items:center;border-radius:10px 0 0 10px;min-width:56px;justify-content:center}
+#walkup .wu-main{background:rgba(10,14,24,.92);border:1px solid rgba(255,255,255,.08);border-left:0;border-radius:0 10px 10px 0;padding:8px 18px 9px;min-width:220px}
+#walkup .wu-nm{font-weight:800;font-size:20px;color:#fff;letter-spacing:-.01em;white-space:nowrap}
+#walkup .wu-st{font-size:12.5px;color:#aab3c5;margin-top:2px;white-space:nowrap}
+#walkup.me .wu-no{background:var(--gold,#ffd23a)}
+#banner.small{font-size:clamp(22px,3.4vw,40px);top:29%;text-shadow:0 3px 0 rgba(0,0,0,.35)}
+#banner.hr{color:var(--gold);font-size:clamp(56px,11vw,150px)}
+#fb{position:absolute;left:0;right:0;top:63%;text-align:center;font-family:var(--num);font-size:17px;letter-spacing:.04em;opacity:0;transition:opacity .2s;text-shadow:0 2px 6px rgba(0,0,0,.6)}
+#fb.show{opacity:1}
+#duty{position:absolute;left:50%;top:calc(max(16px,env(safe-area-inset-top)) + 92px);transform:translateX(-50%);background:rgba(10,14,24,.82);border:1px solid rgba(255,255,255,.16);border-radius:999px;padding:8px 18px;font-weight:800;font-size:15px;white-space:nowrap;pointer-events:none;text-shadow:0 1px 3px rgba(0,0,0,.6);max-width:calc(100vw - 32px);overflow:hidden;text-overflow:ellipsis}
+#cast{position:absolute;left:50%;bottom:calc(max(16px,env(safe-area-inset-bottom)) + 104px);transform:translateX(-50%);max-width:min(640px,calc(100vw - 32px));background:rgba(10,14,24,.78);border-left:3px solid var(--gold);border-radius:8px;padding:7px 14px;font-size:15px;font-weight:700;color:#fff;opacity:0;transition:opacity .25s;pointer-events:none;text-align:center}
+#cast.show{opacity:1}
+#duty.pop{animation:dutyPop .45s cubic-bezier(.2,1.6,.4,1)}
+@keyframes dutyPop{0%{transform:translateX(-50%) scale(.7);opacity:0}100%{transform:translateX(-50%) scale(1);opacity:1}}
+#hitinfo{position:absolute;right:16px;bottom:186px;background:var(--panel);border:1px solid var(--line);border-radius:10px;padding:10px 14px;font-family:var(--num);display:grid;grid-template-columns:auto auto;gap:2px 14px;font-size:13px;opacity:0;transition:opacity .3s}
+#hitinfo.show{opacity:1}
+#hitinfo span{color:var(--dim)} #hitinfo b{text-align:right;font-size:16px}
+#hint{position:absolute;left:50%;bottom:max(16px,env(safe-area-inset-bottom));transform:translateX(-50%);background:rgba(10,14,24,.84);border:1px solid rgba(255,255,255,.14);border-radius:14px;padding:8px 14px;font-size:14px;color:#e8edf8;max-width:calc(100vw - 380px);display:flex;flex-wrap:wrap;align-items:center;justify-content:center;gap:6px 14px;box-shadow:0 6px 24px rgba(0,0,0,.35)}
+#hint .ht{font-family:var(--num);font-size:13px;letter-spacing:.08em;color:#0b1020;background:#ffd23a;border-radius:6px;padding:2px 9px}
+#hint .hk{display:inline-flex;align-items:center;gap:6px;white-space:nowrap}
+#hint .hk .kbd{font-size:12.5px;padding:2px 8px;min-width:22px;text-align:center;background:#fff;color:#0b1020;border-radius:5px;font-weight:800;box-shadow:0 2px 0 rgba(0,0,0,.35)}
+#hint .tip{flex-basis:100%;text-align:center;font-size:12.5px;color:#ffd98a}
+#pcue{position:absolute;left:50%;top:max(64px,calc(env(safe-area-inset-top) + 56px));transform:translateX(-50%);width:min(340px,70vw);text-align:center;pointer-events:none}
+#pcue .pc-t{font-family:var(--num);font-weight:800;font-size:17px;letter-spacing:.06em;color:#fff;text-shadow:0 2px 8px rgba(0,0,0,.7);margin-bottom:6px}
+#pcue .pc-b{position:relative;height:8px;border-radius:5px;background:rgba(10,14,24,.7);border:1px solid rgba(255,255,255,.18);overflow:hidden}
+#pcue .pc-b i{position:absolute;left:0;top:0;bottom:0;width:0;background:linear-gradient(90deg,#9fb3d9,#ffd23a 75%,#ff6b4a)}
+#pcue .pc-b em{position:absolute;top:-2px;bottom:-2px;left:76%;width:2px;background:#fff;opacity:.8}
+#pcue.go .pc-t{color:#ffd23a;font-size:22px;animation:pcPop .25s ease-out}
+@keyframes pcPop{from{transform:scale(1.4)}to{transform:scale(1)}}
+#bigcount{position:absolute;right:max(16px,env(safe-area-inset-right));top:max(78px,calc(env(safe-area-inset-top) + 70px));display:flex;flex-direction:column;gap:5px;background:rgba(10,14,24,.78);border:1px solid rgba(255,255,255,.12);border-radius:12px;padding:10px 14px;pointer-events:none}
+#bigcount span{display:flex;align-items:center;gap:6px}
+#bigcount b{width:16px;font-family:var(--num);font-size:16px;color:#aab3c5}
+#bigcount i{width:15px;height:15px;border-radius:50%;background:rgba(255,255,255,.14);border:1px solid rgba(255,255,255,.18)}
+#bigcount .bc-b i.on{background:#4fd18b;border-color:#4fd18b}
+#bigcount .bc-s i.on{background:#ffd23a;border-color:#ffd23a}
+#bigcount .bc-o i.on{background:#ff5a4f;border-color:#ff5a4f}
+#ptype{position:absolute;left:50%;top:max(110px,calc(env(safe-area-inset-top) + 100px));transform:translateX(-50%);font-family:var(--num);font-weight:800;font-size:18px;padding:5px 14px;border-radius:999px;background:rgba(10,14,24,.75);border:1px solid rgba(255,255,255,.15);pointer-events:none;white-space:nowrap}
+@media (max-width:760px){#bigcount{top:auto;bottom:178px;right:12px;padding:7px 10px}#bigcount i{width:11px;height:11px}}
+#swa{position:absolute;left:max(16px,env(safe-area-inset-left));bottom:110px;width:300px;background:rgba(10,14,24,.88);border:1px solid rgba(255,255,255,.14);border-radius:14px;padding:10px 12px;pointer-events:none;transition:opacity .2s}
+#swa.hide{display:block!important;opacity:0}
+#swa .sw-h{font-family:var(--num);font-size:12px;letter-spacing:.12em;color:#aab3c5;margin-bottom:6px}
+#swa .sw-row{display:flex;gap:10px;align-items:center}
+#swa canvas{width:84px;height:84px;background:rgba(255,255,255,.04);border-radius:8px;flex:none}
+#swa .sw-r{flex:1;min-width:0}
+#swa .sw-l{font-size:13px;color:#cfd6e6;margin:2px 0}
+#swa .sw-l b{font-family:var(--num);margin-left:6px}
+#swa .sw-bar{position:relative;height:10px;border-radius:5px;background:rgba(255,255,255,.1);margin:4px 0 2px}
+#swa .sw-win{position:absolute;top:0;bottom:0;background:rgba(79,209,139,.45);border-radius:4px}
+#swa .sw-mid{position:absolute;left:50%;top:-2px;bottom:-2px;width:1px;background:#fff;opacity:.6}
+#swa .sw-mk{position:absolute;top:-3px;width:6px;height:16px;margin-left:-3px;border-radius:3px;background:#fff;box-shadow:0 0 6px rgba(0,0,0,.6)}
+#swa .sw-sc{display:flex;justify-content:space-between;font-size:10.5px;color:#7f8aa3;margin-bottom:4px}
+#swa .sw-tip{font-size:12.5px;color:#ffd98a;margin-top:6px;min-height:0}
+#swa .sw-tip:empty{display:none}
+@media (max-width:760px){#swa{bottom:auto;top:120px;width:250px;transform:scale(.85);transform-origin:left top}}
+#intro{--cc:#ff6a2b;position:absolute;left:max(24px,env(safe-area-inset-left));bottom:120px;display:flex;align-items:stretch;min-width:min(560px,calc(100vw - 48px));opacity:0;transform:translateX(-40px);transition:opacity .25s,transform .45s cubic-bezier(.2,1.2,.3,1);pointer-events:none;filter:drop-shadow(0 10px 30px rgba(0,0,0,.5))}
+#intro.show{opacity:1;transform:none}
+#intro .in-l{flex:1;background:linear-gradient(100deg,rgba(8,12,22,.95),rgba(8,12,22,.86));border-left:8px solid var(--cc);border-radius:12px 0 0 12px;padding:14px 20px 14px 18px;min-width:0}
+#intro .in-tag{font-family:var(--num);font-size:13px;letter-spacing:.12em;color:var(--cc);font-weight:800}
+#intro .in-nm{font-weight:900;font-size:clamp(26px,4vw,40px);color:#fff;letter-spacing:-.02em;line-height:1.1;margin:2px 0 6px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+#intro .in-today{font-size:15px;color:#e6ebf5;font-weight:700}
+#intro .in-car{font-size:13px;color:#9fabc4;margin-top:3px}
+#intro .in-r{background:var(--cc);color:#0b0f19;border-radius:0 12px 12px 0;padding:10px 20px;display:flex;flex-direction:column;justify-content:center;align-items:center;min-width:130px}
+#intro .in-big{font-family:var(--display,var(--num));font-size:46px;font-weight:900;line-height:1}
+#intro .in-bigl{font-size:12px;font-weight:800;letter-spacing:.08em;opacity:.8}
+#intro .in-sit{font-size:12px;font-weight:900;margin-top:4px}
+@media (max-width:760px){#intro{bottom:auto;top:110px;left:12px;min-width:calc(100vw - 24px)}#intro .in-big{font-size:32px}#intro .in-r{min-width:96px}}
+#replay{position:fixed;inset:0;pointer-events:none;display:none;z-index:4}
+#replay.on{display:block;animation:rpIn .25s ease-out}
+#replay:before,#replay:after{content:'';position:absolute;left:0;right:0;height:9vh;background:#000}
+#replay:before{top:0}#replay:after{bottom:0}
+#replay .rl{position:absolute;left:24px;top:calc(9vh + 16px);font:900 italic 22px Oswald,'Arial Narrow',sans-serif;color:#fff;letter-spacing:.14em;background:#d3202a;padding:4px 14px 4px 12px;border-radius:4px;box-shadow:0 4px 14px rgba(0,0,0,.4)}
+#replay .rl:before{content:'';display:inline-block;width:9px;height:9px;border-radius:50%;background:#fff;margin-right:9px;vertical-align:2px;animation:rpBlink 1s infinite}
+#replay .rs{position:absolute;right:24px;bottom:calc(9vh + 16px);color:#cfd6e6;font-size:13px;text-shadow:0 1px 4px #000}
+@keyframes rpIn{from{opacity:0}to{opacity:1}}@keyframes rpBlink{50%{opacity:.2}}
+#pitchbar{position:absolute;right:16px;bottom:186px;display:flex;flex-direction:column;gap:6px;pointer-events:auto;width:150px}
+@media (max-width:760px){#pitchbar{right:auto;left:50%;bottom:68px;transform:translateX(-50%);flex-direction:row;flex-wrap:wrap;justify-content:center;width:max-content;max-width:calc(100vw - 32px)}}
+#pitchbar button{background:rgba(12,17,30,.94);border:1px solid var(--line);border-radius:10px;padding:8px 12px;font-weight:700;font-size:14px;text-align:left}
+#pitchbar button small{font-family:var(--num);color:var(--dim);margin-right:6px}
+#pitchbar button em{display:block;font-style:normal;font-family:var(--num);font-size:11px;color:var(--dim);font-weight:500}
+#pitchbar button.on{border-color:var(--accent);background:#4a2414}
+#gauge{position:absolute;left:calc(50% + 260px);top:50%;transform:translateY(-50%);width:28px;height:260px;border-radius:14px;background:rgba(8,14,30,.88);border:1px solid var(--line);overflow:hidden}
+#gauge .band{position:absolute;left:0;right:0;background:rgba(79,209,139,.35);border-top:2px solid var(--ok);border-bottom:2px solid var(--ok)}
+#gauge .over{position:absolute;left:0;right:0;top:0;background:rgba(255,90,90,.35)}
+#gauge .fill{position:absolute;left:4px;right:4px;bottom:4px;border-radius:10px;background:linear-gradient(0deg,#2b6cd8,var(--gold) 70%,var(--accent))}
+#gaugeLbl{position:absolute;left:calc(50% + 248px);top:calc(50% + 140px);width:52px;text-align:center;font-family:var(--num);font-size:12px;color:var(--dim)}
+#clock{position:absolute;left:50%;top:max(16px,env(safe-area-inset-top));transform:translateX(-50%);font-family:var(--num);font-size:20px;background:var(--panel);border:1px solid var(--line);border-radius:8px;padding:4px 12px}
+#clock.warn{color:var(--bad)}
+#keys{position:absolute;left:50%;bottom:66px;transform:translateX(-50%);display:flex;gap:6px;pointer-events:auto;flex-wrap:wrap;justify-content:center;width:max-content;max-width:calc(100vw - 32px)}
+#keys button{background:rgba(255,106,43,.92);color:#1d0a02;border-radius:9px;padding:9px 13px;font-weight:900;font-size:14px}
+#keys button .kbd{background:rgba(0,0,0,.18);margin-right:5px}
+#keys.soft button{background:var(--panel);color:var(--text);border:1px solid var(--line);font-weight:700}
+#keys.soft button .kbd{background:rgba(255,255,255,.14)}
+#modeTag{position:absolute;left:50%;bottom:118px;transform:translateX(-50%);font-family:var(--num);font-size:13px;letter-spacing:.08em;background:var(--panel);border:1px solid var(--line);border-radius:999px;padding:5px 14px}
+#modeTag.power{color:var(--accent);border-color:var(--accent)}
+#modeTag.bunt{color:#9fd0ff;border-color:#9fd0ff}
+#buntBtn{position:absolute;right:16px;bottom:186px;pointer-events:auto;background:var(--panel);border:1px solid #9fd0ff;color:#cfe6ff;border-radius:10px;padding:10px 14px;font-weight:900;font-size:14px}
+#buntBtn .kbd{margin-right:6px}
+#buntBtn.on{background:#9fd0ff;color:#06203d}
+@media (max-width:760px){#buntBtn{left:auto;right:20px;bottom:300px}}
+#minimap{position:absolute;right:16px;bottom:max(16px,env(safe-area-inset-bottom));width:156px;height:156px;border-radius:12px;background:rgba(8,14,30,.72);border:1px solid var(--line)}
+#chat{position:absolute;left:16px;bottom:max(16px,env(safe-area-inset-bottom));width:min(320px,52vw);pointer-events:none}
+#chatlog{font-size:13px;line-height:1.5;max-height:160px;overflow:hidden;display:flex;flex-direction:column;justify-content:flex-end}
+#chatlog div{background:rgba(8,14,30,.65);border-radius:6px;padding:2px 8px;margin-top:3px;width:fit-content;max-width:100%;animation:fade 10s forwards}
+#chatlog div b{margin-right:6px}
+#chatlog div.sys{color:var(--dim)}
+@keyframes fade{0%,82%{opacity:1}100%{opacity:0}}
+#chatin{margin-top:6px;pointer-events:auto}
+#quick{position:absolute;left:16px;bottom:210px;display:grid;grid-template-columns:repeat(2,auto);gap:6px;pointer-events:auto}
+#quick button{background:var(--panel);border:1px solid var(--line);border-radius:9px;padding:8px 12px;font-weight:700;font-size:13px;text-align:left}
+#quick button .kbd{margin-right:6px}
+#tab{position:absolute;inset:0;display:flex;align-items:center;justify-content:center;background:rgba(4,8,18,.55)}
+#tab .card{padding:20px;width:min(860px,96vw);max-height:86vh;overflow:auto}
+.ls tr.sep th{padding-top:16px;border-top:1px solid rgba(255,255,255,.15)}
+table.ls{width:100%;border-collapse:collapse;font-family:var(--num);font-variant-numeric:tabular-nums}
+table.ls th,table.ls td{padding:6px 6px;border-bottom:1px solid var(--line);font-size:14px;text-align:center}
+table.ls th{color:var(--dim);font-weight:500}
+table.ls td:first-child,table.ls th:first-child{text-align:left;font-family:var(--body);font-weight:700;white-space:nowrap}
+table.ls .r{color:var(--gold)}
+table.ls tr.me td{color:var(--gold)}
+.scroll-x{overflow-x:auto}
+#over{position:fixed;inset:0;display:flex;align-items:center;justify-content:center;background:rgba(4,8,18,.66);pointer-events:auto;padding:16px;z-index:10}
+#over .card{padding:26px;width:min(780px,100%);max-height:92vh;overflow:auto;text-align:center}
+#over h2{font-family:var(--display);font-weight:400;font-size:clamp(40px,7vw,64px);line-height:1}
+.king{margin:14px auto 18px;display:inline-flex;align-items:center;gap:14px;background:linear-gradient(90deg,rgba(255,207,63,.18),rgba(255,106,43,.12));border:1px solid rgba(255,207,63,.45);border-radius:14px;padding:12px 20px;text-align:left}
+.king svg{width:40px;height:26px;color:var(--gold);flex:none}
+.king small{display:block;color:var(--gold);font-size:12px;letter-spacing:.08em;font-weight:700}
+.king b{font-family:var(--display);font-weight:400;font-size:28px}
+.king em{font-style:normal;color:var(--dim);font-size:13px;margin-left:6px}
+#menuM .btn{width:100%}
+#conn{position:fixed;top:0;left:0;right:0;background:#b3261e;text-align:center;padding:8px;font-weight:700;z-index:40}
+#toast{position:fixed;left:50%;top:16%;transform:translateX(-50%);background:var(--panel);border:1px solid var(--line);border-radius:999px;padding:10px 18px;font-weight:700;z-index:50;opacity:0;transition:opacity .25s;pointer-events:none}
+#toast.show{opacity:1}
+.help h4{color:var(--gold);margin:14px 0 6px;font-size:14px}
+.help p{color:#cfd7ea;font-size:14px;line-height:1.75}
+/* 모바일 */
+#touch{position:absolute;inset:0;pointer-events:none}
+#stick{position:absolute;left:24px;bottom:120px;width:130px;height:130px;border-radius:50%;background:rgba(255,255,255,.07);border:1px solid var(--line);pointer-events:auto}
+#stick i{position:absolute;left:40px;top:40px;width:50px;height:50px;border-radius:50%;background:rgba(255,255,255,.25)}
+#tbtns{position:absolute;right:20px;bottom:190px;display:grid;grid-template-columns:repeat(2,64px);gap:10px;pointer-events:auto}
+#tbtns button{height:64px;border-radius:50%;background:rgba(255,255,255,.12);border:1px solid var(--line);font-weight:900;font-size:13px}
+@media (max-width:760px){
+  .rbody,.teams{grid-template-columns:1fr}
+  #bug{transform:scale(.8);transform-origin:top left}
+  #matchup{top:68px;transform:scale(.82);transform-origin:top left}
+  #role{transform:scale(.85);transform-origin:top right}
+  #hint{font-size:11px;white-space:normal;text-align:center;border-radius:12px;max-width:calc(100vw - 32px);bottom:6px}
+  #minimap{width:104px;height:104px;bottom:66px}
+  #gauge{left:auto;right:20px}
+  #gaugeLbl{left:auto;right:8px}
+  #hitinfo{display:none}
+  .ritem{grid-template-columns:1fr auto}
+}
+@media (prefers-reduced-motion:reduce){*{transition:none!important;animation:none!important}}
+.pc{display:inline-block;width:8px;height:8px;border-radius:50%;margin-right:5px;vertical-align:middle}
+</style>
+<script type="importmap">
+{ "imports": { "three": "https://cdn.jsdelivr.net/npm/three@0.160.0/build/three.module.js", "three/addons/": "https://cdn.jsdelivr.net/npm/three@0.160.0/examples/jsm/" } }
+</script>
+</head>
+<body>
+<canvas id="c"></canvas>
+
+<section id="title" class="screen">
+  <div class="tbox">
+    <div class="kicker">JAMSIL · FRIENDS LEAGUE</div>
+    <h1 class="logo"><svg class="crown" viewBox="0 0 60 34" fill="currentColor" aria-hidden="true"><path d="M2 32 L6 6 L18 20 L30 2 L42 20 L54 6 L58 32 Z"/></svg>홈런<b>왕</b></h1>
+    <p class="sub">잠실 구장에서 친구들이랑 치고, 던지고, 뛰고, 잡는 3D 야구.<br>빈 자리는 CPU가 채워.</p>
+    <div style="margin-bottom:14px"><label class="lbl" for="nick">닉네임</label><input id="nick" class="inp" maxlength="12" placeholder="이름 입력" autocomplete="off"></div>
+    <div class="menu">
+      <button id="bSolo" class="btn pri">혼자 하기 <small>CPU전 · 홈런 더비</small></button>
+      <button id="bCreate" class="btn mp">방 만들기 <small>친구 초대</small></button>
+      <button id="bBrowse" class="btn mp">방 찾기 <small>공개 방 목록</small></button>
+      <div class="row mp"><input id="code" class="inp" maxlength="4" placeholder="방 코드 4자리" style="text-transform:uppercase" autocomplete="off"><button id="bJoin" class="btn">참가</button></div>
+      <div class="row"><button id="bSettings" class="btn" style="flex:1">설정</button><button id="bHelp" class="btn" style="flex:1">조작법</button></div>
+    </div>
+    <div class="err" id="err" role="alert"></div>
+  </div>
+</section>
+
+<section id="browser" class="screen hide">
+  <div class="card">
+    <div class="row" style="justify-content:space-between"><h2>방 찾기</h2><div class="row"><button id="bRefresh" class="btn sm">새로고침</button><button id="bBrowseBack" class="btn sm">뒤로</button></div></div>
+    <div class="rlist" id="rlist"></div>
+    <p class="note">비공개 방은 목록에 안 나와. 코드로 바로 참가해.</p>
+  </div>
+</section>
+
+<section id="room" class="screen hide">
+  <div class="card">
+    <div class="rhead">
+      <div>
+        <h2 id="rName">방</h2>
+        <div class="code">방 코드 <b id="rCode">----</b> <button id="bCopy" class="btn sm">초대 링크 복사</button></div>
+      </div>
+      <div class="row"><button id="bLeave" class="btn sm">나가기</button></div>
+    </div>
+    <div class="rbody">
+      <div class="col" style="min-width:0">
+        <div class="teams">
+          <div class="team away"><div class="th"><button class="emb" data-club="away" title="구단 바꾸기"><img id="emA" alt=""></button><div class="tt"><span id="tnA">원정</span><small class="note">원정 · 선공 <b id="cntA"></b></small></div></div><ul id="tAway"></ul><button class="btn sm" data-team="away">이 팀으로</button></div>
+          <div class="team home"><div class="th"><button class="emb" data-club="home" title="구단 바꾸기"><img id="emH" alt=""></button><div class="tt"><span id="tnH">홈</span><small class="note">홈 · 후공 <b id="cntH"></b></small></div></div><ul id="tHome"></ul><button class="btn sm" data-team="home">이 팀으로</button></div>
+        </div>
+        <div class="specbar" id="specbar"></div>
+        <div class="chatbox"><div class="log" id="rchat"></div><input id="rchatin" class="inp" maxlength="80" placeholder="채팅 (Enter)" autocomplete="off"></div>
+      </div>
+      <div class="col" style="min-width:0">
+        <div class="sets" id="sets">
+          <h5>경기 설정 <span id="hostOnly" class="note">· 방장만 바꿀 수 있어</span></h5>
+          <div class="full"><label class="lbl" for="sName">방 이름</label><input id="sName" class="inp" maxlength="24" placeholder="방 이름" autocomplete="off"></div>
+          <div class="full"><label class="lbl">팀 인원</label><div class="seg" id="sSize"><button data-v="1">1 : 1</button><button data-v="2">2 : 2</button><button data-v="3">3 : 3</button><button data-v="0">자유</button></div></div>
+          <div class="full"><label class="lbl">타격 난이도 (사람 타자)</label><div class="seg" id="sHit"><button data-v="0">쉬움</button><button data-v="1">보통</button><button data-v="2">어려움</button></div></div>
+          <div class="full"><label class="lbl">시간대</label><div class="seg" id="sTod"><button data-v="night">야간 경기</button><button data-v="day">주간 경기</button></div></div>
+          <div class="full"><label class="lbl">모드</label><div class="seg" id="sMode"><button data-v="game">정규 경기</button><button data-v="derby">홈런 더비</button></div></div>
+          <div id="sInnWrap" class="full"><label class="lbl">이닝</label><div class="seg" id="sInn"><button data-v="1">1</button><button data-v="2">2</button><button data-v="3">3</button><button data-v="5">5</button><button data-v="7">7</button><button data-v="9">9</button></div></div>
+          <div id="sOutWrap" class="hide full"><label class="lbl">더비 아웃 수</label><div class="seg" id="sOuts"><button data-v="5">5</button><button data-v="7">7</button><button data-v="10">10</button><button data-v="15">15</button></div></div>
+          <div class="full"><label class="lbl">투수</label><div class="seg" id="sPit"><button data-v="inning">이닝마다 교대</button><button data-v="batter">타자마다 교대</button><button data-v="fixed">고정</button><button data-v="cpu">CPU</button></div></div>
+          <div class="full"><label class="lbl">타순</label><div class="seg" id="sLine"><button data-v="humans">사람만 돌아가며</button><button data-v="nine">9인 타순 (빈칸 CPU)</button></div></div>
+          <div class="full"><label class="lbl">수비 조작</label><div class="seg" id="sFld"><button data-v="auto">공 따라 자동 전환</button><button data-v="pos">내 포지션만</button></div></div>
+          <div class="full"><label class="lbl">CPU 난이도</label><div class="seg" id="sDiff"><button data-v="0">쉬움</button><button data-v="1">보통</button><button data-v="2">어려움</button></div></div>
+          <div><label class="lbl" for="sTA">원정팀 이름</label><input id="sTA" class="inp" maxlength="8" autocomplete="off"></div><div><label class="lbl" for="sTH">홈팀 이름</label><input id="sTH" class="inp" maxlength="8" autocomplete="off"></div>
+          <div id="sMaxWrap"><label class="lbl" for="sMax">최대 인원</label><select id="sMax" class="sel"><option>2</option><option>4</option><option>6</option><option>8</option><option>10</option><option>12</option><option>14</option><option>18</option></select></div>
+          <div><label class="lbl">공개</label><div class="seg" id="sPub"><button data-v="1">공개</button><button data-v="0">비공개</button></div></div>
+          <div class="full"><label class="lbl" for="sPw">비밀번호 (선택)</label><input id="sPw" class="inp" maxlength="20" placeholder="없으면 비워둬" autocomplete="off"></div>
+        </div>
+      </div>
+    </div>
+    <div class="rfoot">
+      <label class="lbl" style="margin:0" for="myPos">내 포지션</label>
+      <select id="myPos" class="sel" style="width:auto"><option value="any">자동</option><option value="P">투수</option><option value="C">포수</option><option value="1B">1루수</option><option value="2B">2루수</option><option value="SS">유격수</option><option value="3B">3루수</option><option value="LF">좌익수</option><option value="CF">중견수</option><option value="RF">우익수</option></select>
+      <label class="lbl" style="margin:0" for="myBo">내 타순</label>
+      <select id="myBo" class="sel" style="width:auto"><option value="0">자동</option><option value="1">1번</option><option value="2">2번</option><option value="3">3번</option><option value="4">4번</option><option value="5">5번</option><option value="6">6번</option><option value="7">7번</option><option value="8">8번</option><option value="9">9번</option></select>
+      <button class="btn sm" data-team="spec">관전하기</button>
+      <span class="sp"></span>
+      <span class="note" id="rnote"></span>
+      <button id="bReady" class="btn">준비</button>
+      <button id="bStart" class="btn pri">경기 시작</button>
+    </div>
+  </div>
+</section>
+
+<section id="hud" class="hide">
+  <div id="bug">
+    <div class="tm">
+      <div class="tr away" id="trA"><i></i><img class="em" id="bEmA" alt=""><span id="nA">원정</span><strong id="sA">0</strong></div>
+      <div class="tr home" id="trH"><i></i><img class="em" id="bEmH" alt=""><span id="nH">홈</span><strong id="sH">0</strong></div>
+    </div>
+    <div class="inn"><small id="half">▲</small><span id="innN">1</span></div>
+    <div class="dia"><svg width="46" height="40" viewBox="0 0 46 40" aria-hidden="true"><rect id="d2" x="17" y="2" width="12" height="12" transform="rotate(45 23 8)" fill="rgba(255,255,255,.18)"/><rect id="d3" x="4" y="15" width="12" height="12" transform="rotate(45 10 21)" fill="rgba(255,255,255,.18)"/><rect id="d1" x="30" y="15" width="12" height="12" transform="rotate(45 36 21)" fill="rgba(255,255,255,.18)"/></svg></div>
+    <div class="cnt">
+      <div class="dots b"><label>B</label><i></i><i></i><i></i></div>
+      <div class="dots s"><label>S</label><i></i><i></i></div>
+      <div class="dots o"><label>O</label><i></i><i></i></div>
+    </div>
+  </div>
+  <div id="matchup">
+    <div class="mu"><b>타자</b><span id="muBat">-</span><em id="muBatS"></em></div>
+    <div class="mu" id="muP"><b>투수</b><span id="muPit">CPU</span><div class="sta"><i id="staBar" style="width:100%"></i></div><em id="muPc">0구</em></div>
+  </div>
+  <div id="role"></div>
+  <div id="ping"></div>
+  <div id="clock" class="hide"></div>
+  <div id="banner"></div>
+  <div id="coach"><b></b><span></span></div>
+  <div id="tbar" class="hide"><span>송구 세기</span><b><i></i></b></div>
+  <div id="walkup"><div class="wu-no"></div><div class="wu-main"><div class="wu-nm"></div><div class="wu-st"></div></div></div>
+  <div id="intro"><div class="in-l"><div class="in-tag"></div><div class="in-nm"></div><div class="in-today"></div><div class="in-car"></div></div><div class="in-r"><div class="in-big"></div><div class="in-bigl"></div><div class="in-sit"></div></div></div>
+  <div id="fb"></div>
+  <div id="duty" class="hide"></div>
+  <div id="cast"></div>
+  <div id="pcue" class="hide"><div class="pc-t"></div><div class="pc-b"><i></i><em></em></div></div>
+  <div id="bigcount" class="hide"><span class="bc-b"><b>B</b><i></i><i></i><i></i></span><span class="bc-s"><b>S</b><i></i><i></i></span><span class="bc-o"><b>O</b><i></i><i></i></span></div>
+  <div id="ptype" class="hide"></div>
+  <div id="swa" class="hide"><div class="sw-h">스윙 분석</div><div class="sw-row"><canvas width="120" height="120"></canvas><div class="sw-r"><div class="sw-l">타이밍 <b class="sw-tv"></b></div><div class="sw-bar"><i class="sw-win"></i><i class="sw-mid"></i><i class="sw-mk"></i></div><div class="sw-sc"><span>빠름</span><span>늦음</span></div><div class="sw-l">위치 <b class="sw-lv"></b></div></div></div><div class="sw-tip"></div></div>
+  <div id="hitinfo"><span>타구 속도</span><b id="hiEv">-</b><span>발사각</span><b id="hiLa">-</b><span>비거리</span><b id="hiD">-</b></div>
+  <div id="pitchbar" class="hide"></div>
+  <div id="gauge" class="hide"><div class="over"></div><div class="band"></div><div class="fill"></div></div>
+  <div id="gaugeLbl" class="hide">구속</div>
+  <div id="modeTag" class="hide"></div>
+  <button id="buntBtn" class="hide"><span class="kbd">B</span>번트 자세</button>
+  <div id="keys" class="hide"></div>
+  <canvas id="minimap" width="300" height="300"></canvas>
+  <div id="replay"><div class="rl">REPLAY</div><div class="rs">클릭 · 스페이스로 건너뛰기</div></div>
+  <div id="hint"></div>
+  <div id="chat"><div id="chatlog"></div><input id="chatin" class="inp hide" maxlength="80" placeholder="메시지 (Enter)" autocomplete="off"></div>
+  <div id="quick" class="hide"></div>
+  <div id="tab" class="hide"><div class="card"><h3 style="font-family:var(--display);font-weight:400;font-size:24px;margin-bottom:10px">기록</h3><div class="scroll-x"><table class="ls" id="tabLine"></table></div><div class="scroll-x" style="margin-top:14px"><table class="ls" id="tabStats"></table></div></div></div>
+  <div id="touch" class="hide"><div id="stick"><i></i></div><div id="tbtns"></div></div>
+</section>
+
+<section id="over" class="hide">
+  <div class="card">
+    <h2 id="overT">경기 종료</h2>
+    <div id="kingBox"></div>
+    <div class="scroll-x"><table class="ls" id="overLine"></table></div>
+    <div class="scroll-x" style="margin-top:14px"><table class="ls" id="overStats"></table></div>
+    <div class="row" style="justify-content:center;margin-top:20px;flex-wrap:wrap">
+      <button id="bAgain" class="btn pri">한 판 더</button>
+      <button id="bToLobby" class="btn">대기실로</button>
+      <button id="bQuit" class="btn">나가기</button>
+    </div>
+    <p class="note" id="overNote" style="margin-top:10px"></p>
+  </div>
+</section>
+
+<div id="createM" class="modal hide"><div class="card">
+  <h3>방 만들기</h3>
+  <div class="col">
+    <div><label class="lbl" for="cName">방 이름</label><input id="cName" class="inp" maxlength="24" placeholder="예: 금요일 뒷방 리그" autocomplete="off"></div>
+    <div><label class="lbl">팀 인원</label><div class="seg" id="cSize"><button data-v="1">1 : 1</button><button data-v="2" class="on">2 : 2</button><button data-v="3">3 : 3</button><button data-v="0">자유</button></div></div>
+    <div><label class="lbl">타격 난이도</label><div class="seg" id="cHit"><button data-v="0">쉬움</button><button data-v="1" class="on">보통</button><button data-v="2">어려움</button></div></div>
+    <div><label class="lbl">시간대</label><div class="seg" id="cTod"><button data-v="night" class="on">야간 경기</button><button data-v="day">주간 경기</button></div></div>
+    <div><label class="lbl">모드</label><div class="seg" id="cMode"><button data-v="game" class="on">정규 경기</button><button data-v="derby">홈런 더비</button></div></div>
+    <div class="row"><div style="flex:1"><label class="lbl" for="cInn">이닝 / 더비 아웃</label><select id="cInn" class="sel"><option value="1">1</option><option value="2">2</option><option value="3" selected>3</option><option value="5">5</option><option value="9">9</option><option value="10">10</option></select></div>
+      <div style="flex:1" id="cMaxWrap" class="hide"><label class="lbl" for="cMax">최대 인원</label><select id="cMax" class="sel"><option>4</option><option>6</option><option>8</option><option>10</option><option selected>12</option><option>18</option></select></div></div>
+    <div><label class="lbl" for="cPw">비밀번호 (선택)</label><input id="cPw" class="inp" maxlength="20" placeholder="없으면 비워둬" autocomplete="off"></div>
+    <div><label class="lbl">공개</label><div class="seg" id="cPub"><button data-v="1" class="on">공개</button><button data-v="0">비공개</button></div></div>
+    <div class="row" style="margin-top:6px"><button id="cGo" class="btn pri" style="flex:1">만들기</button><button class="btn" data-close>취소</button></div>
+  </div>
+</div></div>
+<div id="soloM" class="modal hide"><div class="card">
+  <h3>혼자 하기</h3>
+  <div class="col">
+    <div><label class="lbl">모드</label><div class="seg" id="oMode"><button data-v="game" class="on">CPU 경기</button><button data-v="derby">홈런 더비</button><button data-v="practice">타격 연습</button></div></div>
+    <div><label class="lbl" id="oInnLbl">이닝</label><div class="seg" id="oInn"><button data-v="1">1</button><button data-v="3" class="on">3</button><button data-v="5">5</button><button data-v="9">9</button></div></div>
+    <div><label class="lbl">타격 난이도</label><div class="seg" id="oHit"><button data-v="0">쉬움</button><button data-v="1" class="on">보통</button><button data-v="2">어려움</button></div></div>
+    <div><label class="lbl">수비 조작</label><div class="seg" id="oFld"><button data-v="pos" class="on">내 포지션 고정</button><button data-v="auto">공 따라 자동 전환</button></div></div>
+    <div><label class="lbl">시간대</label><div class="seg" id="oTod"><button data-v="night" class="on">야간 경기</button><button data-v="day">주간 경기</button></div></div>
+    <div><label class="lbl">CPU 난이도</label><div class="seg" id="oDiff"><button data-v="0">쉬움</button><button data-v="1" class="on">보통</button><button data-v="2">어려움</button></div></div>
+    <div class="row" style="gap:10px"><div style="flex:1"><label class="lbl">내 구단</label><button class="clubsel" id="oClubMe" data-solo="me"><img alt=""><span></span></button></div><div style="flex:1"><label class="lbl">상대 구단</label><button class="clubsel" id="oClubOp" data-solo="op"><img alt=""><span></span></button></div></div>
+    <div><label class="lbl">내 팀</label><div class="seg" id="oTeam"><button data-v="away" class="on">원정 (선공)</button><button data-v="home">홈 (후공)</button></div></div>
+    <div><label class="lbl" for="oPos">내 포지션</label><select id="oPos" class="sel"><option value="any">자동 (투수부터)</option><option value="P">투수</option><option value="C">포수</option><option value="SS">유격수</option><option value="2B">2루수</option><option value="3B">3루수</option><option value="1B">1루수</option><option value="CF">중견수</option><option value="LF">좌익수</option><option value="RF">우익수</option></select></div>
+    <div class="row" style="margin-top:6px"><button id="oGo" class="btn pri" style="flex:1">플레이 볼!</button><button class="btn" data-close>취소</button></div>
+  </div>
+</div></div>
+<div id="clubM" class="modal hide"><div class="card wide">
+  <h3 id="clubT">구단 고르기</h3>
+  <div class="clubgrid" id="clubGrid"></div>
+  <div class="note" style="margin-top:10px">홈런왕 오리지널 구단이야. 실제 프로구단과는 상관없어.</div>
+  <div class="row" style="margin-top:10px"><button class="btn" data-close style="flex:1">닫기</button></div>
+</div></div>
+<div id="pwM" class="modal hide"><div class="card">
+  <h3>비밀번호</h3>
+  <div class="col"><input id="pwIn" class="inp" maxlength="20" placeholder="방 비밀번호" autocomplete="off"><div class="row"><button id="pwGo" class="btn pri" style="flex:1">참가</button><button class="btn" data-close>취소</button></div></div>
+</div></div>
+<div id="setM" class="modal hide"><div class="card">
+  <h3>설정</h3>
+  <div class="col">
+    <div><label class="lbl" for="vol">음량</label><input id="vol" type="range" min="0" max="100" value="80" style="width:100%"></div>
+    <div><label class="lbl">그래픽</label><div class="seg" id="gq"><button data-v="low">빠르게</button><button data-v="mid">보통</button><button data-v="high">고품질</button></div></div>
+    <div><label class="lbl">타격 보조</label><div class="seg" id="assist"><button data-v="1">타이밍 색 표시</button><button data-v="2">연습용 (위치까지)</button><button data-v="0">끄기</button></div></div>
+    <div><label class="lbl">화면 흔들림</label><div class="seg" id="shake"><button data-v="1">켜기</button><button data-v="0">끄기</button></div></div>
+    <div><label class="lbl">하이라이트 리플레이 (홈런·호수비)</label><div class="seg" id="replayS"><button data-v="1">켜기</button><button data-v="0">끄기</button></div></div>
+    <div><label class="lbl">캐스터 중계 멘트</label><div class="seg" id="castS"><button data-v="1">자막</button><button data-v="2">자막+음성</button><button data-v="0">끄기</button></div></div>
+    <div><label class="lbl" for="sens">타격 커서 감도</label><input id="sens" type="range" min="50" max="160" value="100" style="width:100%"></div>
+    <p class="note">노트북이 버벅이면 그래픽을 "빠르게"로. 그림자·빛 번짐·해상도가 낮아져.</p>
+    <button class="btn pri" data-close>확인</button>
+  </div>
+</div></div>
+<div id="menuM" class="modal hide"><div class="card">
+  <h3>메뉴</h3>
+  <div class="col">
+    <button class="btn pri" data-close>계속하기</button>
+    <button class="btn" id="mSettings">설정</button>
+    <button class="btn" id="mHelp">조작법</button>
+    <button class="btn hide" id="mLobby">대기실로 돌아가기 (방장)</button>
+    <button class="btn" id="mQuit">나가기</button>
+  </div>
+</div></div>
+<div id="helpM" class="modal hide"><div class="card help" style="width:min(660px,100%)">
+  <h3>조작법</h3>
+  <h4>타격</h4>
+  <p>마우스로 하얀 배트 원을 공이 올 자리에 맞추고, 공이 들어오는 순간 <span class="kbd">좌클릭</span>/<span class="kbd">Space</span> = 정타 스윙(원 큼), <span class="kbd">우클릭</span>/<span class="kbd">F</span> = 강타(원 작고 멀리 감). 원이 공보다 <b>아래</b>면 뜬공, <b>위</b>면 땅볼. 빠르면 당겨치기(좌측), 늦으면 밀어치기(우측).</p>
+  <p><b>타이밍</b>: 화면 위 <b>투구 신호 바</b>가 셋 → 다리 들기 → 정점 → 스트라이드 → <b>온다!</b> 순서로 차. 투수가 다리를 들었다가 잠깐 멈춘 뒤 내딛는 순간 공이 나와. 스윙하면 왼쪽 아래 <b>스윙 분석</b>에 타이밍(빠름/늦음)과 배트 원 위치가 얼마나 빗나갔는지 떠서 뭐가 문제였는지 알 수 있어. 배트 원 테두리가 <b style="color:#4fd18b">초록</b>으로 바뀌는 순간이 타이밍 딱. 공이 지나가면 구종 색으로 궤적이 잠깐 남아(포심 빨강·슬라이더 파랑·커브 보라·체인지업 초록·스플리터 노랑). <span class="kbd">V</span> 타격 시점 전환. 설정 &gt; 타격 보조 "연습용"이면 공 들어올 위치까지 보여줘. <b>타격 난이도</b>(혼자하기·방 설정): 쉬움 = 배트 원·타이밍 폭이 넓고 공이 조금 느리며, 공이 반쯤 오면 들어올 자리에 작은 점이 떠.</p>
+  <h4>번트</h4>
+  <p>투구 전에 <span class="kbd">B</span> 또는 화면의 <b>번트 자세</b> 버튼 → 배트가 공 높이를 자동으로 따라가. 공 들어올 때 <span class="kbd">클릭</span>만 하면 돼. 커서를 좌우로 두면 3루/1루 쪽으로 굴러가. 2스트라이크에서 번트 파울은 삼진.</p>
+  <h4>투구</h4>
+  <p><span class="kbd">1</span>~<span class="kbd">6</span> 구종 → 마우스로 코스 찍고 <span class="kbd">클릭</span> → 게이지가 차오르면 한 번 더 <span class="kbd">클릭</span>. 초록 구간에서 멈추면 최고 구속·정확한 제구. 빨강까지 넘기면 더 빠르지만 공이 흔들려. 많이 던지면 체력이 떨어져 구속·제구가 나빠져. 주자가 있으면 <span class="kbd">Q</span> 견제 (타석당 3번).</p>
+  <h4>수비</h4>
+  <p><span class="kbd">WASD</span> 이동 · <span class="kbd">Shift</span> 전력질주 · <span class="kbd">Space</span> 점프 · <span class="kbd">C</span> 다이빙. 공 가까이 가면 자동 포구, 주황 원이 낙구 지점. 공 잡으면 <span class="kbd">1</span>1루 <span class="kbd">2</span>2루 <span class="kbd">3</span>3루 <span class="kbd">4</span>홈 <span class="kbd">F</span>투수 <span class="kbd">R</span>중계(커트맨에게) — 외야 깊은 곳에선 유격수·2루수가 <b style="color:#5bd0ff">파란 원</b>으로 나와 중계해. 톡 누르면 정확하게, 꾹 누르면 강송구(빠르지만 빗나갈 수 있음). 베이스 위 숫자가 누를 키고, 금색이 주자가 가는 베이스. 공 든 채로 베이스 밟으면 포스아웃, 주자에 닿으면 태그아웃. 손 놓으면 CPU가 대신 움직여.<br>투구 전에는 <span class="kbd">WASD</span>로 수비 위치를 옮겨 시프트할 수 있어. 기본 수비 카메라는 <b>내 선수 뒤 3인칭</b>(화면 드래그로 회전)이라 <span class="kbd">W</span>는 화면 앞쪽. <span class="kbd">V</span>로 홈 뒤 중계 시점과 전환. 공을 향한 <b>띠</b>가 초록이면 뛰어가면 잡고, 노랑이면 다이빙/점프가 필요, 빨강이면 어려움. 땅볼은 하늘색 링이 막을 지점. 노란 링이 지금 내가 조작하는 선수. 타구가 뜨면 공 쫓는 수비수로 조작이 자동으로 넘어가고(방 설정), <span class="kbd">Q</span>로 공에 가장 가까운 수비수로 직접 바꿀 수 있어. 송구하면 받는 선수로 조작이 따라가.</p>
+  <h4>주루</h4>
+  <p>기본은 자동. <span class="kbd">E</span> 전 주자 한 베이스 더 · <span class="kbd">Q</span> 귀루 · <span class="kbd">Space</span> 슬라이딩(베이스 4.5m 앞) · <span class="kbd">R</span> 투구 전 도루 (너무 일찍 누르면 견제당하기 쉬워).</p>
+  <h4>기타</h4>
+  <p><span class="kbd">Enter</span> 채팅 · <span class="kbd">T</span> 빠른 채팅 · <span class="kbd">Tab</span> 기록판 · <span class="kbd">Esc</span> 메뉴</p>
+  <button class="btn pri" data-close style="width:100%;margin-top:16px">확인</button>
+</div></div>
+
+<div id="conn" class="hide">서버 연결이 끊겼어. 다시 붙는 중… <button id="bReconnect" class="btn sm" style="margin-left:8px">다시 연결</button></div>
+<div id="toast"></div>
+<div class="credit">JAMSIL BASEBALL STADIUM</div>
+<script type="module" src="./app.js"></script>
+</body>
+</html>

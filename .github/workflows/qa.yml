@@ -1,0 +1,17 @@
+# main 이외 브랜치·PR: 빌드 + 테스트만 (배포 안 함)
+name: qa
+on:
+  push:
+    branches-ignore: [main]
+  pull_request:
+jobs:
+  qa:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with: { node-version: 22, cache: npm }
+      - run: npm ci
+      - run: node tools/build.mjs
+      - run: node --check public/app.js && node --check src/index.js && node --check shared/sim.js
+      - run: node --test tests/*.test.mjs
