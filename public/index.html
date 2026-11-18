@@ -758,7 +758,7 @@ table.ls tr.sep th{padding-top:18px;border-top:2px solid var(--line2)}
     <div><label class="lbl" for="volCast">캐스터</label><div class="range"><input id="volCast" type="range" min="0" max="100" value="100"><output id="volCastV">100</output></div></div>
     <div><label class="lbl">캐스터 중계 멘트</label><div class="seg" id="castS"><button data-v="1">자막</button><button data-v="2">자막+음성</button><button data-v="0">끄기</button></div></div>
     <div class="setgrp">조작</div>
-    <div><label class="lbl">타격 보조</label><div class="seg" id="assist"><button data-v="1">기본</button><button data-v="2">연습용</button><button data-v="0">끄기</button></div><p class="note" style="margin-top:6px">기본: 배트 원이 공 가까이면 살짝 끌어당기고, 타이밍이 맞는 순간 원 테두리가 초록. 연습용: 당기는 힘이 세지고 배트 원 위에 줄어드는 타이밍 링이 생겨. 공이 올 자리는 어느 쪽도 안 보여줘.</p></div>
+    <div><label class="lbl">타격 보조</label><div class="seg" id="assist"><button data-v="1">기본</button><button data-v="2">연습용</button><button data-v="0">끄기</button></div><p class="note" style="margin-top:6px">기본: 타이밍이 맞는 순간 커서 테두리가 초록. 연습용: 커서 위에 줄어드는 타이밍 링도 생겨. 끄기: 둘 다 없음. 공이 올 자리는 어느 쪽도 안 보여줘.</p></div>
     <div><label class="lbl" for="sens">타격 커서 감도</label><div class="range"><input id="sens" type="range" min="50" max="160" value="100"><output id="sensV">1.00×</output></div></div>
     <div class="acts"><button class="go" data-close>확인</button></div>
   </div>
@@ -778,14 +778,15 @@ table.ls tr.sep th{padding-top:18px;border-top:2px solid var(--line2)}
   <header><h3>조작법</h3><button class="btn sm" data-close>닫기</button></header>
   <div class="body">
     <section><h4>타격</h4><dl>
-      <dt>마우스</dt><dd>하얀 배트 원을 공이 올 자리에 맞추기</dd>
-      <dt><span class="kbd">좌클릭</span> <span class="kbd">Space</span></dt><dd>정타 스윙 (원 큼)</dd>
-      <dt><span class="kbd">우클릭</span> <span class="kbd">F</span></dt><dd>강타 (원 작고 멀리 감)</dd>
+      <dt>마우스</dt><dd>사각 커서(PCI)를 공이 올 길목에 맞추기</dd>
+      <dt><span class="kbd">좌클릭</span> <span class="kbd">Space</span></dt><dd>정타 스윙 (커서 크고 타이밍 여유)</dd>
+      <dt><span class="kbd">우클릭</span> <span class="kbd">F</span></dt><dd>강타 (커서 작고 타이밍 빡빡, 대신 멀리 감) · F를 누르고 있으면 커서가 강타 크기로</dd>
       <dt><span class="kbd">V</span></dt><dd>타격 시점 전환 (포수 뒤 중계 / 타자 어깨 뒤)</dd>
     </dl>
-    <p>원이 공보다 <b>아래</b>면 뜬공, <b>위</b>면 땅볼. 빠르면 당겨치기(좌측), 늦으면 밀어치기(우측).</p>
-    <p><b>타이밍</b>: 화면 위 투구 신호 바가 셋 포지션, 다리 들기, 정점, 스트라이드, <b>온다!</b> 순서로 차. 투수가 다리를 들었다가 잠깐 멈춘 뒤 내딛는 순간 공이 나와. 배트 원 테두리가 <b class="c4">초록</b>으로 바뀌는 순간이 타이밍 딱. 스윙하면 왼쪽 아래 <b>스윙 분석</b>에 타이밍(빠름/늦음)과 배트 원 위치가 얼마나 빗나갔는지 떠.</p>
-    <p>공이 지나가면 구종 색으로 궤적이 잠깐 남아: 포심 <b class="c1">빨강</b>, 슬라이더 <b class="c2">파랑</b>, 커브 <b class="c3">보라</b>, 체인지업 <b class="c4">초록</b>, 스플리터 <b class="c5">노랑</b>. 설정의 타격 보조를 '연습용'으로 하면 배트 원 위에 줄어드는 타이밍 링이 생기고 자석 보정이 세져. <b>타격 난이도</b> 쉬움 = 배트 원·타이밍 폭이 넓고 공이 조금 느려. 캐주얼 모드는 판정 폭이 더 넓어.</p></section>
+    <p><b>타이밍이 먼저</b>: 타이밍이 정확할수록 커서 판정이 넓어져서(최대 1.6배) 대충 맞춰도 맞아. 타이밍이 빗나가면 커서가 정확해도 헛스윙.</p>
+    <p>공이 커서의 <b>아래쪽</b>에 맞으면 땅볼, <b>가운데</b>면 라인드라이브, <b>위쪽</b>이면 뜬공 (커서 안의 가로 눈금 두 줄이 경계). 빠르면 당겨치기(좌측), 늦으면 밀어치기(우측).</p>
+    <p><b>투구 신호</b>: 화면 위 신호 바가 셋 포지션, 다리 들기, 정점, 스트라이드, <b>온다!</b> 순서로 차. 커서 테두리가 <b class="c4">초록</b>인 순간이 타이밍 창 한가운데. 스윙하면 왼쪽 아래 <b>스윙 분석</b>에 타이밍(빠름/늦음)과 커서 위치(점선 = 타이밍 보너스로 넓어진 판정)가 떠.</p>
+    <p>공이 지나가면 구종 색으로 궤적이 잠깐 남아: 포심 <b class="c1">빨강</b>, 슬라이더 <b class="c2">파랑</b>, 커브 <b class="c3">보라</b>, 체인지업 <b class="c4">초록</b>, 스플리터 <b class="c5">노랑</b>. 공이 올 자리는 절대 미리 안 보여줘. <b>타격 난이도</b> 쉬움 = 커서·타이밍 창 1.2배, 어려움 0.82배. <b>캐주얼</b>은 리얼보다 커서·타이밍 창이 1.06배 넓고 타구가 6% 빨라.</p></section>
     <section><h4>번트</h4><dl>
       <dt><span class="kbd">B</span> 또는 화면 버튼</dt><dd>투구 전에 번트 자세. 배트가 공 높이를 자동으로 따라가</dd>
       <dt><span class="kbd">클릭</span></dt><dd>공 들어올 때 대기. 커서를 좌우로 두면 3루/1루 쪽으로 굴러가</dd>
