@@ -9,3 +9,4 @@ dist/
 public/assets/sfx/index.json
 __pycache__/
 tools/qa/.out/
+public/assets/models/player.lod.bin
