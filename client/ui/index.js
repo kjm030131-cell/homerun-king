@@ -279,6 +279,7 @@ export function createUI(ctx) {
     if (screen === 'game') updateCoach(S, role);
   };
   ui.introCard = (kind, s) => introCard(kind, s, { nameOf: ctx.nameOf, myId: ctx.myId, sound: ctx.sound });
+  ui.introHide = introHide; // [fix] main.js endIntro 가 부르는데 빠져 있어서 예외 → 프레임 루프가 멈추던(화면 정지) 버그
   ui.walkup = (s) => walkup(s, { nameOf: ctx.nameOf, myId: ctx.myId, sound: ctx.sound });
   ui.renderPitchBar = (pt) => renderPitchBar(pt, true, ctx.setPitchType);
 

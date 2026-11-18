@@ -1463,7 +1463,13 @@ function drawMinimap() {
 // ═════════════ 메인 루프 ═════════════
 let lastT = performance.now(), frameN = 0;
 const perfAcc = { t: 0, n: 0, skip: 2 };
+// [fix] 프레임 안에서 예외가 하나라도 나면 requestAnimationFrame 이 다시 안 불려 화면이 영영 멈췄음 → 다음 프레임은 항상 예약하고 오류는 콘솔에만
+let frameErrs = 0;
 function frame(now, manual) {
+  if (!manual) requestAnimationFrame(frame);
+  try { frameBody(now, manual); } catch (e) { if (frameErrs++ < 20) console.error('[frame]', e); if (manual) throw e; }
+}
+function frameBody(now, manual) {
   if (window.__vclock) now = performance.now(); // 테스트용 가상 시계
   const dt = Math.min(0.05, (now - lastT) / 1000); lastT = now;
   const time = now / 1000;
@@ -1512,10 +1518,9 @@ function frame(now, manual) {
     stadium.drawScoreboard(S, big ? { big: big.big, sub: big.sub } : { lp });
   }
   fx.update(dt, camera);
-  if (window.__noRender) { if (!manual) requestAnimationFrame(frame); return; } // 테스트용
+  if (window.__noRender) return; // 테스트용
   syncAllSkins(camera);
   look.render(); // [stadium]
-  if (!manual) requestAnimationFrame(frame);
 }
 window.__frame = (t) => frame(t, true);
 requestAnimationFrame(frame);
