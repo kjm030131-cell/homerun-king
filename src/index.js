@@ -1,5 +1,5 @@
 // 홈런왕 — Cloudflare Worker + Durable Objects
-//  Room  : 방 하나 = DO 하나. 60Hz 시뮬레이션, 20Hz 스냅샷 브로드캐스트
+//  Room  : 방 하나 = DO 하나. 60Hz 시뮬레이션, 30Hz 스냅샷 브로드캐스트 (변한 키만 — [net] packSnap)
 //  Lobby : 공개 방 목록 (싱글톤 DO)
 import { Game } from '../shared/sim.js';
 
@@ -32,6 +32,31 @@ export default {
 
 const TICK = 1000 / 60;
 const SNAP_EVERY = 2;
+// [net] 스냅샷 델타: 매번 통째로(평균 1.5KB, 30Hz × 사람 수) 보내던 것을 '지난 브로드캐스트와 달라진 키'만 보냄.
+//  - 키 단위 JSON 문자열 비교 → 같으면 뺌, 없어진 키는 x:[키…]. 받는 쪽(client/net/snap.js mergeSnap)이 지난 스냅샷에 덮어씀.
+//  - d:1 = 델타. 3초마다·누가 새로 접속하면 다음 한 번은 통째로(k:1) → 어긋나도 3초 안에 저절로 맞음.
+//  - t·now·ph 는 항상, ev(이벤트)·pg(핑 목록)는 있을 때만(합치지 않음).
+const SNAP_KEY_EVERY = 90; // 스냅샷 90개(3초)마다 통째로
+const PASS = new Set(['t', 'now', 'ph', 'ev', 'pg']);
+export function packSnap(st, s) {
+  const full = !st.last || ++st.n >= SNAP_KEY_EVERY;
+  if (full) { st.last = new Map(); st.n = 0; }
+  const parts = [];
+  for (const k in s) {
+    const v = s[k]; if (v === undefined) continue;
+    const js = JSON.stringify(v);
+    if (PASS.has(k)) { parts.push(JSON.stringify(k) + ':' + js); continue; }
+    if (!full && st.last.get(k) === js) continue;
+    st.last.set(k, js); parts.push(JSON.stringify(k) + ':' + js);
+  }
+  if (full) parts.push('"k":1');
+  else {
+    parts.push('"d":1');
+    let gone = null; for (const k of st.last.keys()) if (!(k in s) || s[k] === undefined) (gone || (gone = [])).push(k);
+    if (gone) { for (const k of gone) st.last.delete(k); parts.push('"x":' + JSON.stringify(gone)); }
+  }
+  return '{' + parts.join(',') + '}';
+}
 
 export class Room {
   constructor(state, env) {
@@ -45,6 +70,7 @@ export class Room {
     this.idSeq = 0;
     this.lastReport = 0;
     this.dirty = true;
+    this.snapSt = { last: null, n: 0 }; // [net] 델타 기준(지난 브로드캐스트)
     this.newGame();
   }
   newGame() {
@@ -117,6 +143,7 @@ export class Room {
     if (this.tokens.get(token) === id) server.send(JSON.stringify({ t: 'welcome', id, token, code: this.code }));
     server.send(JSON.stringify(g.lobbyState()));
     server.send(JSON.stringify(g.snapshot()));
+    this.snapSt.last = null; // [net] 새로 들어온 사람: 다음 브로드캐스트는 통째로 (접속 스냅샷과 다음 델타 사이에 값이 바뀌었다 돌아온 키 대비)
 
     server.addEventListener('message', (e) => {
       if (typeof e.data !== 'string' || e.data.length > 4000) return;
@@ -146,7 +173,7 @@ export class Room {
       const dt = Math.min(0.1, (t - last) / 1000);
       last = t;
       try { this.game.tick(dt); } catch (err) { console.error('tick', err); }
-      if (++this.n % SNAP_EVERY === 0) this.broadcast(this.game.snapshot(true)); // true: 게임 이벤트(ev)를 실어 보내고 비움
+      if (++this.n % SNAP_EVERY === 0 && this.socks.size) this.broadcastRaw(packSnap(this.snapSt, this.game.snapshot(true))); // true: 게임 이벤트(ev)를 실어 보내고 비움 · [net] 변한 키만
       if (this.n % 60 === 0) this.report();
     }, TICK);
   }
@@ -168,8 +195,8 @@ export class Room {
     this.report(true);
   }
 
-  broadcast(m) {
-    const s = JSON.stringify(m);
+  broadcast(m) { this.broadcastRaw(JSON.stringify(m)); }
+  broadcastRaw(s) {
     for (const [id, ws] of this.socks) {
       try { ws.send(s); } catch { this.socks.delete(id); }
     }

@@ -25,6 +25,7 @@ const nrnd = () => { nseed = (nseed * 1664525 + 1013904223) >>> 0; return nseed 
 const gauss = () => { let u = 0, v = 0; while (!u) u = nrnd(); while (!v) v = nrnd(); return Math.sqrt(-2 * Math.log(u)) * Math.cos(2 * Math.PI * v); };
 Math.random = rnd;
 
+const hr = () => Number(process.hrtime.bigint()) / 1e6;
 // ── 가상 시계 ──
 let VT = 0; // ms
 const heap = []; let seq = 0;
@@ -34,7 +35,7 @@ const pop = () => { const top = heap[0], last = heap.pop(); if (heap.length) { h
 const T0 = 1.7e12;
 const timers = new Map(); let tid = 1;
 Date.now = () => T0 + Math.floor(VT);
-globalThis.setInterval = (fn, ms) => { const id = tid++; timers.set(id, true); const run = (at) => push(at, () => { if (!timers.get(id)) return; fn(); run(at + ms + (SRVJIT ? Math.abs(gauss()) * SRVJIT : 0)); }); run(VT + ms); return id; };
+globalThis.setInterval = (fn, ms) => { const id = tid++; timers.set(id, true); const run = (at) => push(at, () => { if (!timers.get(id)) return; const a = hr(); fn(); const d = hr() - a; cpu.loop.push(d); addSec(d); run(at + ms + (SRVJIT ? Math.abs(gauss()) * SRVJIT : 0)); }); run(VT + ms); return id; };
 globalThis.setTimeout = (fn, ms = 0) => { const id = tid++; timers.set(id, true); push(VT + ms, () => { if (timers.get(id)) { timers.delete(id); fn(); } }); return id; };
 globalThis.clearInterval = globalThis.clearTimeout = (id) => { timers.delete(id); };
 
@@ -50,20 +51,19 @@ console.error = (...a) => errors.push(a.map((x) => (x && x.stack) || String(x)).
 const { Game } = await import(pathToFileURL(join(ROOT, 'shared/sim.js')).href);
 const SIM = await import(pathToFileURL(join(HERE, 'shared/sim.js')).href); // 클라 모델은 항상 지금 sim 의 integrate (클라 번들과 같게) — v20 클라 모델은 v20 sim
 const CSIM = CLIENT === 'v20' ? await import(pathToFileURL(join(ROOT, 'shared/sim.js')).href) : SIM;
-const hr = () => Number(process.hrtime.bigint()) / 1e6;
-const cpu = { tick: [], snap: [], json: [], perSec: new Map() };
+const cpu = { tick: [], snap: [], json: [], loop: [], perSec: new Map() };
 const addSec = (ms) => { const k = Math.floor(VT / 1000); cpu.perSec.set(k, (cpu.perSec.get(k) || 0) + ms); };
 {
   const ot = Game.prototype.tick, os = Game.prototype.snapshot;
-  Game.prototype.tick = function (dt) { const a = hr(); const r = ot.call(this, dt); const d = hr() - a; cpu.tick.push(d); addSec(d); recordTruth(this); return r; };
-  Game.prototype.snapshot = function (...x) { const a = hr(); const r = os.apply(this, x); const d = hr() - a; cpu.snap.push(d); addSec(d); return r; };
+  Game.prototype.tick = function (dt) { const a = hr(); const r = ot.call(this, dt); const d = hr() - a; cpu.tick.push(d); recordTruth(this); return r; };
+  Game.prototype.snapshot = function (...x) { const a = hr(); const r = os.apply(this, x); const d = hr() - a; cpu.snap.push(d); return r; };
 }
 const { Room } = await import(pathToFileURL(join(ROOT, 'src/index.js')).href);
 const lobbyStub = { idFromName: () => 'x', get: () => ({ fetch: async () => new RealResponse('{}') }) };
 const room = new Room({ storage: { get: async () => null, put: async () => { } } }, { LOBBY: lobbyStub });
 { // 브로드캐스트 직렬화 시간
   const ob = room.broadcast.bind(room);
-  room.broadcast = (m) => { const a = hr(); const s = JSON.stringify(m); const d = hr() - a; if (m.t === 's') { cpu.json.push(d); addSec(d); } for (const [id, ws] of room.socks) { try { ws.sendRaw(s); } catch { room.socks.delete(id); } } void ob; };
+  room.broadcast = (m) => { const a = hr(); const s = JSON.stringify(m); const d = hr() - a; if (m.t === 's') cpu.json.push(d); for (const [id, ws] of room.socks) { try { ws.sendRaw(s); } catch { room.socks.delete(id); } } void ob; };
 }
 
 // ── 진짜 위치 기록 (서버 매 틱) ──
@@ -98,7 +98,7 @@ const { makeClient } = await import(pathToFileURL(join(HERE, 'tools/qa/netclient
 const clients = [];
 async function connect(i) {
   const down = link(), up = link();
-  const C = makeClient({ kind: CLIENT, sim: CSIM, i, now: () => VT / 1000, send: (m) => { const s = JSON.stringify(m); up(() => sock.fire('message', { data: s })); }, truthAt, rnd: nrnd, gauss });
+  const C = makeClient({ kind: CLIENT, sim: CSIM, i, now: () => VT / 1000, send: (m) => { const s = JSON.stringify(m); up(() => { const a = hr(); sock.fire('message', { data: s }); addSec(hr() - a); }); }, truthAt, rnd: nrnd, gauss });
   const ls = { message: [], close: [], error: [] };
   const sock = {
     accept() { }, fire(t, e) { for (const f of ls[t]) f(e); },
@@ -138,7 +138,7 @@ host.send({ t: 'start' });
 await runUntil(3000);
 for (const C of clients) C.reset(); // 로비 메시지는 빼고 경기 중만
 const sec0 = Math.floor(VT / 1000);
-cpu.tick.length = cpu.snap.length = cpu.json.length = 0;
+cpu.tick.length = cpu.snap.length = cpu.json.length = cpu.loop.length = 0;
 const wall0 = Date.now ? process.hrtime.bigint() : 0n;
 await runUntil(VT + SEC * 1000);
 const wallMs = Number(process.hrtime.bigint() - wall0) / 1e6;
@@ -153,7 +153,7 @@ const mean = (k) => per.reduce((a, p) => a + p[k], 0) / per.length;
 const R = {
   cfg: { root: ROOT.replace(HERE, '.'), client: CLIENT, players: NP, sec: SEC, ping: PING, jit: JIT, loss: LOSS, seed: +(opt.seed || 1) },
   downKBps: +mean('kbps').toFixed(2), downKBpsMax: Math.max(...per.map((p) => p.kbpsMax)), msgsPerSec: +mean('mps').toFixed(1), snapAvgB: Math.round(mean('snapB')), snapMaxB: Math.max(...per.map((p) => p.snapMaxB)),
-  srv: { tickMs: st(cpu.tick), snapMs: st(cpu.snap), jsonMs: st(cpu.json), cpuMsPerSec: st(secs) },
+  srv: { loopMs: st(cpu.loop), tickMs: st(cpu.tick), snapMs: st(cpu.snap), jsonMs: st(cpu.json), cpuMsPerSec: st(secs) },
   cl: { parseMs: st(per.flatMap((p) => p.parse)), procMs: st(per.flatMap((p) => p.proc)), frameMs: st(per.flatMap((p) => p.frameMs)) },
   underrun: +mean('underrun').toFixed(4), holdFrames: +mean('hold').toFixed(4), extrapMs: +mean('extrapMs').toFixed(1), delayMs: +mean('delayMs').toFixed(1),
   pl: { errRms: +mean('plErr').toFixed(3), errP99: +mean('plErr99').toFixed(3), stall: +mean('stall').toFixed(4), lurch: +mean('lurch').toFixed(4), jumpPerMin: +mean('plJump').toFixed(2), catchup: +mean('catchup').toFixed(4) },
@@ -167,7 +167,7 @@ else {
   const c = R.cfg;
   console.log(`── ${c.root} 클라=${c.client} ${c.players}명 ${c.sec}초 핑${c.ping} 지터${c.jit} 손실${c.loss * 100}% seed${c.seed}${FMS ? ` 프레임${FMS}ms 스파이크${FSPIKE * 100}%` : ''}`);
   console.log(`  내려받기 ${R.downKBps}KB/s(최대 ${R.downKBpsMax}) ${R.msgsPerSec}msg/s 스냅샷 평균 ${R.snapAvgB}B 최대 ${R.snapMaxB}B`);
-  console.log(`  서버 틱 ${R.srv.tickMs.avg}ms(p99 ${R.srv.tickMs.p99} 최대 ${R.srv.tickMs.max}) 스냅샷 ${R.srv.snapMs.avg} 직렬화 ${R.srv.jsonMs.avg} → CPU ${R.srv.cpuMsPerSec.avg}ms/초(최대 ${R.srv.cpuMsPerSec.max})`);
+  console.log(`  서버 루프 1회 ${R.srv.loopMs.avg}ms(p99 ${R.srv.loopMs.p99} 최대 ${R.srv.loopMs.max}) 중 틱 ${R.srv.tickMs.avg}ms(p99 ${R.srv.tickMs.p99} 최대 ${R.srv.tickMs.max}) 스냅샷 ${R.srv.snapMs.avg} 직렬화 ${R.srv.jsonMs.avg} → 서버 CPU 합계 ${R.srv.cpuMsPerSec.avg}ms/초(최대 ${R.srv.cpuMsPerSec.max})`);
   console.log(`  클라 파싱 ${R.cl.parseMs.avg}ms(최대 ${R.cl.parseMs.max}) 처리 ${R.cl.procMs.avg}ms 프레임 모델 ${R.cl.frameMs.avg}ms`);
   console.log(`  보간 지연 ${R.delayMs}ms · 언더런 ${(R.underrun * 100).toFixed(2)}% 프레임 (멈춤 ${(R.holdFrames * 100).toFixed(2)}%, 외삽 평균 ${R.extrapMs}ms)`);
   console.log(`  선수/주자: 오차 RMS ${R.pl.errRms}m p99 ${R.pl.errP99}m · 끊김(움직이는데 멈춤) ${(R.pl.stall * 100).toFixed(2)}% · 튐(과속) ${(R.pl.lurch * 100).toFixed(2)}% · 0.3m+ 점프 ${R.pl.jumpPerMin}/분 (따라가는 중 ${(R.pl.catchup * 100).toFixed(1)}% 제외)`);

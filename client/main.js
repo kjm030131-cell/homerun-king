@@ -21,6 +21,7 @@ import { bus } from './core/bus.js'; // [gameplay] 게임 이벤트 → bus
 import { createPCI, judgeSwing } from './game/batting.js'; // [gameplay] PCI 타격
 import { createBallLook } from './game/ball.js'; // [pitch] 실밥·구종별 회전축
 import { createNetInterp, mergeBall, stepBall, rkey } from './net/interp.js'; // [net] 서버 시계·보간 버퍼·외삽·공 합류 (tools/qa/netbench.mjs 로 측정)
+import { createSnapMerger } from './net/snap.js'; // [net] 서버가 바뀐 키만 보냄 → 합치기
 
 const $ = (id) => document.getElementById(id);
 const clamp = (v, a, b) => Math.max(a, Math.min(b, v));
@@ -167,7 +168,7 @@ crossMark.renderOrder = 11; scene.add(crossMark);
 // ═════════════ 상태 ═════════════
 let net = null, myId = null, myName = '', roomCode = null, myToken = null;
 let lobby = null, S = null, prevS = null;
-const NI = createNetInterp(); // [net]
+const NI = createNetInterp(), SM = createSnapMerger(); // [net]
 let screen = 'title';
 const simNow = () => NI.simNow(nowP()); // [net]
 
@@ -261,8 +262,9 @@ function connectWS(code, name, pw = '') {
   const tok = sessionStorage.getItem('hr_tok_' + code) || '';
   const ws = new WebSocket(`${proto}://${location.host}/ws/${code}?name=${encodeURIComponent(name)}&token=${encodeURIComponent(tok)}&pw=${encodeURIComponent(pw)}`);
   let opened = false;
+  SM.reset(); // [net] 새 소켓은 통째 스냅샷부터
   ws.onopen = () => { opened = true; wsRetry = 0; $('conn').classList.add('hide'); };
-  ws.onmessage = (e) => { lastMsgAt = performance.now(); try { handleMsg(JSON.parse(e.data)); } catch (err) { console.error(err); } };
+  ws.onmessage = (e) => { if (net && net.ws !== ws) return; /* [net] 재접속 뒤 옛 소켓에 남은 메시지 무시 */ lastMsgAt = performance.now(); try { handleMsg(JSON.parse(e.data)); } catch (err) { console.error(err); } };
   ws.onclose = (e) => {
     if (!net || net.ws !== ws) return;
     if (e.code === 4001) { toTitle(); ui.openPw(code); ui.showErr('비밀번호가 틀렸어'); return; }
@@ -299,7 +301,7 @@ function handleMsg(m) {
     case 'chat': addChat(m.name, m.text, m.team); break;
     case 'kicked': toTitle(); ui.showErr('방장이 내보냈어'); break;
     case 'toast': toast(m.text); break;
-    case 's': onSnap(m); if (m.ev) for (const x of m.ev) bus.emit(x.e, x); break; // [gameplay] 게임 이벤트 연결 지점 (docs/rebuild/events.md)
+    case 's': if (!(m = SM.merge(m))) break; onSnap(m); if (m.ev) for (const x of m.ev) bus.emit(x.e, x); break; // [gameplay] 게임 이벤트 연결 지점 (docs/rebuild/events.md)
   }
 }
 
@@ -308,7 +310,7 @@ function setScreen(sc) { ui.setScreen(sc); }
 function toTitle() {
   if (net) { const n = net; net = null; n.close(); }
   clearInterval(pingIv);
-  S = null; prevS = null; lobby = null; myId = null; NI.reset(); // [net]
+  S = null; prevS = null; lobby = null; myId = null; NI.reset(); SM.reset(); // [net]
   setScreen(myName ? 'lobby' : 'title'); // [ui] 나가면 닉네임이 있으면 로비로
   history.replaceState(null, '', location.pathname);
   clearActors();

@@ -3,6 +3,7 @@
 import { pathToFileURL } from 'node:url';
 import { join } from 'node:path';
 const HERE = new URL('../../', import.meta.url).pathname;
+const SNAP = await import(pathToFileURL(join(HERE, 'client/net/snap.js')).href).catch(() => null);
 const NI = await import(pathToFileURL(join(HERE, 'client/net/interp.js')).href).catch(() => null);
 if (NI && process.env.NETCFG) Object.assign(NI.NET, JSON.parse(process.env.NETCFG)); // 튜닝용: NETCFG='{"Q":0.9}'
 
@@ -23,6 +24,7 @@ export function makeClient({ kind, sim, i, now, send, truthAt, rnd, gauss }) {
   const NB = kind === 'new' && NI ? NI.createNetInterp() : null;
   const simNow = () => (NB ? NB.simNow(now()) : now() + (offset || 0));
   const A = []; const runners = new Map();
+  const merger = SNAP ? SNAP.createSnapMerger() : null;
   C.send = (m) => send(m);
   C.reset = () => { stat.down = 0; stat.msgs = 0; stat.perSec.clear(); for (const k of ['parse', 'proc', 'frameMs', 'plErrs', 'bErrs']) stat[k].length = 0; for (const k of ['snapB', 'snapN', 'snapMaxB', 'frames', 'under', 'hold', 'extrap', 'delaySum', 'plN', 'plE2', 'stall', 'lurch', 'moving', 'plJump', 'bN', 'bE2', 'bJump', 'catchup']) stat[k] = 0; stat.ev = {}; };
 
@@ -35,6 +37,7 @@ export function makeClient({ kind, sim, i, now, send, truthAt, rnd, gauss }) {
         case 'welcome': C.id = m.id; break;
         case 'pong': { const rtt = Math.round((now() - m.c) * 1000); send({ t: 'rtt', ms: rtt }); break; }
         case 's': {
+          if (SNAP) { m = merger.merge(m); if (!m) { C.errors.push('델타인데 기준 없음'); break; } }
           const B = Buffer.byteLength(raw); stat.snapB += B; stat.snapN++; stat.snapMaxB = Math.max(stat.snapMaxB, B);
           onSnap(m);
           if (m.ev) for (const x of m.ev) stat.ev[x.e] = (stat.ev[x.e] || 0) + 1;
