@@ -81,7 +81,7 @@ export function runGame({ seed = 1, rules = 'real', innings, fuzz = false, timeL
           if (g.play && g.play === play) {
             const r = d.rid != null ? g.runners.find((x) => x.rid === d.rid) : null;
             const s0 = r ? (r.batter || r.start == null ? (r.batter ? 0 : r.start) : r.start) : null;
-            if (d.kind === 'fly') playFly = true;
+            if (d.kind === 'fly') { playFly = true; if (g.outs < 3 && playRunsScored > 0) flag('뜬공 포구 전에 출발한 주자 득점 인정(태그업 위반)', `득점 ${playRunsScored}`); }
             if (d.kind === 'force' && r && !playFly && !r.mustReturn && s0 > brokenFrom) flag('역포스: 뒤 주자가 이미 아웃됐는데 포스아웃', `주자 ${s0}루 출발, 이미 ${brokenFrom}루 출발 주자 아웃`);
             if (r && s0 != null && !playFly) brokenFrom = Math.min(brokenFrom, s0);
             playOuts.push(d.kind);

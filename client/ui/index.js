@@ -56,8 +56,11 @@ export function createUI(ctx) {
   };
 
   // ── 모달 ──
-  const onClose = { menuM: () => ctx.setPaused(false) };
-  function openModal(id) { show(id, true); if (id === 'menuM') ctx.setPaused(true); }
+  // [bugs] 혼자하기: 일시정지 메뉴에서 연 설정·조작법 창(또는 경기 중 H)도 열려 있는 동안 멈춤 — 전엔 메뉴가 닫히는 순간 풀려서 설정 보는 동안 투구가 들어옴
+  const PAUSE = ['menuM', 'setM', 'helpM'];
+  const repause = () => ctx.setPaused(screen === 'game' && PAUSE.some((m) => isShown(m)));
+  const onClose = { menuM: repause, setM: repause, helpM: repause };
+  function openModal(id) { show(id, true); if (PAUSE.includes(id) && screen === 'game') ctx.setPaused(true); }
   function closeModal(id) { if (!isShown(id)) return; show(id, false); onClose[id] && onClose[id](); }
   document.querySelectorAll('[data-close]').forEach((b) => (b.onclick = () => closeModal(b.closest('.modal').id)));
   document.querySelectorAll('.modal').forEach((m) => m.addEventListener('pointerdown', (e) => { if (e.target === m) closeModal(m.id); }));

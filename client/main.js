@@ -49,6 +49,7 @@ const renderer = new THREE.WebGLRenderer({ canvas, antialias: true, powerPrefere
 const scene = new THREE.Scene();
 const camera = new THREE.PerspectiveCamera(55, 1, 0.15, 7500);
 window.__camera = camera;
+window.__bus = bus; // [bugs] QA 훅: 이벤트·사운드 신호 중복/누락 확인용 (tools/qa/flows.mjs)
 camera.position.set(0, 60, -100);
 // [stadium] 톤매핑·조명(해/조명탑)·그림자·안개·블룸·환경광·낮밤은 client/stadium/look.js
 const look = createLook(renderer, scene, camera);
@@ -191,6 +192,7 @@ function clearActors() {
   runners.clear();
   for (const A of coaches) scene.remove(A.p.root); coaches.length = 0;
 }
+window.__actors = () => ({ fielders, batter, runners: [...runners.values()], umps, coaches, celeb: celeb ? celeb.actors : [] }); // [bugs] QA 훅: 장비(헬멧·모자) 상태 확인용 (tools/qa/flows.mjs)
 // 심판 (홈, 1루, 3루)
 for (const [x, z, ry] of [[0, -2.35, 0], [-22.5, 27, Math.PI * 0.75], [22.5, 27, -Math.PI * 0.75]]) {
   const U = mkActor({ team: 'ump', role: 'ump', seed: x + 3 });
