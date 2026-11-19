@@ -110,13 +110,14 @@ export function createNetInterp() {
 // 공 합류: 서버 공(s.now 시점)을 화면 공의 시각까지 앞으로 굴린 뒤 부드럽게 합류 (main.js onSnap 에서 옮김 — [gameplay] 수정 포함)
 // [net] 화면 공은 자기 시각 tb 를 갖는다(프레임마다 tb → simNow 만큼 적분). 전에는 스냅샷이 프레임 사이에 오면 서버 공을 '지금'까지 굴려
 //       '지난 프레임 위치'에 합류시켜서, 다음 프레임에 또 dt 만큼 적분 → 공이 앞서 갔다 끌려오기를 반복(30fps 에서 0.3m+ 튐 5회/분, 오차 p99 2.2m).
+const _ev = {}; // integrate 결과 재사용
 export function mergeBall(ballL, s, simT, integrate, lastBallSt) {
   const [x, y, z, vx, vy, vz, h, st, sx, sy, sz] = s.b;
   const sb = { x, y, z, vx, vy, vz, sx, sy, sz, state: st, h, tb: simT };
   const T = ballL && ballL.h < 0 && h < 0 && ballL.tb != null && ballL.tb <= simT ? ballL.tb : simT;
   if (h < 0) {
     const age = clamp(T - s.now, -0.1, 0.25);
-    if (age >= 0) for (let i = 0, n = Math.ceil(age * 120); i < n; i++) integrate(sb, age / n);
+    if (age >= 0) for (let i = 0, n = Math.ceil(age * 120); i < n; i++) integrate(sb, age / n, true, _ev);
     else { // 스냅샷이 화면 공보다 '미래'(시계가 천천히 따라가는 중) → 그 시각으로 짧게 되돌림(직선 + 중력, 0.1초 이내라 오차 수 mm)
       sb.x += sb.vx * age; sb.z += sb.vz * age;
       if (st !== 'ground') { sb.y = Math.max(0, sb.y + sb.vy * age + 4.9 * age * age); sb.vy -= 9.8 * age; } // age < 0: 그때 위쪽 속도가 더 컸음
@@ -138,5 +139,5 @@ export function stepBall(ballL, t, integrate, fn) {
   ballL.tb = t;
   if (!span) return;
   const steps = Math.ceil(span / (1 / 120));
-  for (let i = 0; i < steps; i++) { const ev = integrate(ballL, span / steps); if (fn) fn(ev); }
+  for (let i = 0; i < steps; i++) { const ev = integrate(ballL, span / steps, true, _ev); if (fn) fn(ev); }
 }

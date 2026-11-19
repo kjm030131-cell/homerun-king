@@ -291,8 +291,8 @@ function aero(b, dt) {
   b.vx += ax * dt; b.vy += ay * dt; b.vz += az * dt;
 }
 // 사건 리턴: landed/wall/over/pole. world=false면 순수 비행만(비거리 추정용)
-export function integrate(b, dt, world = true) {
-  const ev = { landed: false, wall: false, over: false, pole: false, surf: null, impact: 0 };
+export function integrate(b, dt, world = true, out = null) { // [net] out: 재사용할 결과 객체(클라 낙구 예측 루프가 초당 수천 번 불러 GC 압력) — 결과는 같음
+  const ev = out ? (out.landed = out.wall = out.over = out.pole = false, out.surf = null, out.impact = 0, out) : { landed: false, wall: false, over: false, pole: false, surf: null, impact: 0 };
   b.vy -= G * dt;
   if (b.state === 'thrown') {
     const sp = Math.hypot(b.vx, b.vy, b.vz), k = 1 - DRAG * 0.5 * sp * dt;

@@ -316,6 +316,9 @@ export class Character {
       if (this.lo) { this.lo.visible = far; this.hi.visible = !far; }
       every = !inView ? BODY.hiddenUpdate : far ? BODY.farUpdate : 1;
     }
+    // [net] 'N 프레임마다'는 fps 가 30 근처로 떨어지면(맥북 에어) 먼 선수 동작이 15Hz·화면 밖이 5Hz 로 뚝뚝 끊겼음 →
+    //       fps 에 맞춰 N 을 줄임(60fps 에선 전과 같음, 30fps 면 먼 선수 매 프레임·화면 밖 3프레임마다 = 둘 다 같은 초당 횟수)
+    if (every > 1 && FR.fk < 1) every = Math.max(1, Math.round(every * FR.fk));
     const run = every <= 1 || ((FR.n + this.phase) % every) === 0 || !this.ran;
     if (run) {
       this.mixer.update(this.acc); this.acc = 0; this.ran = true;
@@ -332,7 +335,7 @@ export class Character {
     this.lookW += ((this.lookReq ?? 0) - this.lookW) * (1 - Math.exp(-8 * dt));
     if (this.lookW > 0.01) any = true;
     if (!any) return;
-    this.root.updateMatrixWorld(true);
+    // [net] root.updateMatrixWorld(true)(뼈 53개+장비 전체)를 지움 — twoBoneIK·_look 의 getWorldPosition/Quaternion 이 필요한 부모 사슬만 갱신함 (qa 요청: 심판 look 이 상시라 매 프레임 전체 갱신이었음)
     const B = this.bones;
     for (const [s, n] of [['L', 'Left'], ['R', 'Right']]) {
       const w = this.ikW[s]; if (w <= 0.01) continue;
@@ -450,6 +453,7 @@ export class Character {
   // 렌더 직전 한 번(skinned.js syncAllSkins 에서 부름): 다음 프레임 컬링·LOD 판단용
   static frame(camera) {
     FR.n++;
+    { const t = performance.now(), d = FR.t0 ? Math.min(0.1, (t - FR.t0) / 1000) : 1 / 60; FR.t0 = t; FR.dtE = (FR.dtE || 1 / 60) + (d - (FR.dtE || 1 / 60)) * 0.05; FR.fk = Math.min(1, (1 / 60) / FR.dtE); } // [net] 프레임 시간 평균 → 갱신 간격 배율
     if (!camera) { FR.has = false; return; }
     camera.updateMatrixWorld();
     _pm.multiplyMatrices(camera.projectionMatrix, camera.matrixWorldInverse);

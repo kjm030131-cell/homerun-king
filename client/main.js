@@ -1086,6 +1086,7 @@ function updateTracer() {
   tracerMat.opacity = tracerId == null ? 0 : e < 2.2 ? 0.85 : Math.max(0, 0.85 - (e - 2.2) * 1.5);
   tracer.visible = tracerMat.opacity > 0.01 && (camMode === 'bat' || camMode === 'catch' || camMode === 'tv') && !(S && S.ph === 'pitch');
 }
+const _predB = {}, _predEv = {}; // [net]
 function updateBall(dt, t, role, pitchPhase) {
   const s = S;
   let vis = false;
@@ -1128,8 +1129,8 @@ function updateBall(dt, t, role, pitchPhase) {
       if (ballL.state === 'air' && ballL.y > 1.2 && ballL.vy > -40) {
         if (tp - landT > 0.08) {
           landT = tp;
-          const b = { ...ballL };
-          let i = 0; for (; i < 360; i++) { const ev = integrate(b, 1 / 60); if (ev.landed || ev.wall || ev.over) break; }
+          const b = Object.assign(_predB, ballL); // [net] 예측용 공·결과 객체 재사용
+          let i = 0; for (; i < 360; i++) { const ev = integrate(b, 1 / 60, true, _predEv); if (ev.landed || ev.wall || ev.over) break; }
           if (!landPt || Math.hypot(landPt[0] - b.x, landPt[1] - b.z) > 3) landTotal = Math.max(0.3, i / 60);
           landLeft = i / 60;
           landPt = [b.x, b.z];
@@ -1153,8 +1154,8 @@ function updateBall(dt, t, role, pitchPhase) {
         else {
           if (tp - cutT > 0.1) {
             cutT = tp; cut = null;
-            const b = { ...ballL };
-            for (let i = 1; i <= 240; i++) { integrate(b, 1 / 60); const tt = i / 60; if (b.y < 1.3 && Math.hypot(b.x - me.x, b.z - me.z) / SPRINT_SPEED + 0.12 <= tt) { cut = [b.x, b.z, tp + tt]; break; } }
+            const b = Object.assign(_predB, ballL); // [net]
+            for (let i = 1; i <= 240; i++) { integrate(b, 1 / 60, true, _predEv); const tt = i / 60; if (b.y < 1.3 && Math.hypot(b.x - me.x, b.z - me.z) / SPRINT_SPEED + 0.12 <= tt) { cut = [b.x, b.z, tp + tt]; break; } }
           }
           if (cut) { tx = cut[0]; tz = cut[1]; tLeft = cut[2] - tp; cutRing.visible = true; cutRing.position.set(tx, 0.07, tz); cutRing.scale.setScalar(1 + 0.1 * Math.sin(tp * 10)); }
         }
@@ -1448,22 +1449,30 @@ function updateHUD() {
 }
 // 미니맵
 const mm = $('minimap').getContext('2d');
+// [net] 경기장 바탕(펜스·내야·베이스)은 안 바뀌니 한 번만 그려 두고 복사 — 전엔 2프레임마다 다시 그리며 점마다 배열을 새로 만들어 GC 압력(2분에 ~30MB)
+let mmBg = null;
+const MMW = 300, MMS = MMW / 270, MMX = MMW / 2, MMY = MMW - 22;
+const mmx = (x) => MMX - x * MMS, mmy = (z) => MMY - z * MMS;
+function mmDot(x, z, r, col, stroke) { mm.fillStyle = col; mm.beginPath(); mm.arc(mmx(x), mmy(z), r, 0, 7); mm.fill(); if (stroke) { mm.strokeStyle = '#fff'; mm.lineWidth = 1.5; mm.stroke(); } }
 function drawMinimap() {
   if (!S || !S.fl || screen !== 'game') return;
-  const W = 300, sc = W / 270, ox = W / 2, oy = W - 22;
-  const P = (x, z) => [ox - x * sc, oy - z * sc];
-  mm.clearRect(0, 0, W, W);
-  mm.fillStyle = 'rgba(47,125,54,.55)'; mm.beginPath(); mm.moveTo(...P(0, -3));
-  for (let i = 0; i <= 40; i++) { const phi = -FOUL + i / 40 * FOUL * 2; const r = fenceR(phi); mm.lineTo(...P(Math.sin(phi) * r, Math.cos(phi) * r)); }
-  mm.closePath(); mm.fill();
-  mm.fillStyle = 'rgba(181,119,74,.7)'; mm.beginPath(); BASES.forEach(([x, z], i) => { const [a, b] = P(x * 1.15, z * 1.08 - 1); i ? mm.lineTo(a, b) : mm.moveTo(a, b); }); mm.closePath(); mm.fill();
-  mm.fillStyle = '#fff'; for (const [x, z] of BASES) { const [a, b] = P(x, z); mm.fillRect(a - 3, b - 3, 6, 6); }
+  if (!mmBg) {
+    mmBg = document.createElement('canvas'); mmBg.width = mm.canvas.width; mmBg.height = mm.canvas.height;
+    const g = mmBg.getContext('2d');
+    g.fillStyle = 'rgba(47,125,54,.55)'; g.beginPath(); g.moveTo(mmx(0), mmy(-3));
+    for (let i = 0; i <= 40; i++) { const phi = -FOUL + i / 40 * FOUL * 2; const r = fenceR(phi); g.lineTo(mmx(Math.sin(phi) * r), mmy(Math.cos(phi) * r)); }
+    g.closePath(); g.fill();
+    g.fillStyle = 'rgba(181,119,74,.7)'; g.beginPath(); BASES.forEach(([x, z], i) => { const a = mmx(x * 1.15), b = mmy(z * 1.08 - 1); i ? g.lineTo(a, b) : g.moveTo(a, b); }); g.closePath(); g.fill();
+    g.fillStyle = '#fff'; for (const [x, z] of BASES) g.fillRect(mmx(x) - 3, mmy(z) - 3, 6, 6);
+  }
+  mm.clearRect(0, 0, MMW, MMW);
+  mm.drawImage(mmBg, 0, 0);
   const role = getRole();
   const ft = S.half === 0 ? '#3a6ee0' : '#d13a43', bt = S.half === 0 ? '#d13a43' : '#3a6ee0';
-  S.fl.forEach((f, i) => { const [a, b] = P(...(i === role.fi && ctl.active ? [ctl.x, ctl.z] : [f[1], f[2]])); mm.fillStyle = i === role.fi ? '#ffcf3f' : ft; mm.beginPath(); mm.arc(a, b, i === role.fi ? 7 : 5, 0, 7); mm.fill(); });
-  for (const r of S.rn || []) { const [a, b] = P(r[0], r[1]); mm.fillStyle = r[4] === myId ? '#ffcf3f' : bt; mm.beginPath(); mm.arc(a, b, 5, 0, 7); mm.fill(); mm.strokeStyle = '#fff'; mm.lineWidth = 1.5; mm.stroke(); }
-  if (ballMesh.visible) { const [a, b] = P(ballPos.x, ballPos.z); mm.fillStyle = '#fff'; mm.beginPath(); mm.arc(a, b, 4, 0, 7); mm.fill(); }
-  if (landRing.visible) { const [a, b] = P(landRing.position.x, landRing.position.z); mm.strokeStyle = '#ff8a3d'; mm.lineWidth = 2; mm.beginPath(); mm.arc(a, b, 7, 0, 7); mm.stroke(); }
+  for (let i = 0; i < S.fl.length; i++) { const f = S.fl[i], me = i === role.fi; if (me && ctl.active) mmDot(ctl.x, ctl.z, 7, '#ffcf3f'); else mmDot(f[1], f[2], me ? 7 : 5, me ? '#ffcf3f' : ft); }
+  for (const r of S.rn || []) mmDot(r[0], r[1], 5, r[4] === myId ? '#ffcf3f' : bt, true);
+  if (ballMesh.visible) mmDot(ballPos.x, ballPos.z, 4, '#fff');
+  if (landRing.visible) { mm.strokeStyle = '#ff8a3d'; mm.lineWidth = 2; mm.beginPath(); mm.arc(mmx(landRing.position.x), mmy(landRing.position.z), 7, 0, 7); mm.stroke(); }
 }
 
 // ═════════════ 메인 루프 ═════════════
