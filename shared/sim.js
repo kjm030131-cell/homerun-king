@@ -91,6 +91,18 @@ export const PITCHES = {
   BP: { name: '배팅볼', v: 112, brk: [0, -0.12], k: 2.0, col: '#ffffff' },
 };
 export const PITCH_KEYS = ['FB', 'TS', 'SL', 'CB', 'CH', 'SP'];
+// [pitch] 사람 투수 제구 (11-19 '친구랑 1대1 하면 볼/스트라이크 구분이 안 된다'): 예전 사람 투수 오차는 σ 1.3~1.8cm(퍼펙트 게이지)라
+// 존 경계 ±5cm에 43%를 꽂고 볼넷 0% — 실제 메이저 최고 제구(의도 지점 평균 7인치 ≈ 18cm 빗나감, σ ≈ 14cm/축)보다 10배 정확했음.
+// sd = 보통 게이지 σ(m, 축마다, 구종별: 변화구일수록 제구 어려움). 게이지·피로·실투는 throwPitch
+export const COMMAND = {
+  sd: { FB: 0.13, TS: 0.135, SL: 0.145, CH: 0.145, SP: 0.155, CB: 0.16, BP: 0.03 },
+  weak: 1.3, // 힘 빠진 공(게이지 0.6 미만)
+  over: 3.2, // 과투구: 1 + over·(게이지-1) 배 (1.15 → ×1.48)
+  tired: 0.6, // 체력 0 → ×1.6
+  mistake: 0.04, // 실투(가운데로 몰림·변화구 덜 꺾임) 기본 확률 — 과투구·피로·퍼펙트에 따라 바뀜
+  hang: 0.55, // 실투한 변화구 변화량 배율
+  ready: 1.1, // 사람 투수: 투구 단계가 열린 뒤 이 시간 전엔 와인드업 시작 안 함 (퀵 피치 금지 — 타자 준비 시간)
+};
 // bat: CPU 타자 실력(낮을수록 잘 침), whiff: CPU 헛스윙 기본확률, pitchT: 투구 체감 속도(1=실제)
 export const DIFF = [
   { name: '쉬움', bat: 1.35, whiff: 0.36, eye: 0.6, pitchErr: 0.085, zone: 0.62, react: 0.5, read: 1.0, err: 0.022, speed: 0.92, pitchT: 0.68 },
@@ -803,6 +815,7 @@ export class Game {
     const pc = this.pitcherCtrl();
     this.pitchDeadline = this.now + (this.isLive(pc) ? 15 : this.mode === 'derby' ? 1.0 : rand(1.4, 2.3));
     this.pickTried = false;
+    this.pitchReady = this.now + COMMAND.ready; this.pendPitch = null; // [pitch]
     if (this.mode === 'game' && this.balls === 0 && this.strikes === 0 && !this.isLive(pc)) this.pitchDeadline += 2.0; // 타자 등장 컷씬 시간
     if (this.mode === 'derby' && !this.isLive(this.batter.id)) { this.dy.order[this.dy.idx].done = true; this.derbyNext(); return; }
     // CPU 번트 판단: 무사 1루, 하위타선
@@ -820,6 +833,9 @@ export class Game {
 
   onPitch(id, m) {
     if (this.phase !== 'pitch' || this.pitcherCtrl() !== id) return;
+    // [pitch] 퀵 피치 금지: 투구 단계가 열리고 COMMAND.ready 초 전이면 그때까지 미뤘다가 던짐 (타자가 커서를 다시 잡을 시간)
+    if (this.now < (this.pitchReady || 0)) { this.pendPitch = { id, m }; return; }
+    this.pendPitch = null;
     const type = PITCH_KEYS.includes(m.type) ? m.type : 'FB';
     this.throwPitch(type, Number(m.tx) || 0, Number(m.ty) || 0.8, clamp(Number(m.power) || 0.8, 0, 1.15), true);
   }
@@ -857,8 +873,15 @@ export class Game {
     const tired = clamp((50 - st.sta) / 50, 0, 1);
     const pw = Math.min(1, power), R = this.R;
     const perfect = human && power >= R.perfectPitch[0] && power <= R.perfectPitch[1];
-    let err = errOverride ?? (human ? (0.018 + 0.11 * Math.max(0, power - 0.95) + 0.035 * Math.max(0, 0.8 - power)) * R.humanPitchErr * (perfect ? R.perfectBonus.err : 1) : this.D.pitchErr);
-    err += tired * 0.05;
+    let err, mistake = false;
+    if (errOverride != null || !human) err = (errOverride ?? this.D.pitchErr) + tired * 0.05;
+    else { // [pitch] 사람 투수: 구종별 실제 프로 수준 탄착 분산 × 게이지 × 피로 (COMMAND)
+      const C = COMMAND, g = power < 0.6 ? C.weak : power > 1 ? 1 + C.over * (power - 1) : 1;
+      err = (C.sd[type] ?? 0.11) * g * (perfect ? R.perfectBonus.err : 1) * (1 + C.tired * tired) * R.humanPitchErr;
+      // 실투: 과투구·피로일수록 잦고, 퍼펙트면 드묾. 공이 가운데 높이로 몰리고 변화구는 덜 꺾임 (실제 '행잉 슬라이더')
+      const pm = (C.mistake + 0.08 * Math.max(0, power - 1) / 0.15 + 0.05 * tired) * (perfect ? 0.6 : 1);
+      if (type !== 'BP' && Math.random() < pm) { mistake = true; tx *= 0.3; ty = 0.84 + (ty - 0.84) * 0.3; err *= 0.6; }
+    }
     const kmh = P.v * (0.86 + 0.15 * pw) * (1 - tired * 0.06) * (human ? 1 : this.D.speed) + gauss() * 1.2;
     const speed = kmh / 3.6;
     tx = clamp(tx + gauss() * err, -0.95, 0.95);
@@ -867,13 +890,14 @@ export class Game {
     if (type !== 'BP') { st.sta = Math.max(0, st.sta - (0.9 + 1.1 * pw) * R.staminaMul); st.pc++; }
     const T = RELEASE[2] / speed / (this.mode === 'derby' ? 0.85 : this.D.pitchT) * (this.batterIsCPU() ? 1 : HIT_SLOW[this.set.hitEase] || 1);
     const t0 = this.now + WINDUP;
-    const brkScale = (0.85 + 0.15 * pw) * (perfect ? R.perfectBonus.brk : 1);
+    const brkScale = (0.85 + 0.15 * pw) * (perfect ? R.perfectBonus.brk : 1) * (mistake && !['FB', 'TS'].includes(type) ? COMMAND.hang : 1);
     this.pitch = {
       id: ++this.seq, type, tx: r2(tx), ty: r2(ty), bx: r2(P.brk[0] * brkScale * (1 + gauss() * 0.08)), by: r2(P.brk[1] * brkScale * (1 + gauss() * 0.08)), k: P.k, dc: P.v < 125 ? 0.12 : P.v < 140 ? 0.06 : 0, t0: r2(t0),
       T: Math.round(T * 1000) / 1000, kmh: Math.round(kmh), swung: false, swingAt: null, res: null, mode: null,
     };
     this.pitch.arrive = this.pitch.t0 + this.pitch.T;
     if (perfect) this.pitch.pf = 1;
+    if (mistake) this.pitch.mm = 1; // 실투 (스냅샷엔 안 실음 — 테스트·기록용)
     this.phase = 'pitching';
     // 투구 시간표(WINDUP 1.85s): 세트 0~0.35 · 레그킥 0.35~1.25 · 정점 멈춤 1.25~1.45 · 스트라이드 1.45~1.85 · 릴리스 1.85 (docs/rebuild/events.md)
     // 코스(tx,ty)는 이벤트에 넣지 않는다 (공 위치 미리보기 금지)
@@ -1576,6 +1600,7 @@ export class Game {
       case 'pitch':
         this.buntDefense(dt);
         this.holdRunner(dt);
+        if (this.pendPitch && this.now >= this.pitchReady) { const q = this.pendPitch; this.onPitch(q.id, q.m); if (this.phase !== 'pitch') break; } // [pitch]
         if (this.now >= this.pitchDeadline - 0.5 && !this.pickTried && this.cpuPickoff()) break;
         if (this.now >= this.pitchDeadline) this.aiPitch();
         break;
