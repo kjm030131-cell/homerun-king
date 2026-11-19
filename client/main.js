@@ -728,10 +728,15 @@ function updateControl(dt) {
   const prePitch = S && S.ph === 'pitch' && role.fi >= 0 && role.pos !== 'P' && role.pos !== 'C';
   if (!S || (S.ph !== 'live' && !prePitch) || role.fi < 0 || screen !== 'game') { ctl.active = false; return; }
   const f = S.fl[role.fi];
-  if (ctl.idx !== role.fi) { if (ctl.idx >= 0 && S.ph === 'live') feedback(`▶ ${POS_KO[role.pos] || ''} 조작`, '#ffd23a'); ctl.idx = role.fi; ctl.active = false; }
+  if (ctl.idx !== role.fi) {
+    if (ctl.idx >= 0 && S.ph === 'live') feedback(`▶ ${POS_KO[role.pos] || ''} 조작`, '#ffd23a');
+    // [qa 11-19] 조작 선수가 바뀌면 누르고 있던 방향키는 무시(한 번 떼야 움직임): 송구 후 받는 선수로 넘어갔을 때 W 를 계속 누르고 있어서 베이스에서 벗어나 공을 놓치던 것
+    ctl.block = ctl.idx >= 0; ctl.idx = role.fi; ctl.active = false;
+  }
   const diveAge = f[7];
   let fw = (keys.w || keys.arrowup ? 1 : 0) - (keys.s || keys.arrowdown ? 1 : 0) + touchMove.y;
   let rt = (keys.d || keys.arrowright ? 1 : 0) - (keys.a || keys.arrowleft ? 1 : 0) + touchMove.x;
+  if (ctl.block) { if (Math.abs(fw) < 0.1 && Math.abs(rt) < 0.1) ctl.block = false; else { fw = 0; rt = 0; } }
   const t = nowP();
   if ((Math.abs(fw) > 0.1 || Math.abs(rt) > 0.1) && !(diveAge >= 0 && diveAge < 1.2)) {
     if (!ctl.active) { ctl.x = f[1]; ctl.z = f[2]; ctl.active = true; }
@@ -788,8 +793,13 @@ function place(A, x, z, ry, dt, k = 14) {
   if (!A.init) { r.position.set(x, groundY(x, z), z); r.rotation.y = ry; A.init = true; A.spd = 0; return 0; }
   const a = 1 - Math.exp(-k * dt);
   const ox = r.position.x, oz = r.position.z;
-  r.position.x = lerp(ox, x, a); r.position.z = lerp(oz, z, a);
-  r.position.y = groundY(r.position.x, r.position.z); // [model] 마운드(높이 25.9cm) 위에선 발이 마운드에 닿게 — 전엔 y=0 이라 투수 발이 마운드 속
+  let nx = lerp(ox, x, a), nz = lerp(oz, z, a);
+  // [qa 11-19] 화면 이동 속도 상한(사람 최고 속도 근처): 서버 위치가 크게 튀어도 미끄러지듯 날아가지 않고 뛰어감. 50m 넘게 튀면(교대·리셋) 바로 옮김
+  const jump = Math.hypot(x - ox, z - oz), vmax = 10.5 * dt, mv = Math.hypot(nx - ox, nz - oz);
+  if (jump < 50 && mv > vmax) { nx = ox + (nx - ox) * vmax / mv; nz = oz + (nz - oz) * vmax / mv; }
+  else if (jump >= 50) { nx = x; nz = z; }
+  r.position.x = nx; r.position.z = nz;
+  r.position.y = groundY(r.position.x, r.position.z); // [model] 마운드(높이 25.9cm) 위에선 발이 마운드에 닿게
   let d = ry - r.rotation.y; d = Math.atan2(Math.sin(d), Math.cos(d));
   r.rotation.y += d * Math.min(1, dt * 10);
   const sp = Math.hypot(r.position.x - ox, r.position.z - oz) / Math.max(dt, 1e-3);

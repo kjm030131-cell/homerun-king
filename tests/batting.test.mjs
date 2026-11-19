@@ -67,7 +67,7 @@ function human(rules, games, innings) {
   return { avg: h / ab, k: k / pa };
 }
 test('보통 사람 흉내: 리얼 타율 .19~.335 (목표 .22~.30) · 삼진율 15~29% (목표 18~25%)', () => {
-  const r = withSeed(21, () => human('real', 12, 9));
+  const r = withSeed(21, () => human('real', 24, 9)); // [qa 11-19] 12판은 시드 하나가 삼진율 14%대로 튐(5개 시드 평균 17.6%)
   assert.ok(r.avg > 0.19 && r.avg < 0.335, `리얼 타율 ${r.avg.toFixed(3)}`);
   assert.ok(r.k > 0.15 && r.k < 0.29, `리얼 삼진율 ${(r.k * 100).toFixed(1)}%`);
 });

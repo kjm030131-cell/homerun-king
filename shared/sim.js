@@ -758,7 +758,9 @@ export class Game {
     else if (b.state === 'thrown') { let bd = 1e9; for (let i = 0; i < this.fielders.length; i++) { if (i === b.thrower) continue; const d = dist2(this.fielders[i].x, this.fielders[i].z, b.tx, b.tz); if (d < bd) { bd = d; target = i; } } }
     else {
       // 타구 쫓기는 플레이당 한 번(타구 직후)만 자동 전환 — 계속 바뀌면 헷갈림
-      if (P.autoChaseDone && !(P.chaser >= 0 && this.now - (P.sw || 0) > 2.5 && this.humanIdleAll())) return;
+      // [qa 11-19] 예외: 공이 내가 잡고 있는 선수를 지나쳐 외야로 빠졌으면(내 선수보다 6m+ 멀리, 쫓는 사람이 바뀜) 쫓는 선수로 넘김
+      const passed = P.chaser >= 0 && this.now - (P.sw || 0) > 0.8 && this.humans(this.fieldTeam).some((h) => { const ci = this.ctrlFielder(h.id); if (ci < 0 || ci === P.chaser) return false; const f = this.fielders[ci]; return Math.hypot(b.x, b.z) > Math.hypot(f.x, f.z) + 6 && dist2(f.x, f.z, b.x, b.z) > 7; });
+      if (P.autoChaseDone && !passed && !(P.chaser >= 0 && this.now - (P.sw || 0) > 2.5 && this.humanIdleAll())) return;
       target = P.chaser;
     }
     if (target < 0) return;
@@ -774,7 +776,7 @@ export class Game {
       for (const id of hs) {
         const ci = this.ctrlFielder(id), f = ci >= 0 ? this.fielders[ci] : null;
         if (f && (b.holder === ci || this.now - (f.swT || -9) < 1.5)) continue; // 공 든 사람/방금 바꾼 사람은 그대로
-        if (f && this.now - f.act < 0.6 && f.act > (f.swT || -9)) continue; // 직접 움직이는 중이면 안 뺏음
+        if (f && this.now - f.act < 0.6 && f.act > (f.swT || -9) && !(b.holder < 0 && b.state !== 'thrown' && Math.hypot(b.x, b.z) > Math.hypot(f.x, f.z) + 6 && dist2(f.x, f.z, b.x, b.z) > 7)) continue; // 직접 움직이는 중이면 안 뺏음(공이 이미 지나쳤으면 넘김)
         const d = f ? dist2(f.x, f.z, tf.x, tf.z) : 0;
         if (d < best) { best = d; pick = id; }
       }
@@ -1090,6 +1092,17 @@ export class Game {
     return { rid: ++this.seq, pid: this.batter.id, name: this.batter.name, b, target: b === 0 ? 1 : b, start: b, forced: batter, mustReturn: false, out: false, scored: false, manual: 0, batter, steal: false, trot: false };
   }
 
+  // [qa 11-19] 플레이 끝(결과 표시) 동안 수비수가 제자리로 걸어서 돌아감 — 전엔 다음 투구 때 한 번에 순간이동(화면에선 미끄러지듯 날아감)
+  walkBack(dt) {
+    if (!this.fielders.length || this.mode === 'derby') return;
+    for (const f of this.fielders) {
+      if (this.ball && this.ball.holder >= 0 && this.fielders[this.ball.holder] === f && this.now < this.phaseUntil - 0.6) continue; // 공 든 사람은 잠깐 서 있다가
+      const hs = this.spotOf(f.pos), dx = hs[0] - f.x, dz = hs[1] - f.z, d = Math.hypot(dx, dz);
+      if (d < 0.2) { f.mv = 0; continue; }
+      const st = Math.min(d, (d > 25 ? 6.5 : 4.2) * dt);
+      f.x += dx / d * st; f.z += dz / d * st; f.ry = Math.atan2(dx, dz); f.mv = d > 25 ? 2 : 1;
+    }
+  }
   // [qa 11-19] 수비수가 펜스·관중석을 뚫고 나가지 않게 (홈런 타구 쫓다가 우익수가 펜스 2~3m 밖까지 달려가던 것)
   keepInPark() {
     for (const f of this.fielders) {
@@ -1642,6 +1655,7 @@ export class Game {
         }
         // 홈런 트롯
         for (const r of this.runners) if (r.trot && !r.scored) { r.b = Math.min(4, r.b + TROT_SPEED / BASE_D * dt); if (r.b >= 4) r.scored = true; }
+        this.walkBack(dt);
         if (this.now >= this.phaseUntil) this.afterResult();
         break;
       }
@@ -2073,7 +2087,8 @@ export class Game {
   relayPlan(fx, fz, k) {
     const base = BASES[k % 4], d = dist2(fx, fz, base[0], base[1]);
     if (d < 58) return null;
-    const pos = k === 4 ? (fx >= 0 ? 'SS' : '1B') : k === 3 ? (fx >= -8 ? 'SS' : '2B') : (fx >= 0 ? 'SS' : '2B');
+    // [qa 11-19] 홈 중계도 1루수 대신 2루수: 1루수가 커트맨으로 빠지면 사람이 1루로 던질 때 1루가 비어 있었음(1·3루수·포수는 항상 베이스)
+    const pos = k === 4 ? (fx >= 0 ? 'SS' : '2B') : k === 3 ? (fx >= -8 ? 'SS' : '2B') : (fx >= 0 ? 'SS' : '2B');
     const ci = POS.indexOf(pos);
     if (ci < 0) return null;
     const s = clamp(d * 0.45, 22, 42), ux = (fx - base[0]) / d, uz = (fz - base[1]) / d;
