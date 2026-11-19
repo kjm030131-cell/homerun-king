@@ -19,9 +19,9 @@ export const RULES = {
     cpuPower: 0.2, // CPU 타자 강공(파워 스윙) 비율 (2스트라이크 전)
     clutch: null, // 막판 역전 기회 보정 (캐주얼 전용)
     // ── 투구 ──
-    humanPitchErr: 1.0, // 사람 투수 제구 오차 배율
+    humanPitchErr: 1.0, // 사람 투수 제구 오차 배율 (기준 σ 는 sim.js COMMAND — 구종별 실제 프로 수준)
     perfectPitch: [0.84, 0.97], // 게이지 퍼펙트 구간 (클라 표시와 같게)
-    perfectBonus: { err: 0.7, brk: 1.08 }, // 퍼펙트 투구: 오차 ×0.7, 변화량 ×1.08
+    perfectBonus: { err: 0.8, brk: 1.04 }, // [pitch] 퍼펙트 투구: 오차 ×0.8, 변화량 ×1.04 (전 ×0.7·×1.08 — 사람 투수만 코너를 핀포인트로 찌르던 원인)
     staminaMul: 1.0,
     seqEffect: true, // 같은 구종 연속 → CPU 타자가 익숙해짐 / 완급 조절 → 헛스윙↑ (구종 선택에 의미)
     // ── 수비·주루 ──
@@ -48,7 +48,7 @@ export const RULES = {
     clutch: { deficit: 3, ease: 1.12, ev: 1.03 }, // 마지막 이닝 이후, 지고 있는 팀(1~3점 차) 타자 판정 폭 ×1.12, 타구 속도 ×1.03
     humanPitchErr: 0.8,
     perfectPitch: [0.8, 0.98],
-    perfectBonus: { err: 0.6, brk: 1.1 },
+    perfectBonus: { err: 0.75, brk: 1.05 }, // [pitch] 전 0.6·1.1
     staminaMul: 0.5,
     seqEffect: true,
     cpuReach: 0.9,

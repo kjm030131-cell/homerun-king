@@ -2,7 +2,7 @@
 import * as THREE from 'three';
 import {
   Game, HIT_EASE, pitchPos, integrate, fenceR, BASES, MOUND, ZONE, PITCHES, PITCH_KEYS, POS_KO, HOME_SPOT, FOUL, SPRINT_SPEED, FIELD_SPEED,
-  RELEASE, WINDUP, SWING, PCI, BALL_R, runnerXZ, RULES, // [gameplay] RULES: 모드별 퍼펙트 투구 구간 · PCI 타격
+  RELEASE, WINDUP, SWING, PCI, BALL_R, runnerXZ, RULES, inZone, // [gameplay] RULES: 모드별 퍼펙트 투구 구간 · PCI 타격 · [pitch] inZone: 지나간 공 볼/스트 색
 } from '../shared/sim.js';
 import { Player, UNIFORMS, setFaceTextures } from './player.js';
 import { loadSkin, attachSkin, syncAllSkins } from './skinned.js';
@@ -18,6 +18,7 @@ import { initAudio, setVolume, unlock as audio } from './audio/index.js'; // [au
 import { createUI, cfg, store, TOUCH, banner, feedback, toast, castLine, addChat, sysChat, myDuty, paintClubs, swingReport, saveLocalCareer } from './ui/index.js';
 import { bus } from './core/bus.js'; // [gameplay] 게임 이벤트 → bus
 import { createPCI, judgeSwing } from './game/batting.js'; // [gameplay] PCI 타격
+import { createBallLook } from './game/ball.js'; // [pitch] 실밥·구종별 회전축
 
 const $ = (id) => document.getElementById(id);
 const clamp = (v, a, b) => Math.max(a, Math.min(b, v));
@@ -81,6 +82,7 @@ applyQuality();
 // ═════════════ 공 / 마커 ═════════════
 const ballMesh = new THREE.Mesh(new THREE.SphereGeometry(BALL_R * 1.6, 16, 12), new THREE.MeshStandardMaterial({ color: '#fbfaf5', roughness: 0.45, emissive: '#3a3a36' }));
 ballMesh.castShadow = true; scene.add(ballMesh);
+const ballLook = createBallLook(ballMesh); // [pitch] 실밥 텍스처 + 구종별 회전(슬라이더 빨간 점 등) — 위치 정보 없음
 const ballGlow = new THREE.Sprite(new THREE.SpriteMaterial({ map: glowTex(), color: '#ffffff', transparent: true, depthWrite: false, blending: THREE.AdditiveBlending, opacity: 0.35 }));
 ballGlow.scale.set(0.6, 0.6, 1); ballMesh.add(ballGlow);
 const blob = new THREE.Mesh(new THREE.CircleGeometry(0.22, 16).rotateX(-Math.PI / 2), new THREE.MeshBasicMaterial({ color: '#000', transparent: true, opacity: 0.45, depthWrite: false }));
@@ -1116,6 +1118,7 @@ function updateBall(dt, t, role, pitchPhase) {
     const p = s.p;
     if (t >= p.t0) {
       const sv = (t - p.t0) / p.T;
+      ballLook.pitch(p); // [pitch]
       let q = pitchPos(p, Math.min(sv, 1.05));
       if (contactFreeze && contactFreeze.pid === p.id && tp < contactFreeze.until && sv >= 0.95) q = [p.tx, p.ty, 0];
       ballPos.set(q[0], q[1], Math.max(q[2], -0.62));
@@ -1130,7 +1133,7 @@ function updateBall(dt, t, role, pitchPhase) {
         pitchFb = true;
         if (!(contactFreeze && contactFreeze.pid === p.id)) bus.emit('cue:mitt', { pid: p.id, kmh: p.kmh }); // [audio] 화면에서 공이 미트에 닿는 순간
       }
-      if (sv > 1.0 && (role.batter || role.pitcher || camMode === 'tv')) { crossMark.visible = true; crossMark.position.set(p.tx, p.ty, 0.02); crossMark.material.color.set(p.res === 'take' || p.res === 'miss' || true ? '#ff3b3b' : '#fff'); }
+      if (sv > 1.0 && (role.batter || role.pitcher || camMode === 'tv')) { crossMark.visible = true; crossMark.position.set(p.tx, p.ty, 0.02); crossMark.material.color.set(inZone(p.tx, p.ty) ? '#ffd23a' : '#5bc8ff'); } // [pitch] 지나간 '뒤'에만: 노랑 = 존 통과(스트라이크), 하늘색 = 볼 — 존 감 익히기용 사후 피드백
     }
   } else if (ballL && (s.ph === 'live' || s.ph === 'result')) {
     if (ballL.h >= 0) {
@@ -1144,6 +1147,7 @@ function updateBall(dt, t, role, pitchPhase) {
         if (ev.landed && ev.impact > 2.5) { bus.emit('cue:bounce', { impact: ev.impact, surf: ev.surf, x: ballL.x, z: ballL.z }); /* [audio] */ if (ev.surf === 'dirt' && ev.impact > 3) fx.dustPuff(ballL.x, ballL.z, 0.8, 0.8); }
       }
       ballPos.set(ballL.x, ballL.y, ballL.z);
+      ballLook.spinVec(ballL.sx, ballL.sy, ballL.sz); // [pitch]
       fx.trailPush(ballPos, ballL.state === 'thrown' ? '#9fd0ff' : '#ffe6b0');
       vis = true;
       // 낙구 지점
@@ -1194,7 +1198,10 @@ function updateBall(dt, t, role, pitchPhase) {
     ballMesh.position.copy(ballPos);
     // 멀리 날아간 공은 화면에서 점처럼 사라지지 않게 살짝 키워서 그림 (투구 중엔 실제 크기)
     // 날아가는 공은 거리 따라 살짝 키우고, 투구 중인 공은 1.5배로 그려서 '실제 공'을 끝까지 눈으로 따라갈 수 있게 (위치 예측 표시는 없음)
-    const bsc = ballL && (s.ph === 'live' || s.ph === 'result') ? clamp(camera.position.distanceTo(ballPos) / 22, 1, 3) * (camera.fov / 52) ** 0.5 : s.ph === 'pitching' && (role.batter || role.pitcher) ? 1.5 : 1;
+    let bsc = ballL && (s.ph === 'live' || s.ph === 'result') ? clamp(camera.position.distanceTo(ballPos) / 22, 1, 3) * (camera.fov / 52) ** 0.5 : s.ph === 'pitching' && (role.batter || role.pitcher) ? 1.5 : 1;
+    // [pitch] 투구 중엔 화면 지름 최소 보장(창이 작거나 어깨 시점이라도 릴리스 직후 점처럼 안 사라지게): 창 높이의 1.2% (800px → 9.6px, 8~14px)
+    if (s.ph === 'pitching' && (role.batter || role.pitcher)) { const d = Math.max(0.5, camera.position.distanceTo(ballPos)), px1 = 2 * BALL_R * 1.6 / d * (innerHeight / 2) / Math.tan(camera.fov * Math.PI / 360), want = clamp(innerHeight * 0.012, 8, 14); if (px1 * bsc < want) bsc = want / px1; }
+    ballLook.update(dt); // [pitch] 실밥 회전
     ballMesh.scale.setScalar(bsc);
     // [gameplay] 키워 그린 공이 땅에 반쯤 묻혀 '바닥 아래에서 튀는' 것처럼 보이던 것: 그린 반지름만큼 띄움 (물리 위치는 그대로)
     if (ballL && (s.ph === 'live' || s.ph === 'result')) ballMesh.position.y = Math.max(ballPos.y, BALL_R * 1.6 * bsc);

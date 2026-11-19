@@ -63,6 +63,7 @@ test('이벤트 순서: windup → release → (swing) → 결과, 시각은 단
   let n = 0;
   for (const seq of byPid.values()) {
     if (seq[0] !== 'windup') continue;
+    if (seq.length === 1 && R.all.length >= 4000) continue; // [pitch] 수집 상한(4000개)에서 잘린 마지막 투구 (예전부터 가끔 깨지던 원인)
     assert.equal(seq[1], 'release', seq.join(','));
     if (seq.includes('contact')) assert.ok(seq.indexOf('swing') < seq.indexOf('contact'));
     n++;
