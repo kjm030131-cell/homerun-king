@@ -62,18 +62,25 @@ export const SLOT_BONE = { head: 'Head', handR: 'RightHand', handL: 'LeftHand', 
 //  width : head 맞춤일 때 머리 폭 대비 배율, top: 정수리 위 여유(m), back: 뒤통수 기준 앞으로 밀기(m)
 //  anchor: 장비 경계상자의 기준점(-1~1, 각 축) → 뼈 위치 + pos 에 둔다
 export const FIT = {
-  cap: { rot: [0, 0, 0], fit: 'head', width: 1.1, top: 0.012, back: -0.008, pos: [0, 0, 0], scale: 1 },
-  helmet: { rot: [0, 0, 0], fit: 'head', width: 1.18, top: 0.022, back: -0.016, pos: [0, 0, 0], scale: 1 },
+  //  stretch: 축별 배율 [x, y, z] — Tripo cap.glb/helmet.glb(11-19)는 폭 대비 깊이가 머리보다 얕아서 그대로 키우면 앞머리가 뚫고 나옴
+  cap: { rot: [0, 0, 0], fit: 'head', width: 1.08, stretch: [1, 0.93, 1.1], top: 0.01, back: -0.006, pos: [0, 0, 0], scale: 1 },
+  helmet: { rot: [0, 0, 0], fit: 'head', width: 1.27, stretch: [1, 0.87, 1.13], top: 0.02, back: -0.02, pos: [0, 0, 0], scale: 1 },
   // 배트는 축·손잡이 끝을 자동으로 찾는다(가장 긴 축, 가는 쪽 = 손잡이). knob = 오른손 뼈 기준 손잡이 끝 위치, dir = 배트 방향
   bat: { fit: 0.86, knob: [-0.085, -0.03, -0.13], dir: [0, 0.15, 1] },
-  // 글러브: 손가락이 +y, 주머니가 +z 로 서 있는 모델이라고 가정 → 왼손 T포즈(손가락 +x, 손바닥 -y)로 돌림
-  glove: { rot: [90, 0, -90], fit: 0.3, anchor: [-1, 0, 0], pos: [0.03, -0.01, 0], scale: 1, catcher: 1.18 },
+  // 글러브 → 왼손 T포즈(손가락 +x, 손바닥 -y, 엄지 +z)로. Tripo glove.glb(11-19): 주머니 +y, 손가락 -z, 손목 구멍 +z, 웹·엄지 +x
+  //  → 그대로는 오른손용 배치라 mirror(x 뒤집기) 후 rot [180,-90,0] (x→-z, y→-y, z→-x). anchor [-1,1,0] = 손목 쪽 끝·손등 쪽 면
+  glove: { rot: [180, -90, 0], mirror: true, fit: 0.29, anchor: [-1, 1, 0], pos: [-0.035, 0.045, 0], scale: 1, catcher: 1.18 },
   ball: { pos: [-0.09, -0.035, 0.025] },
 };
 
 // 몸 설정
 export const BODY = {
   height: 1.85, // 맞출 키(m) — 옛 몸과 같은 크기
+  // 모자 밑 머리카락 누르기: 눈썹 높이(머리 높이 대비, 턱 0 ~ 정수리 1). 그 위에서 머리 타원체 밖 정점을 타원체 표면 × hatSquash 로
+  hatBrow: 0.58, hatSquash: 0.95,
+  // 투구 자세에서 몸을 앞으로(m). pitch 클립 세트 자세의 축발(오른발) 끝이 엉덩이 뒤 0.36m → 투수판(z 18.37~18.52) 앞 모서리에 붙이려면 0.5
+  //  (덤: 릴리스 순간 손이 sim RELEASE z 17.0 근처로 옴 — 전엔 0.5m 뒤)
+  pitchFwd: 0.5,
   lodDist: 22, // 이 거리(m)보다 멀면 저폴리(+ 애니메이션 갱신 절반) — 11-19 26→22 (렉)
   farUpdate: 2, // 먼 선수는 N 프레임마다 한 번 애니메이션 갱신
   hiddenUpdate: 6, // 화면 밖 선수는 N 프레임마다 한 번

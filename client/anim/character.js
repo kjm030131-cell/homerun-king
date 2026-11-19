@@ -30,9 +30,18 @@ function bodyMaterial(src, restMatrix, U) {
     Object.assign(sh.uniforms, U);
     sh.vertexShader = sh.vertexShader
       .replace('#include <common>', `#include <common>
-uniform mat4 uRest; varying vec3 vRP; varying vec3 vRN;`)
+uniform mat4 uRest; uniform mat4 uRestInv; uniform vec4 uHatC; uniform vec3 uHatR; varying vec3 vRP; varying vec3 vRN;`)
       .replace('#include <begin_vertex>', `#include <begin_vertex>
-vRP = (uRest * vec4(position, 1.0)).xyz; vRN = normalize(mat3(uRest) * normal);`);
+vRP = (uRest * vec4(position, 1.0)).xyz; vRN = normalize(mat3(uRest) * normal);
+// [model] 모자·헬멧 밑 머리카락 누르기: 눈썹 높이 위에서 머리 타원체 밖 정점 → 타원체 표면 (캐릭터 공간에서 계산 후 메시 공간으로)
+if (uHatC.w > 0.5 && vRP.y > uHatC.y - 0.01) {
+  vec3 q = (vRP - uHatC.xyz) / uHatR; float L = length(q);
+  if (L > 1.0) {
+    float t = smoothstep(uHatC.y - 0.01, uHatC.y + 0.02, vRP.y);
+    vec3 pc = mix(vRP, uHatC.xyz + (vRP - uHatC.xyz) / L, t);
+    transformed = (uRestInv * vec4(pc, 1.0)).xyz; vRP = pc;
+  }
+}`);
     sh.fragmentShader = sh.fragmentShader
       .replace('#include <common>', `#include <common>
 varying vec3 vRP; varying vec3 vRN;
@@ -76,7 +85,9 @@ function lightMaterial(m) {
 function uniforms(restMatrix, lib) {
   const T = BODY.tint, H = BODY.height;
   return {
-    uRest: { value: restMatrix.clone() },
+    uRest: { value: restMatrix.clone() }, uRestInv: { value: restMatrix.clone().invert() },
+    uHatC: { value: lib.headE ? new THREE.Vector4(lib.headE.c.x, lib.headE.c.y, lib.headE.c.z, 1) : new THREE.Vector4(0, 9, 0, 0) },
+    uHatR: { value: lib.headE ? lib.headE.r.clone().multiplyScalar(BODY.hatSquash) : new THREE.Vector3(1, 1, 1) },
     uJersey: { value: new THREE.Color('#f4f2ec') }, uPants: { value: new THREE.Color('#f4f2ec') }, uSock: { value: new THREE.Color('#14254a') },
     uTintP: { value: new THREE.Vector4(T.satMax, T.lumMin, T.neck * H, T.belt * H) }, uSockH: { value: T.sock * H }, uTintOn: { value: 1 },
     uMask: { value: lib.maskTex || null }, uMaskOn: { value: lib.maskTex ? 1 : 0 },
@@ -152,11 +163,11 @@ function blobAssets() {
   if (typeof document !== 'undefined') {
     const c = document.createElement('canvas'); c.width = c.height = 64;
     const g = c.getContext('2d'), gr = g.createRadialGradient(32, 32, 0, 32, 32, 32);
-    gr.addColorStop(0, 'rgba(0,0,0,0.62)'); gr.addColorStop(0.55, 'rgba(0,0,0,0.3)'); gr.addColorStop(1, 'rgba(0,0,0,0)');
+    gr.addColorStop(0, 'rgba(0,0,0,0.9)'); gr.addColorStop(0.45, 'rgba(0,0,0,0.62)'); gr.addColorStop(0.75, 'rgba(0,0,0,0.22)'); gr.addColorStop(1, 'rgba(0,0,0,0)');
     g.fillStyle = gr; g.fillRect(0, 0, 64, 64);
     tex = new THREE.CanvasTexture(c);
   }
-  const mat = new THREE.MeshBasicMaterial({ map: tex, color: tex ? 0xffffff : 0x000000, transparent: true, opacity: 0.55, depthWrite: false, polygonOffset: true, polygonOffsetFactor: -2, polygonOffsetUnits: -2, fog: true });
+  const mat = new THREE.MeshBasicMaterial({ map: tex, color: tex ? 0xffffff : 0x000000, transparent: true, opacity: 0.62, depthWrite: false, polygonOffset: true, polygonOffsetFactor: -2, polygonOffsetUnits: -2, fog: true });
   // main.js 가 타자 메시를 돌며 material.transparent = false 로 덮어씀(공용 재질이라 전원 사각형 그림자가 됨) → 항상 투명으로 고정
   Object.defineProperty(mat, 'transparent', { get: () => true, set: () => {}, configurable: true });
   const geo = new THREE.PlaneGeometry(1, 1); geo.rotateX(-Math.PI / 2);
@@ -334,12 +345,22 @@ export class Character {
     const h = this.bones.Hips; if (!h || !this.blob) return;
     // [qa] root.updateMatrixWorld(true) 를 지움 — 선수마다 매 프레임 뼈 53개+장비 전체 행렬 갱신(렌더가 또 함) → 프레임 JS 시간 최대 원인.
     //      getWorldPosition 이 Hips 위쪽 부모 사슬만 갱신하므로 결과는 같음
+    // [model] 발 두 개를 덮는 타원(발 사이 가운데, 발 방향으로 길게) — 전엔 엉덩이 밑 원(지름 0.95m, 가운데 34%)이라 흐려서 신발 밑이 비어 보였음('떠 보임')
+    const s = this.root.scale.x || 1;
     h.getWorldPosition(_t); this.root.worldToLocal(_t);
-    const s = this.root.scale.x || 1, hy = _t.y * s; // 엉덩이 높이(m): 서 있으면 ~1, 점프하면 높고, 다이빙·슬라이딩이면 낮음
-    this.blob.position.x = _t.x; this.blob.position.z = _t.z;
-    const k = clamp(1.25 - Math.abs(hy - 0.95) * 0.9, 0.35, 1);
-    this.blob.scale.set(0.95 * (hy < 0.5 ? 1.5 : 1), 1, 0.95 * (hy < 0.5 ? 1.9 : 1));
-    this.blob.visible = k > 0.36;
+    const hy = _t.y * s; // 엉덩이 높이(m): 서 있으면 ~1, 점프하면 높고, 다이빙·슬라이딩이면 낮음
+    const fl = this.bones.LeftFoot, fr = this.bones.RightFoot, B = this.blob;
+    if (hy < 0.5 || !fl || !fr) { // 누운 자세(다이빙·슬라이딩): 몸통 밑 큰 타원
+      B.position.set(_t.x, B.position.y, _t.z); B.rotation.y = 0; B.scale.set(1.3, 1, 1.7); B.visible = true; return;
+    }
+    fl.getWorldPosition(_a); this.root.worldToLocal(_a); fr.getWorldPosition(_b); this.root.worldToLocal(_b);
+    const dx = _b.x - _a.x, dz = _b.z - _a.z, d = Math.hypot(dx, dz);
+    const lift = Math.max(0, Math.min(_a.y, _b.y) * s - 0.1); // 두 발 다 뜨면(점프) 작아짐
+    const k = clamp(1 - lift * 1.6, 0.35, 1);
+    B.position.set((_a.x + _b.x) / 2, B.position.y, (_a.z + _b.z) / 2);
+    B.rotation.y = d > 1e-3 ? Math.atan2(dx, dz) : 0; // 로컬 z 축을 발→발 방향으로
+    B.scale.set(0.5 * k, 1, (d + 0.5) * k);
+    B.visible = true;
   }
   // 머리가 목표를 보게(최대 65°). 얼굴 앞 방향(머리 뼈 로컬)은 T포즈에서 미리 계산(lib.faceLocal)
   _look(head, target, w) {

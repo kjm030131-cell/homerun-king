@@ -54,12 +54,34 @@ export function prepTemplate(scene) {
   }
   const headP = new THREE.Vector3().setFromMatrixPosition(rest.get('Head'));
   if (headBox.isEmpty() || headBox.max.y - headBox.min.y < 0.08) headBox.setFromCenterAndSize(headP.clone().add(new THREE.Vector3(0, 0.1, 0.01)), new THREE.Vector3(0.18, 0.24, 0.22));
+  // [model] 머리 타원체(눈썹 높이 위 = 모자·헬멧 안쪽): 눈썹 높이 단면의 폭·깊이 + 정수리. 이 밖으로 삐져나온 머리카락은
+  //         셰이더에서 타원체 표면으로 눌러 넣음(모자 뚫고 나오는 머리 방지, character.js bodyMaterial). 모자·헬멧 맞춤도 이 값 기준
+  const brow = headBox.min.y + (headBox.max.y - headBox.min.y) * BODY.hatBrow;
+  const sl = new THREE.Box3();
+  for (const m of meshes) {
+    const bi = m.skeleton.bones.findIndex((b) => b.name === 'Head'), bt = m.skeleton.bones.findIndex((b) => b.name === 'HeadTop_End');
+    const P = m.geometry.attributes.position, SI = m.geometry.attributes.skinIndex, SW = m.geometry.attributes.skinWeight;
+    if (bi < 0 || !SI || !SW) continue;
+    for (let i = 0; i < P.count; i++) {
+      let w = 0;
+      for (let k = 0; k < 4; k++) { const j = SI.getComponent(i, k); if (j === bi || j === bt) w += SW.getComponent(i, k); }
+      if (w < 0.5) continue;
+      v.fromBufferAttribute(P, i).applyMatrix4(m.matrixWorld);
+      if (Math.abs(v.y - brow) < 0.015) sl.expandByPoint(v);
+    }
+  }
+  if (sl.isEmpty()) sl.copy(headBox);
+  const hcx = (headBox.min.x + headBox.max.x) / 2;
+  const headE = {
+    c: new THREE.Vector3(hcx, brow, (sl.min.z + sl.max.z) / 2),
+    r: new THREE.Vector3(Math.max(sl.max.x - hcx, hcx - sl.min.x), headBox.max.y - brow, (sl.max.z - sl.min.z) / 2),
+  };
   const qh = new THREE.Quaternion(); new THREE.Matrix4().extractRotation(rest.get('Head')).decompose(new THREE.Vector3(), qh, new THREE.Vector3());
   const faceLocal = new THREE.Vector3(0, 0, 1).applyQuaternion(qh.clone().invert());
   const hips = bones.get('Hips');
   const pq = new THREE.Quaternion(); hips.parent.getWorldQuaternion(pq);
   return {
-    tpl, scale: s, meshInfo, rest, headBox, faceLocal, boneSet: new Set(bones.keys()),
+    tpl, scale: s, meshInfo, rest, headBox, headE, faceLocal, boneSet: new Set(bones.keys()),
     hipsRest: hips.position.clone(), hipsUp: new THREE.Vector3(0, 1, 0).applyQuaternion(pq.invert()).normalize(),
     srcGeo: meshes[0].geometry,
   };
@@ -173,7 +195,8 @@ export function prepHeadItem(kind, raw, T) {
   const hb = T.headBox;
   let b = measure(g);
   const s = (hb.max.x - hb.min.x) * F.width / Math.max(1e-6, b.max.x - b.min.x) * (F.scale || 1);
-  g.scale.setScalar(s); b = measure(g);
+  const st = F.stretch || [1, 1, 1]; // [model] 축별 배율(Tripo 모자는 머리보다 넓고 얕음 → 깊이를 늘리고 높이를 줄여 머리에 맞춤)
+  g.scale.set(s * st[0], s * st[1], s * st[2]); b = measure(g);
   g.position.x += (hb.min.x + hb.max.x) / 2 - (b.min.x + b.max.x) / 2 + F.pos[0];
   g.position.y += hb.max.y + F.top - b.max.y + F.pos[1];
   g.position.z += hb.min.z + F.back - b.min.z + F.pos[2];
@@ -181,7 +204,8 @@ export function prepHeadItem(kind, raw, T) {
 }
 export function prepGlove(raw, T, catcher = false) {
   const F = FIT.glove;
-  const g = new THREE.Group(); g.add(raw); g.rotation.set(F.rot[0] * DEG, F.rot[1] * DEG, F.rot[2] * DEG);
+  const g = new THREE.Group(); g.rotation.set(F.rot[0] * DEG, F.rot[1] * DEG, F.rot[2] * DEG);
+  if (F.mirror) { const mg = new THREE.Group(); mg.scale.x = -1; mg.add(raw); g.add(mg); } else g.add(raw); // 오른손용 모델 → 왼손 (three 가 음수 행렬식이면 앞면 방향을 뒤집어 그림)
   let b = measure(g); const sz = b.getSize(_v);
   g.scale.setScalar(F.fit / Math.max(1e-6, sz.x, sz.y, sz.z) * (F.scale || 1) * (catcher ? F.catcher : 1));
   b = measure(g);
