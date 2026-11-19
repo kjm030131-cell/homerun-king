@@ -6,6 +6,7 @@ import { career, avgStr, eraStr, ipStr } from './career.js';
 import { teamColor } from './results.js';
 import { clubOf, emblemURL } from '../emblem.js';
 import { PITCHES, PITCH_KEYS, POS_KO, WINDUP } from '../../shared/sim.js';
+import { pciPath } from '../game/batting.js'; // [gameplay] PCI 모양
 
 const clamp = (v, a, b) => Math.max(a, Math.min(b, v));
 const OF = ['LF', 'CF', 'RF'];
@@ -212,8 +213,8 @@ export function hudFrame(c, role, f) {
   if (role.batter && pitchPhase) {
     title = f.bunt ? '번트' : '타격';
     keysL = f.bunt ? [['클릭', '번트 대기'], ['마우스 좌우', '방향'], ['B', '강공 전환']]
-      : [['마우스', '배트 원 이동'], ['좌클릭', '정타'], ['우클릭 · F', '강타(잘 뜸)'], ['공 아래를 맞히면', '뜬공 · 위는 땅볼'], ...(dy && dy.pr ? [['1~6', `구종 고정${dy.pp && dy.pp !== 'MIX' && PITCHES[dy.pp] ? '(' + PITCHES[dy.pp].name + ')' : ''}`], ['0', '섞어서']] : derby ? [] : [['B', '번트']]), ['V', '시점']];
-    tip = f.bunt ? '' : '위쪽 신호 바가 차면 공이 온다. 원 테두리가 초록일 때 스윙';
+      : [['마우스', 'PCI 커서'], ['좌클릭', '정타'], ['우클릭 · F', '강타(잘 뜸)'], ['공이 커서 위쪽', '뜬공 · 아래쪽은 땅볼'], ...(dy && dy.pr ? [['1~6', `구종 고정${dy.pp && dy.pp !== 'MIX' && PITCHES[dy.pp] ? '(' + PITCHES[dy.pp].name + ')' : ''}`], ['0', '섞어서']] : derby ? [] : [['B', '번트']]), ['V', '시점']];
+    tip = f.bunt ? '' : '타이밍이 먼저. 커서 테두리가 초록일 때 스윙하면 커서가 조금 빗나가도 맞아';
   } else if (role.pitcher && s.ph === 'pitch') {
     title = '투구'; keysL = [['1~6', '구종'], ['마우스', '코스'], ['클릭', '게이지 시작'], ['클릭', '초록에서 투구']];
     if (runnersOn) keysL.push(['Q', '견제']);
@@ -255,38 +256,42 @@ export function renderPitchBar(pitchType, force, onPick, sq) {
   bar.querySelectorAll('button').forEach((b) => (b.onpointerdown = (e) => { e.stopPropagation(); onPick(b.dataset.p); }));
 }
 
-// ── 스윙 분석: 타이밍(빠름/늦음)과 위치(배트 원 vs 공) 중 뭐가 문제였는지 + 최근 스윙 경향 코칭 ──
+// ── 스윙 분석: 타이밍(빠름/늦음)과 위치(PCI 커서 vs 공) 중 뭐가 문제였는지 + 최근 스윙 경향 코칭 ──
+// J = shared/sim.js pciJudge 결과 (W 타이밍 반폭, RX/RY 그려진 커서, g 타이밍 보너스 배율, nx/ny/n 커서 안 위치) [gameplay]
 const swHist = [];
 let swaT = 0;
-export function swingReport(dt, a, p, M, contact) {
+export function swingReport(dt, a, p, J, contact) {
   const el = $('swa'); if (!el) return;
-  const ex = a[0] - p.tx, ey = a[1] - p.ty, d = Math.hypot(ex, ey);
-  swHist.push({ dt, ex, ey, d, contact, W: M.W, R: M.R }); if (swHist.length > 12) swHist.shift();
+  const ex = a[0] - p.tx, ey = a[1] - p.ty;
+  swHist.push({ dt, ex, ey, n: J.n, contact, W: J.W, tq: J.tq }); if (swHist.length > 12) swHist.shift();
   // 타이밍 바: ±0.2초 범위, 초록 = 맞는 구간
   const span = 0.2, pos = clamp(dt / span, -1, 1);
-  el.querySelector('.sw-win').style.cssText = `left:${50 - M.W / span * 50}%;width:${M.W / span * 100}%`;
-  const tOk = Math.abs(dt) <= M.W, lOk = d <= M.R;
+  el.querySelector('.sw-win').style.cssText = `left:${50 - J.W / span * 50}%;width:${J.W / span * 100}%`;
+  const tOk = J.tq >= 0, lOk = J.n <= 1;
   const mk = el.querySelector('.sw-mk'); mk.style.left = `${50 + pos * 50}%`; mk.classList.toggle('bad', !tOk);
-  const tv = el.querySelector('.sw-tv'); tv.textContent = Math.abs(dt) < 0.02 ? '딱 맞음' : `${Math.round(Math.abs(dt) * 1000)}ms ${dt < 0 ? '빠름' : '늦음'}`; tv.classList.toggle('bad', !tOk);
-  // 위치 그림: 공(흰 점) 기준으로 배트 원이 어디 있었나
+  const tv = el.querySelector('.sw-tv'); tv.textContent = Math.abs(dt) < 0.02 ? '딱 맞음' : `${Math.round(Math.abs(dt) * 1000)}ms ${dt < 0 ? '빠름(당김)' : '늦음(밀어침)'}`; tv.classList.toggle('bad', !tOk);
+  // 위치 그림: 공(흰 점) 기준으로 PCI 커서가 어디 있었나. 점선 = 타이밍 보너스로 넓어진 판정
   const cv = el.querySelector('canvas'), g = cv.getContext('2d'), S0 = 60, k = 60 / 0.3;
   g.clearRect(0, 0, 120, 120);
   g.strokeStyle = 'rgba(255,255,255,.16)'; g.lineWidth = 1; g.strokeRect(10.5, 10.5, 99, 99);
   g.beginPath(); g.moveTo(60, 12); g.lineTo(60, 108); g.moveTo(12, 60); g.lineTo(108, 60); g.strokeStyle = 'rgba(255,255,255,.07)'; g.stroke();
-  g.beginPath(); g.arc(S0 + ex * k, S0 - ey * k, M.R * k, 0, 7); g.fillStyle = lOk ? 'rgba(47,174,106,.28)' : 'rgba(229,54,58,.24)'; g.fill(); g.strokeStyle = lOk ? '#3fd187' : '#ff5a55'; g.lineWidth = 2; g.stroke();
+  const cx = S0 + ex * k, cy = S0 - ey * k;
+  if (J.g > 1.01) { pciPath(g, cx, cy, J.RX * J.g * k, J.RY * J.g * k); g.setLineDash([3, 3]); g.strokeStyle = 'rgba(255,255,255,.35)'; g.lineWidth = 1; g.stroke(); g.setLineDash([]); }
+  pciPath(g, cx, cy, J.RX * k, J.RY * k); g.fillStyle = lOk ? 'rgba(47,174,106,.28)' : 'rgba(229,54,58,.24)'; g.fill(); g.strokeStyle = lOk ? '#3fd187' : '#ff5a55'; g.lineWidth = 2; g.stroke();
   g.beginPath(); g.arc(S0, S0, 5, 0, 7); g.fillStyle = '#fff'; g.fill();
   const lv = el.querySelector('.sw-lv');
-  lv.textContent = d < 0.03 ? '정확' : `${Math.round(d * 100)}cm ${Math.abs(ey) > Math.abs(ex) ? (ey > 0 ? '위로' : '아래로') : ex < 0 ? '왼쪽' : '오른쪽'}`; lv.classList.toggle('bad', !lOk);
+  lv.textContent = !lOk ? `커서 밖 ${Math.round(Math.hypot(ex, ey) * 100)}cm` : J.ny > 0.33 ? '커서 아래쪽 (땅볼)' : J.ny < -0.33 ? '커서 위쪽 (뜬공)' : '커서 가운데 (라인드라이브)';
+  lv.classList.toggle('bad', !lOk);
   // 경향 코칭 (최근 4번 이상)
   let tip = '';
   const last = swHist.slice(-6);
   if (last.length >= 4) {
     const mT = last.reduce((q, h) => q + h.dt, 0) / last.length;
-    const badT = last.filter((h) => Math.abs(h.dt) > h.W).length, badL = last.filter((h) => h.d > h.R).length;
+    const badT = last.filter((h) => h.tq < 0).length, badL = last.filter((h) => h.tq >= 0 && h.n > 1).length;
     const mY = last.reduce((q, h) => q + h.ey, 0) / last.length;
     if (badT >= badL && badT >= 2) tip = mT > 0 ? `타이밍이 늦는 편 (평균 ${Math.round(mT * 1000)}ms). '스트라이드' 뜰 때 미리 준비` : `타이밍이 빠른 편 (평균 ${Math.round(-mT * 1000)}ms). 공이 존 앞에 올 때까지 참기`;
-    else if (badL >= 2) tip = Math.abs(mY) > 0.06 ? `배트 원이 공보다 ${mY > 0 ? '위' : '아래'}에 있는 편. ${mY > 0 ? '조금 낮게' : '조금 높게'}` : '위치가 좌우로 흔들림. 공 따라 원을 끝까지 옮기기';
-    else tip = '좋아요, 지금 감각 유지';
+    else if (badL >= 2) tip = Math.abs(mY) > 0.06 ? `커서가 공보다 ${mY > 0 ? '위' : '아래'}에 있는 편. ${mY > 0 ? '조금 낮게' : '조금 높게'}` : '커서가 좌우로 흔들림. 공 따라 끝까지 옮기기';
+    else tip = '좋아요, 타이밍만 맞으면 커서는 대충 맞아도 맞아';
   }
   el.querySelector('.sw-tip').textContent = tip;
   el.classList.add('show'); clearTimeout(swaT); swaT = setTimeout(() => el.classList.remove('show'), 5200);
@@ -294,7 +299,7 @@ export function swingReport(dt, a, p, M, contact) {
 
 // ── 처음 몇 번은 상황별 짧은 도움말 카드 (브라우저마다 종류별 2번까지) ──
 const COACH = {
-  bat: ['타격', '투수가 다리를 들었다 <b>멈춘 뒤</b> 내딛을 때 공이 나와. 하얀 원을 공 길목에 두고, 원 테두리가 <b class="g">초록</b>일 때 클릭.'],
+  bat: ['타격', '투수가 다리를 들었다 <b>멈춘 뒤</b> 내딛을 때 공이 나와. 사각 커서(PCI)를 공 길목에 두고, 테두리가 <b class="g">초록</b>일 때 클릭. <b>타이밍이 맞으면 커서는 대충 맞아도 맞아</b>.'],
   pitch: ['투구', '<b>1~6</b> 구종 고르고, 마우스로 코스, 클릭해서 게이지 시작, <b class="g">초록 구간</b>에서 한 번 더 클릭.'],
   field: ['수비', '노란 링이 내 선수. <b>WASD</b>로 공 밑으로 가면 자동 포구. 잡으면 <b>Space</b> = 금색 베이스로 송구.'],
   run: ['주루', '주자 있으면 투구 전 <b>R</b> 도루. 타구 후 <b>E</b> 추가 진루 / <b>Q</b> 귀루. 접전은 자동 슬라이딩.'],

@@ -2,12 +2,12 @@
 import * as THREE from 'three';
 import {
   Game, HIT_EASE, pitchPos, integrate, fenceR, BASES, MOUND, ZONE, PITCHES, PITCH_KEYS, POS_KO, HOME_SPOT, FOUL, SPRINT_SPEED, FIELD_SPEED,
-  RELEASE, WINDUP, SWING, BALL_R, runnerXZ, RULES, // [gameplay] RULES: 모드별 퍼펙트 투구 구간
+  RELEASE, WINDUP, SWING, PCI, BALL_R, runnerXZ, RULES, // [gameplay] RULES: 모드별 퍼펙트 투구 구간 · PCI 타격
 } from '../shared/sim.js';
 import { Player, UNIFORMS, setFaceTextures } from './player.js';
 import { loadSkin, attachSkin, syncAllSkins } from './skinned.js';
 import { Replay } from './replay.js';
-import { makeActor } from './anim/actor.js'; // [anim]
+import { makeActor, usingNewCharacter } from './anim/actor.js'; // [anim] ([qa] usingNewCharacter: 팀 캐시 확인용)
 import { CLUBS, clubOf, emblemURL, uniformsFor } from './emblem.js';
 import { TEX_AVG, FACE_SKINS } from './texinfo.js';
 import { Animator, PITCH_DUR, PITCH_RELEASE_K, THROW_DUR, swingTrack, pitchK } from './anim.js';
@@ -17,6 +17,7 @@ import { initAudio, setVolume, unlock as audio } from './audio/index.js'; // [au
 // [ui] 화면·HUD·설정은 client/ui/ (createUI 하나로 연결)
 import { createUI, cfg, store, TOUCH, banner, feedback, toast, castLine, addChat, sysChat, myDuty, paintClubs, swingReport, saveLocalCareer } from './ui/index.js';
 import { bus } from './core/bus.js'; // [gameplay] 게임 이벤트 → bus
+import { createPCI, judgeSwing } from './game/batting.js'; // [gameplay] PCI 타격
 
 const $ = (id) => document.getElementById(id);
 const clamp = (v, a, b) => Math.max(a, Math.min(b, v));
@@ -134,16 +135,11 @@ let zoneMesh = null;
   void seg;
 }
 scene.add(zoneGroup);
-const pci = new THREE.Group();
+// [gameplay] PCI(MLB 더쇼식 둥근 사각 커서) — client/game/batting.js. 판정 크기 그대로 그림(숨은 판정 없음, 타이밍 맞으면 판정만 조금 넓어짐)
+const PCIv = createPCI(scene), pci = PCIv.group;
 let pciHot = false;
-const hitEase = () => (S && S.hx) || HIT_EASE[(S && S.he) ?? 0] || 1; // [gameplay] hx = 서버가 쓰는 실제 판정 폭(모드·난이도 반영)
+const hitEase = () => (S && S.hx) || HIT_EASE[(S && S.he) ?? 1] || 1; // [gameplay] hx = 서버가 쓰는 실제 판정 배율(모드·난이도 반영)
 const mode2 = () => (buntOn || (S && S.bs) ? 'bunt' : keys.f ? 'power' : 'contact');
-// 배트 중심(PCI): 얇은 타원 테두리 + 아주 옅은 채움 + 가운데 점 하나. 타이밍 맞을 때만 테두리가 초록으로
-const pciOuter = new THREE.Mesh(new THREE.RingGeometry(0.93, 1, 64), new THREE.MeshBasicMaterial({ color: '#ffffff', transparent: true, opacity: 0.55, depthTest: false, side: THREE.DoubleSide }));
-const pciFill = new THREE.Mesh(new THREE.CircleGeometry(1, 64), new THREE.MeshBasicMaterial({ color: '#ffffff', transparent: true, opacity: 0.06, depthTest: false, side: THREE.DoubleSide }));
-const pciSweet = new THREE.Mesh(new THREE.RingGeometry(0.06, 0.08, 28), new THREE.MeshBasicMaterial({ color: '#ffffff', depthTest: false, side: THREE.DoubleSide, transparent: true, opacity: 0 }));
-const pciDot = new THREE.Mesh(new THREE.CircleGeometry(0.014, 16), new THREE.MeshBasicMaterial({ color: '#ffffff', transparent: true, opacity: 0.9, depthTest: false, side: THREE.DoubleSide }));
-pci.add(pciFill, pciOuter, pciSweet, pciDot); pci.children.forEach((c) => (c.renderOrder = 11)); scene.add(pci);
 // 타격 보조: 공이 들어올 위치 표시 + 줄어드는 타이밍 링
 const assistDot = new THREE.Group();
 {
@@ -177,7 +173,14 @@ const umps = [];
 const coaches = [];
 if (!/noskin/.test(location.search)) loadSkin((window.HR_ASSETS && window.HR_ASSETS.model) || './assets/models/body.bin', (window.HR_ASSETS && window.HR_ASSETS.modelLo) || './assets/models/body_lo.bin');
 function mkActor(opts) { return makeActor(opts, scene); } // [anim] 새 캐릭터(GLB) 있으면 Character, 없으면 옛 몸 — client/anim/actor.js
+// [qa] 공수 교대마다 수비 9명·타자·코치를 새로 만들던 것(유니폼 데칼 캔버스·스켈레톤 복제 → 교대 순간 프레임 40ms+ 멈칫)을 팀별로 보관해 다시 씀
+const teamCache = new Map();
+const runnerPool = new Map(); // [qa] 주자 재사용 (poolKey → 배우 목록)
+function parkRunner(A) { scene.remove(A.p.root); if (A.poolKey) (runnerPool.get(A.poolKey) || runnerPool.set(A.poolKey, []).get(A.poolKey)).push(A); }
+function takeRunner(pk) { const l = runnerPool.get(pk); const A = l && l.pop(); if (!A || (usingNewCharacter() && !A.p.char)) return null; A.init = false; A.slideT = 0; A.p.root.visible = true; scene.add(A.p.root); return A; }
+const cachedTeam = (k) => { const c = teamCache.get(k); return c && (!usingNewCharacter() || c.every((A) => A.p.char)) ? c : null; }; // 늦게 온 새 몸으로 못 바뀐 옛 몸 캐시는 버림
 function clearActors() {
+  teamCache.clear(); runnerPool.clear();
   for (const A of fielders) scene.remove(A.p.root);
   fielders = []; fieldTeamBuilt = null;
   if (batter) scene.remove(batter.p.root); batter = null; batTeamBuilt = null;
@@ -197,17 +200,26 @@ function buildTeams(s) {
   const key = ft + s.fl.map((f) => f[0]).join('');
   if (fieldTeamBuilt !== key) {
     for (const A of fielders) scene.remove(A.p.root);
+    if (fieldTeamBuilt && fielders.length) teamCache.set('f' + fieldTeamBuilt, fielders); // [qa]
     const nums = { P: 18, C: 22, '1B': 25, '2B': 4, '3B': 13, SS: 6, LF: 7, CF: 8, RF: 9 };
-    fielders = s.fl.map((f, i) => { const A = mkActor({ team: ft, num: nums[f[0]], role: f[0] === 'C' ? 'catcher' : 'fielder', seed: i + (ft === 'home' ? 0 : 50) }); A.pos = f[0]; return A; });
+    const c = cachedTeam('f' + key); // [qa]
+    if (c) { fielders = c; for (const A of c) { A.init = false; scene.add(A.p.root); } }
+    else fielders = s.fl.map((f, i) => { const A = mkActor({ team: ft, num: nums[f[0]], role: f[0] === 'C' ? 'catcher' : 'fielder', seed: i + (ft === 'home' ? 0 : 50) }); A.pos = f[0]; return A; });
     fieldTeamBuilt = key;
   }
   if (batTeamBuilt !== bt) {
     if (batter) scene.remove(batter.p.root);
-    batter = mkActor({ team: bt, num: 24, role: 'batter', seed: 99 });
-    for (const A of runners.values()) scene.remove(A.p.root);
+    for (const A of runners.values()) parkRunner(A); // [qa]
     runners.clear();
-    for (const A of coaches) scene.remove(A.p.root); coaches.length = 0;
-    for (const [x, z] of [[-24, 21], [24, 21]]) { const C = mkActor({ team: bt, num: 70 + coaches.length, role: 'fielder', seed: x }); C.p.glove.visible = false; C.p.root.position.set(x, 0, z); C.p.root.rotation.y = Math.atan2(-x, -z + 10); coaches.push(C); }
+    for (const A of coaches) scene.remove(A.p.root);
+    if (batTeamBuilt && batter) teamCache.set('b' + batTeamBuilt, [batter, ...coaches]); // [qa]
+    coaches.length = 0;
+    const c = cachedTeam('b' + bt); // [qa]
+    if (c) { batter = c[0]; batter.init = false; coaches.push(...c.slice(1)); for (const A of c) scene.add(A.p.root); }
+    else {
+      batter = mkActor({ team: bt, num: 24, role: 'batter', seed: 99 });
+      for (const [x, z] of [[-24, 21], [24, 21]]) { const C = mkActor({ team: bt, num: 70 + coaches.length, role: 'fielder', seed: x }); C.p.glove.visible = false; C.p.root.position.set(x, 0, z); C.p.root.rotation.y = Math.atan2(-x, -z + 10); coaches.push(C); }
+    }
     batTeamBuilt = bt;
   }
 }
@@ -229,7 +241,7 @@ function startLocal(name, o) {
   };
   const iv = setInterval(tickFn, 1000 / 60);
   net = { send: (m) => game.handle('me', m), close: () => clearInterval(iv), local: true, game };
-  window.__hr = { game, getRole: () => getRole(), cam: () => camMode, S: () => S, net: () => net, rp: replay, lct: () => lastContactT, scene, tick: tickFn, renderer };
+  window.__hr = { game, getRole: () => getRole(), cam: () => camMode, S: () => S, net: () => net, rp: replay, lct: () => lastContactT, scene, tick: tickFn, renderer, simNow };
   roomCode = null;
   game.start();
   lobby = game.lobbyState();
@@ -257,6 +269,7 @@ function connectWS(code, name, pw = '') {
     if (wsRetry < 30) { wsRetry++; setTimeout(() => { if (net && net.ws === ws) connectWS(code, name); }, Math.min(4000, 400 * wsRetry)); }
   };
   net = { ws, send: (m) => ws.readyState === 1 && ws.send(JSON.stringify(m)), close: () => { net = null; ws.close(); } };
+  window.__hr = { game: null, getRole: () => getRole(), cam: () => camMode, S: () => S, net: () => net, rp: replay, lct: () => lastContactT, scene, tick: () => { }, renderer, simNow }; // [qa] 멀티에서도 테스트 훅 (tools/qa)
   roomCode = code;
   clearInterval(pingIv);
   lastMsgAt = performance.now();
@@ -398,18 +411,22 @@ function onSnap(s) {
   // 공
   if (s.b) {
     const [x, y, z, vx, vy, vz, h, st, sx, sy, sz] = s.b;
-    if (!ballL || h >= 0 || st !== lastBallSt || Math.hypot(ballL.x - x, ballL.y - y, ballL.z - z) > 2.5) {
+    // 지연 보정: 서버 상태(s.now 시점)를 지금 화면 시각까지 앞으로 굴린 뒤 합류 (과거 위치로 당기면 공이 뒤로 끌려가서 느려 보임)
+    // [gameplay] 처음 받은 스냅샷·상태가 바뀐 스냅샷(air→ground 바운드 등)도 앞으로 굴린 뒤 씀 — 예전엔 굴리지 않은 과거 위치로 순간이동해서 바운드 자리가 어긋났음
+    const sb = { x, y, z, vx, vy, vz, sx, sy, sz, state: st, h };
+    if (h < 0) { const age = clamp(simNow() - s.now, 0, 0.25); for (let i = 0, n = Math.ceil(age * 120); i < n; i++) integrate(sb, age / n); }
+    if (!ballL || h >= 0 || ballL.h >= 0 || (st === 'thrown' && lastBallSt !== 'thrown') || Math.hypot(ballL.x - sb.x, ballL.y - sb.y, ballL.z - sb.z) > 2.5) {
       if (st === 'thrown' && lastBallSt !== 'thrown') fx.trailClear();
-      ballL = { x, y, z, vx, vy, vz, sx, sy, sz, state: st, h };
+      ballL = sb;
     } else {
-      // 지연 보정: 서버 상태(s.now 시점)를 지금 화면 시각까지 앞으로 굴린 뒤 부드럽게 합류
-      // (과거 위치로 당기면 공이 뒤로 끌려가서 느려 보임)
-      const sb = { x, y, z, vx, vy, vz, sx, sy, sz, state: st, h };
-      const age = clamp(simNow() - s.now, 0, 0.25);
-      for (let i = 0, n = Math.ceil(age * 120); i < n; i++) integrate(sb, age / n);
       const k = 0.35;
-      ballL.x = lerp(ballL.x, sb.x, k); ballL.y = lerp(ballL.y, sb.y, k); ballL.z = lerp(ballL.z, sb.z, k);
-      ballL.vx = sb.vx; ballL.vy = sb.vy; ballL.vz = sb.vz; ballL.sx = sb.sx; ballL.sy = sb.sy; ballL.sz = sb.sz; ballL.h = h; ballL.state = sb.state;
+      ballL.x = lerp(ballL.x, sb.x, k); ballL.z = lerp(ballL.z, sb.z, k);
+      // [gameplay] 바운드 직전·직후엔 클라와 서버가 몇 ms 차이로 서로 다른 쪽(내려가는 중/튀어 오른 뒤)에 있을 수 있음 → 그때 세로 속도를 덮어쓰면
+      // 공중에서 튀거나 두 번 튐. 같은 쪽일 때만 높이·세로 속도를 맞추고, 다르면 클라가 자기 바운드를 끝내게 둠
+      const sameSide = (ballL.vy > 0.5) === (sb.vy > 0.5) || (ballL.y > 0.8 && sb.y > 0.8);
+      if (sameSide) { ballL.y = lerp(ballL.y, sb.y, k); ballL.vy = sb.vy; ballL.state = sb.state; }
+      ballL.vx = sb.vx; ballL.vz = sb.vz; ballL.sx = sb.sx; ballL.sy = sb.sy; ballL.sz = sb.sz; ballL.h = h;
+      if (sb.state === 'thrown' || sb.state === 'dead') ballL.state = sb.state;
     }
     lastHolder = h; lastBallSt = st;
   } else { ballL = null; lastBallSt = ''; lastHolder = -1; }
@@ -474,7 +491,7 @@ function onContact(p, q, bunt) {
   if (!bunt && q > 0.3) {
     shake = Math.max(shake, 0.06 + q * 0.22);
     hitStopUntil = nowP() + 0.015 + q * 0.035; // 정타일수록 공이 아주 잠깐 멈췄다 튀어나감 (길면 공이 느려 보임)
-    camPunch = Math.max(camPunch, q * q * 5); // 화각 순간 좁힘(줌 펀치)
+    camPunch = Math.max(camPunch, q * q * 1.2); // 화각 순간 좁힘(줌 펀치) — [gameplay] 5°→1.2°: 줌이 풀리며 공이 가운데로 빨려 들어가 느려 보이던 것 줄임
   }
   excite = Math.max(excite, 0.25 + q * 0.4);
 }
@@ -627,39 +644,31 @@ function doSwing(mode) {
   swungLocal[p.id] = t;
   let a = aimPoint() || [0, 0.8];
   const dt = t - p.arrive;
-  const M0 = SWING[mode];
   if (mode === 'bunt') {
     // 번트: 배트가 공 높이를 자동으로 따라감. 좌우 커서로 방향만 조절
     a = [p.tx + clamp((a[0] - p.tx) * 0.35, -0.14, 0.14), p.ty + 0.02];
-  } else if (cfg.assist > 0 && (S.he ?? 1) < 2) {
-    // 조준 보정(자석): 배트 원이 공 가까이(판정 반경의 1.5배 안)면 공 쪽으로 살짝 당겨줌. 연습 모드는 더 세게
-    const R0 = M0.R * hitEase();
-    const dx = p.tx - a[0], dy = p.ty - a[1], dd = Math.hypot(dx, dy);
-    const pull = cfg.assist === 2 ? 0.45 : (S.he ?? 1) === 0 ? 0.38 : 0.28;
-    if (dd < R0 * 1.5) a = [a[0] + dx * pull, a[1] + dy * pull];
   }
-  net.send({ t: 'swing', pid: p.id, dt, ax: a[0] - p.tx, ay: a[1] - p.ty, mode });
+  // [gameplay] 자석 보정(공 쪽으로 커서 당기기)은 없앰 → 대신 서버·클라 공통 PCI 판정이 '타이밍이 맞을수록 커서 판정이 넓어짐'
+  const ax = a[0] - p.tx, ay = a[1] - p.ty;
+  net.send({ t: 'swing', pid: p.id, dt, ax, ay, mode });
   swingInfo[p.id] = { mode, a };
-  // 접촉 여부는 결정적이라 바로 판정 → 즉시 타격감
-  const he = mode === 'bunt' ? 1 : hitEase(); // 서버와 같은 판정 폭(타격 난이도 반영)
-  const M = { ...SWING[mode], W: SWING[mode].W * he, R: SWING[mode].R * he };
-  const d = Math.hypot(a[0] - p.tx, a[1] - p.ty);
-  const contact = Math.abs(dt) <= M.W && d <= M.R;
-  const ms = Math.round(dt * 1000);
-  const tm = Math.abs(dt) < 0.025 ? '완벽한 타이밍' : dt < 0 ? `${-ms}ms 빠름` : `${ms}ms 늦음`;
-  if (mode !== 'bunt') swingReport(dt, a, p, M, contact);
-  bus.emit('localSwing', { pid: p.id, mode, contact, dt: Math.round(dt * 1000), q: contact ? (mode === 'bunt' ? 0.3 : Math.pow(1 - Math.abs(dt) / M.W, 0.5) * Math.pow(1 - d / M.R, 0.6)) : 0 }); // [gameplay] 내 스윙 즉시 피드백(서버 contact/miss는 핑만큼 늦게 옴)
-  if (contact) {
-    const q = mode === 'bunt' ? 0.3 : Math.pow(1 - Math.abs(dt) / M.W, 0.5) * Math.pow(1 - d / M.R, 0.6);
-    contactFreeze = { pid: p.id, until: nowP() + 0.35, pos: [p.tx, p.ty] };
-    onContact(p, q, mode === 'bunt');
-    if (mode === 'bunt') feedback('번트!', '#9fd0ff');
-    else if (q < 0.1) feedback(`${tm} · 빗맞은 파울`, '#ffcf3f');
-    else if (q > 0.82) { bus.emit('ui:perfect'); feedback(`퍼펙트! · ${tm}`, '#4fd18b'); perfectHit = nowP(); }
-    else feedback(`${tm} · ${d < 0.08 ? '정타' : a[1] - p.ty > 0.07 ? '공 윗부분 → 땅볼' : a[1] - p.ty < -0.07 ? '공 아랫부분 → 뜬공' : '빗맞음'}`, q > 0.5 ? '#4fd18b' : '#ffcf3f');
-  } else {
-    feedback(Math.abs(dt) > M.W ? (dt < 0 ? `너무 빨라 (${-ms}ms)` : `늦었어 (${ms}ms)`) : '공이랑 안 맞았어', '#ff8a80');
+  // 접촉 여부는 결정적이라 바로 판정 → 즉시 타격감 (서버 pciJudge 와 같은 함수)
+  if (mode === 'bunt') {
+    const M = SWING.bunt, contact = Math.abs(dt) <= M.W && Math.hypot(ax, ay) <= M.R;
+    bus.emit('localSwing', { pid: p.id, mode, contact, dt: Math.round(dt * 1000), q: contact ? 0.3 : 0 });
+    if (contact) { contactFreeze = { pid: p.id, until: nowP() + 0.35, pos: [p.tx, p.ty] }; onContact(p, 0.3, true); feedback('번트!', '#9fd0ff'); }
+    else feedback(Math.abs(dt) > M.W ? (dt < 0 ? '번트 너무 빨라' : '번트 늦었어') : '번트 헛스윙', '#ff8a80');
+    return;
   }
+  const R = judgeSwing(mode, dt, ax, ay, hitEase());
+  swingReport(dt, a, p, R.J, R.J.contact);
+  bus.emit('localSwing', { pid: p.id, mode, contact: R.J.contact, dt: Math.round(dt * 1000), q: R.q }); // [gameplay] 내 스윙 즉시 피드백(서버 contact/miss는 핑만큼 늦게 옴)
+  if (R.J.contact) {
+    contactFreeze = { pid: p.id, until: nowP() + 0.35, pos: [p.tx, p.ty] };
+    onContact(p, R.q, false);
+    if (R.perfect) { bus.emit('ui:perfect'); perfectHit = nowP(); }
+  }
+  feedback(R.text, R.col);
 }
 let contactFreeze = null, perfectHit = 0;
 // [ui] 스윙 분석 창은 client/ui/hud.js swingReport
@@ -811,7 +820,10 @@ function updateWorld(dt) {
   s.fl.forEach((f, i) => {
     const A = fielders[i]; if (!A) return;
     let [pos, x, z, ry, ctrlId, mv, jt, dv] = f;
-    if (IP) { const fa = IP[0].fl[i], fb = IP[1].fl[i]; if (fa && fb && fa[0] === pos && fb[0] === pos) { x = lerp(fa[1], fb[1], IP[2]); z = lerp(fa[2], fb[2], IP[2]); ry = lerpAng(fa[3], fb[3], IP[2]); } }
+    if (IP) { const fa = IP[0].fl[i], fb = IP[1].fl[i]; if (fa && fb && fa[0] === pos && fb[0] === pos) { x = lerp(fa[1], fb[1], IP[2]); z = lerp(fa[2], fb[2], IP[2]); ry = lerpAng(fa[3], fb[3], IP[2]);
+      // [gameplay] 타구 중엔 공(현재 시각으로 외삽)과 수비수(보간 지연 netQ.delay 만큼 과거)가 다른 시각에 그려져서, 공이 수비수 몸에 맞거나 잡히는 자리가
+      // 화면에선 수비수 1~6m 앞(허공)이었음 → 보간 구간 속도로 지연만큼 앞으로 밀어 같은 시각에 맞춤 (최대 1.5m)
+      if (s.ph === 'live' && IP[1].t > IP[0].t) { const dtS = IP[1].t - IP[0].t, ah = netQ.delay; let ex = (fb[1] - fa[1]) / dtS * ah, ez = (fb[2] - fa[2]) / dtS * ah; const el = Math.hypot(ex, ez); if (el > 1.5) { ex *= 1.5 / el; ez *= 1.5 / el; } x += ex; z += ez; } } }
     if (i === role.fi && ctl.active) { x = ctl.x; z = ctl.z; ry = ctl.ry; }
     if (pos === 'P' && pitchPhase) ry = Math.PI;
     const sp = place(A, x, z, ry, dt, i === role.fi && ctl.active ? 30 : IP ? 22 : 12);
@@ -901,7 +913,11 @@ function updateWorld(dt) {
     const key = rid ? 'r' + rid : name + '|' + (pid || '');
     live.add(key);
     let A = runners.get(key);
-    if (!A) { A = mkActor({ team: batTeamBuilt || 'away', num: (name.charCodeAt(name.length - 1) % 60) + 1, role: 'runner', seed: name.length * 7 + (pid ? pid.length : 0) }); runners.set(key, A); }
+    if (!A) {
+      // [qa] 주자는 출루마다 새로 만들고 버리기만 해서(dispose 없음) 경기 내내 지오메트리·텍스처·스켈레톤이 쌓였음 → 같은 모습(팀·번호·seed)끼리 재사용
+      const o = { team: batTeamBuilt || 'away', num: (name.charCodeAt(name.length - 1) % 60) + 1, role: 'runner', seed: name.length * 7 + (pid ? pid.length : 0) }, pk = `${o.team}|${o.num}|${o.seed}`;
+      A = takeRunner(pk) || mkActor(o); A.poolKey = pk; runners.set(key, A);
+    }
     let x = x0, z = z0;
     if (IP) { const ra = IP[0].rn.get(key), rb = IP[1].rn.get(key); if (ra && rb) { x = lerp(ra[0], rb[0], IP[2]); z = lerp(ra[1], rb[1], IP[2]); } }
     // 리드 (투구 전 베이스에서 살짝 떨어짐)
@@ -926,7 +942,7 @@ function updateWorld(dt) {
     A.a.runner(dt, { speed: sp, slideK, lead: onBase && (s.ph === 'pitch' || s.ph === 'pitching'), cheer: !!(flags & 2), lookW: onBase ? _v.set(0, 1.2, 15) : null });
     A.p.root.visible = !(showBatter && b === 0);
   }
-  for (const [k, A] of runners) if (!live.has(k)) { scene.remove(A.p.root); runners.delete(k); }
+  for (const [k, A] of runners) if (!live.has(k)) { parkRunner(A); runners.delete(k); }
   // 심판/코치
   for (const U of umps) {
     let call = null;
@@ -1178,7 +1194,10 @@ function updateBall(dt, t, role, pitchPhase) {
     ballMesh.position.copy(ballPos);
     // 멀리 날아간 공은 화면에서 점처럼 사라지지 않게 살짝 키워서 그림 (투구 중엔 실제 크기)
     // 날아가는 공은 거리 따라 살짝 키우고, 투구 중인 공은 1.5배로 그려서 '실제 공'을 끝까지 눈으로 따라갈 수 있게 (위치 예측 표시는 없음)
-    ballMesh.scale.setScalar(ballL && (s.ph === 'live' || s.ph === 'result') ? clamp(camera.position.distanceTo(ballPos) / 22, 1, 3) * (camera.fov / 52) ** 0.5 : s.ph === 'pitching' && (role.batter || role.pitcher) ? 1.5 : 1);
+    const bsc = ballL && (s.ph === 'live' || s.ph === 'result') ? clamp(camera.position.distanceTo(ballPos) / 22, 1, 3) * (camera.fov / 52) ** 0.5 : s.ph === 'pitching' && (role.batter || role.pitcher) ? 1.5 : 1;
+    ballMesh.scale.setScalar(bsc);
+    // [gameplay] 키워 그린 공이 땅에 반쯤 묻혀 '바닥 아래에서 튀는' 것처럼 보이던 것: 그린 반지름만큼 띄움 (물리 위치는 그대로)
+    if (ballL && (s.ph === 'live' || s.ph === 'result')) ballMesh.position.y = Math.max(ballPos.y, BALL_R * 1.6 * bsc);
     blob.visible = ballPos.y > 0.12;
     blob.position.set(ballPos.x, 0.06, ballPos.z);
     blob.scale.setScalar(clamp(1 - ballPos.y / 40, 0.35, 1));
@@ -1221,8 +1240,28 @@ function tpsCam(me, tx, ty, tz, dt) {
   const lookD = clamp(dd, 5, 30);
   tLook.set(me.x + Math.sin(Y) * lookD, 0.9 + hb * 0.32, me.z + Math.cos(Y) * lookD);
 }
+// [gameplay] 타구 직후 중계 카메라: 홈 뒤 높은 곳에 고정, 시선은 공이 화면 데드존(가로 ±50%, 위·아래 60%)을 벗어날 때만 따라감.
+// 데드존 안에선 배경이 멈춰 있어 공이 실제 속도로 보인다. 화각 고정 54°(줌으로 공 움직임이 상쇄되지 않게)
+const DZ = { id: -1, yaw: 0, pitch: 0, pos: new THREE.Vector3(0, 8.5, -15), fov: 54 };
+function deadzoneCam(dt) {
+  const P = DZ.pos;
+  if (DZ.id !== lastContactT) { DZ.id = lastContactT; DZ.yaw = 0; DZ.pitch = Math.atan2(1.5 - P.y, 24 - P.z); }
+  const dx = ballPos.x - P.x, dy = ballPos.y - P.y, dz = ballPos.z - P.z;
+  const by = Math.atan2(dx, dz), bp = Math.atan2(dy, Math.hypot(dx, dz));
+  const th = Math.tan(DZ.fov * Math.PI / 360), ax = Math.atan(0.5 * th * camera.aspect), au = Math.atan(0.62 * th), ad = Math.atan(0.6 * th);
+  let ty = DZ.yaw, tq = DZ.pitch;
+  if (by - DZ.yaw > ax) ty = by - ax; else if (DZ.yaw - by > ax) ty = by + ax;
+  if (bp - DZ.pitch > au) tq = bp - au; else if (DZ.pitch - bp > ad) tq = bp + ad;
+  const kk = 1 - Math.exp(-9 * dt);
+  DZ.yaw += (ty - DZ.yaw) * kk; DZ.pitch += (clamp(tq, -0.6, 1.0) - DZ.pitch) * kk;
+  tPos.copy(P);
+  tLook.set(P.x + Math.sin(DZ.yaw) * Math.cos(DZ.pitch) * 30, P.y + Math.sin(DZ.pitch) * 30, P.z + Math.cos(DZ.yaw) * Math.cos(DZ.pitch) * 30);
+  return DZ.fov;
+}
+let camDirect = false;
 function updateCamera(dt, time) {
   let k = 4, fov = 55;
+  camDirect = false;
   const tp = nowP();
   if (screen === 'title' || screen === 'room' || screen === 'browser' || !S || !S.fl) {
     const a = time * 0.05;
@@ -1304,7 +1343,7 @@ function updateCamera(dt, time) {
       // 투수가 할 일이 없을 땐 내 선수 따라 흔들리지 않게 '중계 카메라'로 고정 → 어지럽지 않음
       const bz = ballPos.z, bx = ballPos.x;
       if (!ballMesh.visible) { tPos.set(0, 9, -15); tLook.set(0, 1, 20); }
-      else if (tp - lastContactT < 2.4) { tPos.set(bx * 0.06, 8.5, -15); tLook.copy(ballPos).setY(Math.max(0.6, ballPos.y * 0.75)); fov = clamp(54 - Math.max(0, Math.hypot(bx, bz) - 35) * 0.16, 38, 54); }
+      else if (tp - lastContactT < 2.4) { fov = deadzoneCam(dt); camDirect = true; } // [gameplay] 고정 중계 + 데드존 (공이 화면 가운데 영역을 실제 속도로 지나감)
       else { const far = clamp(bz, 0, 120); tPos.set(bx * 0.2, 8 + far * 0.08, -15 + far * 0.18); tLook.set(bx * 0.8, Math.max(0.6, Math.min(ballPos.y, 20) * 0.5), Math.max(8, bz * 0.85)); fov = 52; }
       k = tp - lastContactT < 2.4 ? 6 : 2.2; camMode = 'pwatch';
     } else if (role.fi >= 0 && fielders[role.fi] && (ph === 'live' || (ph === 'result' && S.b)) && cfg.fieldCam === 'tps') {
@@ -1332,9 +1371,9 @@ function updateCamera(dt, time) {
       const bz = ballPos.z, bx = ballPos.x, tc = tp - lastContactT, fly = ballL && ballL.state === 'air';
       if (!ballMesh.visible && !(S.b && S.b[6] >= 0)) { tPos.set(0, 30, -30); tLook.set(0, 0, 30); k = 3; fov = 52; }
       else if (tc < 2.4 && (fly || bz < 40)) {
-        const d = Math.hypot(bx, bz);
-        tPos.set(bx * 0.06, 8.5, -15); tLook.copy(ballPos).setY(Math.max(0.5, ballPos.y * 0.75));
-        k = 6; fov = clamp(54 - Math.max(0, d - 35) * 0.16, 38, 54);
+        // [gameplay] 맞는 순간 중계 위치로 '컷'(쓸어가는 블렌드·줌아웃 없음) → 카메라 고정, 공이 화면 가운데 데드존을 벗어날 때만 고개를 돌림.
+        // 예전(고개가 공을 계속 따라가고 줌이 25°→54°로 풀림)은 화면상 공 속도가 고정 카메라의 51~68%였음 (docs/rebuild/gameplay.md)
+        fov = deadzoneCam(dt); camDirect = true; k = 6;
       } else { tPos.set(bx * 0.35, 14 + bz * 0.1 + ballPos.y * 0.15, bz * 0.3 - 16); tLook.copy(ballPos).setY(Math.max(0.5, ballPos.y * 0.7)); k = 2; fov = 52; }
       camMode = 'follow';
     }
@@ -1345,8 +1384,8 @@ function updateCamera(dt, time) {
   if (camMode !== lastCamMode) { camBlendT = nowP(); lastCamMode = camMode; }
   const blend = clamp((nowP() - camBlendT) / 0.7, 0, 1);
   const smooth = (window.__cam || window.__fastCam ? 0.0001 : (1 / Math.max(0.5, k)) * (1.6 - 0.6 * blend));
-  smoothDamp(camPos, tPos, camVel, smooth, dt);
-  smoothDamp(camLook, tLook, lookVel, smooth * 0.85, dt);
+  if (camDirect) { camPos.copy(tPos); camLook.copy(tLook); camVel.set(0, 0, 0); lookVel.set(0, 0, 0); camFov = fov; } // [gameplay] 데드존 카메라는 직접 (스프링 지연 없음)
+  else { smoothDamp(camPos, tPos, camVel, smooth, dt); smoothDamp(camLook, tLook, lookVel, smooth * 0.85, dt); }
   void a;
   camera.position.copy(camPos);
   if (shake > 0 && cfg.shake) {
@@ -1354,7 +1393,7 @@ function updateCamera(dt, time) {
     shake = Math.max(0, shake - dt * 0.9);
   } else shake = 0;
   camera.lookAt(camLook);
-  camFov = window.__cam || window.__fastCam ? fov : lerp(camFov, fov, camMode === 'tv' || fov < 30 ? Math.min(1, a * 1.5) : a);
+  if (!camDirect) camFov = window.__cam || window.__fastCam ? fov : lerp(camFov, fov, camMode === 'tv' || fov < 30 ? Math.min(1, a * 1.5) : a);
   camPunch = Math.max(0, camPunch - dt * 18);
   const fovNow = camFov - camPunch;
   if (Math.abs(camera.fov - fovNow) > 0.01) { camera.fov = fovNow; camera.updateProjectionMatrix(); }
@@ -1393,10 +1432,10 @@ function updateHUD() {
       assistDot.children[0].material.opacity = 0.5 * (bunt ? 1 : op); assistDot.children[1].material.opacity = 0.9 * (bunt ? 1 : op);
     }
     // 타이밍 보조(기본): 줄어드는 링 대신 배트 원 테두리가 '지금!' 구간에서만 초록으로
-    pciHot = cfg.assist > 0 && Math.abs(sv - 1) * p.T < SWING.contact.W * hitEase() * 0.55;
+    pciHot = cfg.assist > 0 && Math.abs(sv - 1) * p.T < (bunt ? SWING.bunt.W : PCI.contact.W * hitEase()) * 0.55; // [gameplay] 타이밍 창 안쪽 55% = 초록 (시간만, 위치는 안 알려줌)
     if (cfg.assist === 2 && sv > 0 && sv < 1.15) {
-      const R = SWING[bunt ? 'bunt' : 'contact'].R * hitEase();
-      const rr = R * 0.6 + Math.max(0, 1 - sv) * 0.5;
+      const R = bunt ? SWING.bunt.R * 0.6 : PCI.contact.RX * hitEase();
+      const rr = R + Math.max(0, 1 - sv) * 0.5;
       const ap = aimPoint() || [0, 0.8]; // [gameplay] 타이밍 링은 공 자리 대신 내 배트 원 위에 (위치 미리보기 금지)
       timeRing.visible = true; timeRing.position.set(ap[0], ap[1], -0.015); timeRing.scale.setScalar(rr); timeRing.lookAt(camera.position);
       timeRing.material.color.set(pciHot ? '#4fd18b' : '#ffffff'); timeRing.material.opacity = clamp(sv * 1.5, 0, 0.6);
@@ -1404,16 +1443,7 @@ function updateHUD() {
   }
   const a = (role.batter || role.pitcher) && pitchPhase ? aimPoint() : null;
   const mode = mode2();
-  if (a && role.batter && camMode !== 'intro') {
-    const R = SWING[mode].R * (mode === 'bunt' ? 1 : hitEase());
-    pci.visible = true; pci.position.set(a[0], a[1], -0.02);
-    pci.scale.setScalar(1);
-    // 표시 크기는 '잘 맞는 구간'(판정 반경의 60%)만 — 화면이 덜 어지럽게
-    pciOuter.scale.setScalar(R * 0.6); pciFill.scale.setScalar(R * 0.6);
-    pciOuter.material.color.set(pciHot ? '#4fd18b' : mode === 'bunt' ? '#9fd0ff' : mode === 'power' ? '#ff9f43' : '#ffffff');
-    pciOuter.material.opacity = pciHot ? 0.95 : 0.5;
-    pci.lookAt(camera.position);
-  }
+  if (a && role.batter && camMode !== 'intro') PCIv.update(a, mode, hitEase(), pciHot, camera, SWING.bunt.R); // [gameplay] 정타/강타 크기 다름, 그려진 크기 = 판정 크기
   if (camMode === 'intro') { pci.visible = false; aimMark.visible = false; }
   if (role.pitcher && s.ph === 'pitch' && camMode !== 'intro') {
     const aim = gauge ? gauge.aim : a;

@@ -26,7 +26,18 @@ export const RELEASE = [0.45, 1.85, 17.0];
 export const FOUL = Math.PI / 4;
 export const TEMPO = 1.15; // 결과 대기 배율 (팝업 읽을 시간)
 export const WINDUP = 1.85; // 세트 → 레그킥(정점에서 잠깐 멈춤) → 스트라이드 → 릴리스 (타자가 타이밍 잡을 수 있게)
-export const POLE = [[100 * Math.sin(FOUL), 100 * Math.cos(FOUL)], [-100 * Math.sin(FOUL), 100 * Math.cos(FOUL)]];
+// 폴대: 그림(client/stadium/fence.js)과 같은 자리(라인 끝에서 바깥쪽 0.18m)·높이 26m
+export const POLE = [[100 * Math.sin(FOUL) + 0.18, 100 * Math.cos(FOUL) + 0.18], [-100 * Math.sin(FOUL) - 0.18, 100 * Math.cos(FOUL) + 0.18]];
+export const POLE_H = 26.2;
+export const WALL_FOUL = 1.25; // 파울 지역 벽 높이 (client/stadium/layout.js 와 같게)
+// 덕아웃 개구부(벽 없음) 각도 범위(도): 라인 따라 17~37m, 라인에서 22.2m (layout.js DUGOUT)
+const dugA = (t, d) => Math.atan2((t + d) * Math.SQRT1_2, (t - d) * Math.SQRT1_2) * 180 / Math.PI;
+export const DUG_SPAN = [dugA(37, 22.2), dugA(17, 22.2)];
+// 백네트 높이(벽 위로): 홈 뒤 8.5m → 덕아웃 끝 3.6m (fence.js 와 같은 smoothstep)
+export function netH(ad) {
+  const a0 = DUG_SPAN[1] + 1, t = Math.min(1, Math.max(0, (ad - 165) / (a0 - 165)));
+  return 8.5 + (3.6 - 8.5) * t * t * (3 - 2 * t);
+}
 
 // 잠실: 좌우 100m, 좌우중간 약 120m, 중앙 125m
 export function fenceR(phi) {
@@ -41,17 +52,20 @@ export function standR(phi) {
   return Math.max(18, Math.min(100, 22 / Math.sin(a - FOUL)));
 }
 // 지면 재질: 흙/잔디/워닝트랙
+// [재개발] 새 경기장 그림(client/stadium/field.js)과 똑같은 경계: 예전 sim은 '마운드 29m 원 = 흙'이라 그림상 잔디인 파울 지역까지 흙(구름 저항 2.6 vs 잔디 4.6)으로
+// 처리 → 잔디 위에서 흙처럼 멀리 구르고 높게 튐. 지금: 내야 흙 = 29m 원 ∩ 파울라인 바깥 1.8m, 홈 원 3.96m, 베이스 3.0m, 1·3루 주로 1.7m 폭,
+// 내야 잔디 = 베이스 사각형 86%, 워닝트랙 = 펜스 앞 4.5m + 파울 지역 벽 앞 2.8m
 export function surface(x, z) {
-  const r = Math.hypot(x, z), phi = Math.atan2(x, z);
-  if (Math.abs(phi) <= FOUL && r > fenceR(phi) - 4.5) return 'dirt';
-  if (Math.hypot(x - MOUND[0], z - MOUND[1]) < 2.75) return 'dirt';
-  if (Math.hypot(x, z) < 4.2) return 'dirt';
-  for (let i = 1; i < 4; i++) if (Math.hypot(x - BASES[i][0], z - BASES[i][1]) < 3.2) return 'dirt';
-  if (Math.hypot(x - MOUND[0], z - MOUND[1]) < 29) {
-    const k = 0.84 * H;
-    if (Math.abs(x) / k + Math.abs(z - H) / k <= 1) return 'grass';
-    return 'dirt';
-  }
+  const r = Math.hypot(x, z), phi = Math.atan2(x, z), a = Math.abs(phi);
+  if (a <= FOUL ? r > fenceR(phi) - 4.5 : r > standR(phi) - 2.8) return 'dirt';
+  if (r < 3.96) return 'dirt';
+  if (Math.hypot(x - MOUND[0], z - MOUND[1]) < 2.74) return 'dirt';
+  for (let i = 1; i < 4; i++) if (Math.hypot(x - BASES[i][0], z - BASES[i][1]) < 3.0) return 'dirt';
+  // 1·3루 주로: 홈→1루/3루 선분에서 0.85m 이내
+  for (const i of [1, 3]) { const [bx, bz] = BASES[i], L = BASE_D, t = clamp((x * bx + z * bz) / (L * L), 0, 1); if (Math.hypot(x - bx * t, z - bz * t) < 0.85) return 'dirt'; }
+  const k = 0.86 * H;
+  if (Math.abs(x) / k + Math.abs(z - H) / k <= 1) return 'grass';
+  if (Math.hypot(x - MOUND[0], z - MOUND[1]) < 28.96 && z + 2.55 >= Math.abs(x)) return 'dirt';
   return 'grass';
 }
 
@@ -117,13 +131,14 @@ export const SWING = {
   bunt: { W: 0.3, R: 0.32 },
 };
 // 사람 타자 타격 난이도: 판정 폭 배율 / 공 체감 속도 배율 (0 쉬움, 1 보통, 2 어려움)
-export const HIT_EASE = [1.78, 1.55, 1.12]; // 판정 폭(타이밍·배트 원) 배율: 쉬움 / 보통 / 어려움 (재개발: '아직 좀 어렵다' 피드백 → 보통 1.42→1.55)
+export const HIT_EASE = [1.2, 1.0, 0.82]; // 사람 타자 판정 배율(PCI 크기·타이밍 창 둘 다): 쉬움 / 보통 / 어려움 — PCI 기준값에 곱함 (CPU 타자는 SWING 그대로)
 export const HIT_SLOW = [1.14, 1.06, 1.0];
 // 사람 타자 발사각 (11-19 '다 땅볼·뜬공 기준 모르겠다' 피드백): 원 중심 정타 → 라인드라이브~뜬공, 원 아래쪽 → 뜬공, 위쪽 → 땅볼
 export let LIFT_H = { contact: 12, power: 21 }, LIFT_SLOPE_H = 34, LIFT_NOISE_H = 8, SWEET_H = 15;
 export function setLift(o) { if (o.lift) LIFT_H = o.lift; if (o.slope) LIFT_SLOPE_H = o.slope; if (o.noise) LIFT_NOISE_H = o.noise; if (o.sweet) SWEET_H = o.sweet; }
 // human: 사람 타자 보정 켜기, hq/pull: 모드별(RULES) 맞힌 공 질 보정·스윗스팟 모으기
 export function evalSwing(mode, dt, ax, ay, pitchV = 40, ease = 1, human = false, hq = 0.85, pull = 0.35) {
+  if (human && mode !== 'bunt') return evalPCI(mode, dt, ax, ay, pitchV, ease, hq, pull);
   const M0 = SWING[mode] || SWING.contact;
   const M = ease === 1 ? M0 : { ...M0, W: M0.W * ease, R: M0.R * ease };
   const d = Math.hypot(ax, ay);
@@ -151,6 +166,57 @@ export function evalSwing(mode, dt, ax, ay, pitchV = 40, ease = 1, human = false
   // 사람 타자: 잘 맞힌 공(q>0.55)은 '스윗스팟' 쪽으로 살짝 모아줌
   if (human && q > 0.55) launch += (SWEET_H - launch) * Math.min(pull, (q - 0.55) * 0.9);
   const spray = clamp(-(dt / M.W) * 52 - (ax / M.R) * 20 + 5 + gauss() * 12, -78, 78); // 우타자: 빠르면 당겨서 좌측(+x)
+  return { v, launch, spray, q };
+}
+
+// ═════════════ 사람 타자: PCI(MLB 더쇼식 커서) + 타이밍 위주 ═════════════
+// 존 위에 둥근 사각 커서(PCI). 맞느냐/안 맞느냐와 타구 질은 '타이밍'이 주로 정하고, 커서는 넉넉하게:
+//  · 타이밍 창 W 밖이면 헛스윙(빠름/늦음). 창 안이면 정확도 tq = 1-|dt|/W (1 = 딱 맞음)
+//  · 판정 커서 크기 = 그려진 PCI × (1 + grow·tq) → 타이밍이 맞을수록 커서가 조금 빗나가도 맞음 (공 위치는 안 보여줌)
+//  · 공이 PCI의 어디에 맞았나(ny): 커서 아래쪽(커서가 공보다 위) → 땅볼, 가운데 → 라인드라이브, 위쪽 → 뜬공
+//  · 타이밍 빠름 → 당겨치기(좌측), 늦음 → 밀어치기(우측)
+// RX/RY = 반폭/반높이(m, 보통 난이도·리얼 기준), W = 타이밍 반폭(초). 모드·난이도 배율(ease)을 크기·타이밍 둘 다에 곱한다.
+export const PCI = {
+  contact: { RX: 0.215, RY: 0.16, W: 0.145, pow: 0.98 },
+  power: { RX: 0.165, RY: 0.12, W: 0.11, pow: 1.08 }, // 발사각 기준은 LIFT_H(정타 12°·강타 21°)·LIFT_SLOPE_H 공통
+  grow: 0.6, // 타이밍 정확도에 따른 판정 커서 확대 (tq=1 → ×1.6)
+  P: 3, // 둥근 사각 지수 (2 = 타원, 클수록 사각형)
+  qT: 0.85, qN: 0.45, qE: 0.4, // 타구 질 q = tq^qT · (1 - qN·n²): 타이밍이 주, 커서 중심 거리는 보조
+};
+// 결정적 판정(랜덤 없음) — 클라가 스윙 즉시 같은 결과를 계산(즉시 타격감)하고 서버도 같은 함수로 판정
+export function pciJudge(mode, dt, ax, ay, ease = 1) {
+  const P = PCI[mode] || PCI.contact;
+  const W = P.W * ease, RX = P.RX * ease, RY = P.RY * ease;
+  const tq = isFinite(dt) ? 1 - Math.abs(dt) / W : -1;
+  const g = 1 + PCI.grow * Math.max(0, tq);
+  const nx = (ax || 0) / (RX * g), ny = (ay || 0) / (RY * g);
+  const n = Math.pow(Math.pow(Math.abs(nx), PCI.P) + Math.pow(Math.abs(ny), PCI.P), 1 / PCI.P);
+  const contact = tq >= 0 && n <= 1;
+  const why = contact ? null : tq < 0 ? (dt < 0 ? 'early' : 'late') : 'off';
+  return { contact, why, tq, g, nx, ny, n, W, RX, RY };
+}
+// 타구 질의 타이밍 기준은 배율을 덜 받음(ease^qE): 쉬운 모드는 '맞히기'가 쉬워지고, 장타가 그만큼 폭증하진 않게
+export function pciQ(mode, dt, J, ease = 1) {
+  const W = (PCI[mode] || PCI.contact).W * Math.pow(ease, PCI.qE);
+  const tq = Math.max(0, 1 - Math.abs(dt) / W);
+  return Math.pow(tq, PCI.qT) * (1 - PCI.qN * J.n * J.n);
+}
+export function evalPCI(mode, dt, ax, ay, pitchV = 40, ease = 1, hq = 0.85, pull = 0.35) {
+  const J = pciJudge(mode, dt, ax, ay, ease);
+  if (!J.contact) return null;
+  const P = PCI[mode] || PCI.contact;
+  let q = pciQ(mode, dt, J, ease);
+  q = 1 - (1 - q) * hq; // 모드별 후하게 (같은 실수라도 타구가 덜 죽음)
+  // 파울: 타이밍 끝자락이거나 커서 가장자리에 걸치면 자주 파울 (실제처럼 2스트라이크 이후 버티기)
+  const pf = (J.tq < 0.25 ? 0.55 * (1 - J.tq / 0.25) : 0) + (J.n > 0.8 ? 0.5 * (J.n - 0.8) / 0.2 : 0) + 0.12;
+  if (Math.random() < pf) return { v: rand(14, 26), launch: rand(20, 70), spray: (dt < 0 ? 1 : -1) * rand(55, 125), q: q * 0.5, foul: true };
+  // 커서 맨 가장자리(손잡이·배트 끝): 빗맞은 약한 타구
+  if (J.n > 0.88 && Math.random() < 0.5) return { v: rand(19, 31), launch: J.ny > 0 ? rand(-18, 4) : rand(25, 58), spray: clamp(-(dt / J.W) * 40 + gauss() * 12, -78, 78), q: q * 0.5 };
+  const v = (31.5 + 20.2 * q) * P.pow + 0.1 * (pitchV - 35) + rand(-1.2, 1.2);
+  // 발사각: 커서 중심 = LIFT_H(정타 12°·강타 21°), 공이 커서 위쪽(ny<0)일수록 뜸, 아래쪽일수록 땅볼 (11-19 '뜬공 기준 명확' 피드백 값 그대로)
+  let launch = clamp((LIFT_H[mode] ?? 12) - J.ny * LIFT_SLOPE_H + gauss() * LIFT_NOISE_H, -25, 70);
+  if (q > 0.55) launch += (SWEET_H - launch) * Math.min(pull, (q - 0.55) * 0.9); // 정타는 스윗스팟 쪽으로 살짝 모음
+  const spray = clamp(-(dt / J.W) * 46 - J.nx * 10 + 4 + gauss() * 10, -78, 78); // 빠르면 당겨서 좌측(+x)
   return { v, launch, spray, q };
 }
 // 타구 초기 상태 (속도 + 스핀)
@@ -212,7 +278,7 @@ export function integrate(b, dt, world = true) {
   if (!world) return ev;
   const r = Math.hypot(b.x, b.z), phi = Math.atan2(b.x, b.z);
   // 폴대
-  for (const p of POLE) if (b.y < 30 && b.y > WALL_H && dist2(b.x, b.z, p[0], p[1]) < 0.4) ev.pole = true;
+  for (const p of POLE) if (b.y < POLE_H && b.y > WALL_H && dist2(b.x, b.z, p[0], p[1]) < 0.35) ev.pole = true;
   // 외야 펜스 (안쪽에서 바깥으로 넘어갈 때만)
   if (Math.abs(phi) <= FOUL + 0.004) {
     const R = fenceR(phi);
@@ -229,6 +295,27 @@ export function integrate(b, dt, world = true) {
         }
         b.x = nx * (R - 0.15); b.z = nz * (R - 0.15);
         ev.wall = true;
+      }
+    }
+  }
+  // [재개발] 파울 지역 벽(1.25m)·백네트: 예전엔 벽이 없어서 파울 지역 땅볼·송구가 그림의 벽을 뚫고 관중석으로 들어감
+  if (Math.abs(phi) > FOUL + 0.004) {
+    const R = standR(phi);
+    if (r >= R - 0.1 && r0 < R + 0.3) {
+      const ad = Math.abs(phi) * 180 / Math.PI;
+      const inDug = ad > DUG_SPAN[0] - 0.3 && ad < DUG_SPAN[1] + 0.3;
+      const hTop = ad > DUG_SPAN[1] + 1 ? WALL_FOUL + netH(ad) : WALL_FOUL;
+      if (!inDug && b.y < hTop) {
+        const nx = b.x / r, nz = b.z / r, vr = b.vx * nx + b.vz * nz;
+        if (vr > 0) {
+          ev.impact = vr;
+          const net = b.y > WALL_FOUL, e = net ? 0.08 : 0.35;
+          b.vx -= (1 + e) * vr * nx; b.vz -= (1 + e) * vr * nz;
+          const d = net ? 0.3 : 0.8; b.vx *= d; b.vz *= d; b.vy *= net ? 0.3 : 0.75;
+          b.sx = b.sy = b.sz = 0;
+        }
+        b.x = nx * (R - 0.12); b.z = nz * (R - 0.12);
+        ev.fwall = true;
       }
     }
   }
@@ -865,7 +952,7 @@ export class Game {
     this.ev('swing', { pid: p.id, mode, human: human ? 1 : 0, dt: dms, bid: this.batter.id || null });
     if (!res) {
       p.res = 'miss';
-      { const M = SWING[mode] || SWING.contact, W = M.W * ease; this.ev('miss', { pid: p.id, mode, dt: dms, why: Math.abs(dt) > W ? (dt < 0 ? 'early' : 'late') : 'off', human: human ? 1 : 0 }); }
+      { const M = human && mode !== 'bunt' ? PCI[mode] : (SWING[mode] || SWING.contact), W = M.W * ease; this.ev('miss', { pid: p.id, mode, dt: dms, why: Math.abs(dt) > W ? (dt < 0 ? 'early' : 'late') : 'off', human: human ? 1 : 0 }); }
       if (this.mode === 'derby') return this.derbyOut('헛스윙');
       if (mode === 'bunt') { this.say(this.strikes >= 2 ? '번트 실패 · 삼진' : '번트 헛스윙', this.strikes >= 2); }
       return this.countStrike(true, true);
@@ -883,6 +970,9 @@ export class Game {
       batted: true, bounced: false, touched: false, fair: null, holder: -1, thrower: -1, throwAt: 0, ev: Math.round(res.v * 3.6), bunt: !!res.bunt,
     });
     this.lastHit = { id: p.id, ev: this.ball.ev, la: Math.round(res.launch), q: r2(res.q), mode };
+    // 사람 스윙은 타자 핑(올라오는 지연)만큼 늦게 도착 → 실제 스윙 순간부터 날아간 만큼 앞으로 굴려 시작 (최대 0.15초).
+    // 그래야 타자 화면에서 공이 '맞은 순간'부터 제 속도로 날아감 (예전엔 한쪽 핑만큼 늦게 출발해 계속 뒤처짐)
+    if (human) { const lag = clamp(this.now - p.swingAt, 0, 0.15); for (let i = 0, n = Math.ceil(lag * 120); i < n; i++) integrate(this.ball, lag / n); }
     this.startPlay();
   }
   // 맞는 순간 피드백 데이터: 등급(grade) · 세기(pow 0~1, 히트스톱·흔들림·소리 세기용) · 타구 종류(kind)
@@ -1670,6 +1760,12 @@ export class Game {
         if (b.holder < 0) return this.homeRun();
       }
       if (ev.wall) { b.bounced = true; if (b.batted && b.fair === null) b.fair = true; P.traj = null; this.wallEv = { id: ++this.seq }; this.ev('wall', { x: r2(b.x), y: r2(b.y), z: r2(b.z), impact: r2(ev.impact) }); }
+      // 파울 지역 벽·백네트: 페어 판정 전이면 파울, 페어 타구·송구는 벽 맞고 튀어나와 인플레이 계속
+      if (ev.fwall) {
+        if (b.batted && b.fair === null) return this.foulBall();
+        b.bounced = true; P.traj = null;
+        if (ev.impact > 3) this.ev('wall', { x: r2(b.x), y: r2(b.y), z: r2(b.z), impact: r2(ev.impact), foul: 1 });
+      }
       if (ev.landed && b.batted && !b.bounced) {
         b.bounced = true;
         const r = Math.hypot(b.x, b.z), phi = Math.atan2(b.x, b.z);
@@ -2065,7 +2161,7 @@ export class Game {
   // ───────── 스냅샷 ─────────
   // drain=true: 쌓인 게임 이벤트를 ev 로 실어 보내고 비움 (Room 브로드캐스트·혼자하기 틱에서만. 접속 직후 개별 전송은 false)
   snapshot(drain = false) {
-    const s = { t: 's', now: r2(this.now), ph: this.phase };
+    const s = { t: 's', now: Math.round(this.now * 1000) / 1000, ph: this.phase }; // ms 단위: 0.01초 반올림이면 공 외삽 위치가 ±0.2m 떨림
     if (drain && this.events.length) s.ev = this.takeEvents();
     if (this.phase === 'lobby') return s;
     s.ru = this.set.rules; s.hx = r2(this.humanEase('contact'));
