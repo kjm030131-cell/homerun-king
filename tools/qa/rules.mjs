@@ -173,6 +173,7 @@ export function runGame({ seed = 1, rules = 'real', innings, fuzz = false, timeL
       if (al.length > 4) flag('주자 5명 이상', `${al.length}`);
       for (const r of al) {
         if (!(r.b >= 0 && r.b <= 4) || !(r.target >= 0 && r.target <= 4) || !isFinite(r.b)) { flag('주자 위치 범위 밖', `b=${r.b} target=${r.target}`); break; }
+        if (!Number.isInteger(r.target)) { flag('주자 목표 베이스가 정수가 아님(클라 BASES[target] 오류)', `target=${r.target}`); break; }
       }
       if (g.phase === 'live' && order) {
         const live = order.filter((r) => !r.out && !r.scored);

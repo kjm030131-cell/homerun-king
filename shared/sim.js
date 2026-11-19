@@ -1617,7 +1617,7 @@ export class Game {
     this.stat().rbi += P.err ? 0 : Math.max(0, P.runs);
     for (const r of this.runners) delete r.batter;
     // [bugs] 3아웃이면 남은 주자는 그 자리에 멈춤 (전엔 1루로 뛰던 타자주자가 결과 화면 동안 홈플레이트로 순간이동)
-    for (const r of this.alive()) { if (this.outs >= 3) { r.target = r.b; continue; } if (r.b !== Math.floor(r.b)) r.target = Math.floor(r.b); r.b = r.target; }
+    for (const r of this.alive()) { if (this.outs >= 3) { r.target = Math.min(4, Math.max(1, Math.ceil(r.b))); continue; } /* target 은 항상 정수(클라가 BASES[target] 로 씀) */ if (r.b !== Math.floor(r.b)) r.target = Math.floor(r.b); r.b = r.target; }
     this.play = null;
     if (this.ball && this.ball.state !== 'held') this.ball.ghost = true;
     this.ev('playEnd', { runs: P.runs, outs: this.outs, hl: P.highlight ? 1 : 0 });

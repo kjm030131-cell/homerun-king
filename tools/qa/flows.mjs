@@ -146,7 +146,7 @@ for (const name of pick) {
     }
     const fin = await ev(() => window.__qf.report());
     for (const x of fin.issues) issue(x[0], x[1]);
-    R.notes.push(`이벤트 ${fin.nev}개 · 투구 ${fin.pitches} · 타격 ${fin.contacts} · 장비 검사 ${fin.equipChecks}회 · 통과점 ${fin.cross} (존 노랑 ${fin.crossY}/볼 하늘 ${fin.crossB}) · 오디오 voices 최대 ${fin.audioPeak} 버림 ${fin.audioDropped}`);
+    R.notes.push(`이벤트 ${fin.nev}개 · 투구 ${fin.pitches} · 타격 ${fin.contacts} · 내 스윙 판정 비교 ${fin.lsCmp} · 장비 검사 ${fin.equipChecks}회 · 통과점 ${fin.cross} (존 노랑 ${fin.crossY}/볼 하늘 ${fin.crossB}) · 오디오 voices 최대 ${fin.audioPeak} 버림 ${fin.audioDropped}`);
     const q = await ev(() => window.__qa.errors);
     for (const e of q) issue(`예외 [${e.src}] ×${e.n}`, e.msg.split('\n').slice(0, 3).join(' | '));
   } catch (e) { issue('FATAL', String(e.message || e).slice(0, 300)); }
@@ -226,6 +226,9 @@ function PAGE_HELPERS() {
         if (t === 'release') F.pitches++; if (t === 'contact') F.contacts++;
         if (d && d.at != null && !/^(cue|ui|caster):/.test(t)) { const sig = t + JSON.stringify(d); const k = t + '@' + d.at; if (lastSig.get(k) === sig) issue('같은 이벤트가 같은 시각에 두 번: ' + t, sig.slice(0, 120)); lastSig.set(k, sig); if (lastSig.size > 400) lastSig = new Map([...lastSig].slice(-200)); }
         if (t === 'modeChange' && d && d.start) per.clear(); // 새 경기: pid 다시 1부터
+        // 내 스윙 즉시 판정(localSwing.contact) = 서버 판정(contact/miss) 인지 (PCI+타이밍, 클라·서버 같은 함수·같은 hx)
+        if (t === 'localSwing' && d) { F.ls = F.ls || new Map(); F.ls.set(d.pid, !!d.contact); F.lsN = (F.lsN || 0) + 1; }
+        if ((t === 'contact' || t === 'miss') && d && d.human && F.ls && F.ls.has(d.pid)) { const want = F.ls.get(d.pid); F.ls.delete(d.pid); F.lsCmp = (F.lsCmp || 0) + 1; if (want !== (t === 'contact')) issue('내 화면 즉시 판정 ≠ 서버 판정', 'pid ' + d.pid + ' 화면 ' + (want ? '맞음' : '헛스윙') + ' / 서버 ' + t + (d.why ? '(' + d.why + ')' : '') + ' mode=' + d.mode); }
         if (d && d.pid != null && PER_PID.includes(t)) { const k = t + '#' + d.pid; const n = (per.get(k) || 0) + 1; per.set(k, n); if (n === 2) issue('같은 투구(pid)에 ' + t + ' 두 번', 'pid ' + d.pid); if (per.size > 2000) per.clear(); }
       });
     };
@@ -267,7 +270,7 @@ function PAGE_HELPERS() {
         H.scene.traverse((o) => { if (o.isMesh && o.visible && o.geometry && o.geometry.type === 'SphereGeometry' && Math.abs((o.geometry.parameters.radius || 0) - 0.0592) < 0.002) { F.seamOk = 1; if (!o.material.map) issue('투구 공에 실밥 텍스처 없음'); } });
       }
     };
-    F.report = () => ({ issues: F.issues, nev: F.nev, pitches: F.pitches, contacts: F.contacts, equipChecks: F.equipChecks, cross: F.cross, crossY: F.crossY, crossB: F.crossB, audioPeak: window.__audio ? window.__audio.stats.peak : null, audioDropped: window.__audio ? window.__audio.stats.dropped : null });
+    F.report = () => ({ issues: F.issues, lsCmp: F.lsCmp || 0, nev: F.nev, pitches: F.pitches, contacts: F.contacts, equipChecks: F.equipChecks, cross: F.cross, crossY: F.crossY, crossB: F.crossB, audioPeak: window.__audio ? window.__audio.stats.peak : null, audioDropped: window.__audio ? window.__audio.stats.dropped : null });
     // __qaStep 의 매 프레임 뒤에 검사 끼우기
     const orig = window.__qaStep;
     window.__qaStep = (sec, o = {}) => { let r = 'ok'; const H = window.__hr; if (H && !H.net()) H.tick = () => { }; /* 나간 뒤 옛 혼자하기 틱(실제론 clearInterval 로 멈춤)이 하네스에서 계속 불리지 않게 */ const n = Math.max(1, Math.round(sec * 10)); for (let i = 0; i < n && r === 'ok'; i++) { r = orig(sec / n, o); try { F.check(); } catch (e) { Q.rec('flowcheck', e); } } return r; };
