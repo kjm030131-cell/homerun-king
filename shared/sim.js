@@ -746,7 +746,9 @@ export class Game {
     else if (b.state === 'thrown') { let bd = 1e9; for (let i = 0; i < this.fielders.length; i++) { if (i === b.thrower) continue; const d = dist2(this.fielders[i].x, this.fielders[i].z, b.tx, b.tz); if (d < bd) { bd = d; target = i; } } }
     else {
       // 타구 쫓기는 플레이당 한 번(타구 직후)만 자동 전환 — 계속 바뀌면 헷갈림
-      if (P.autoChaseDone && !(P.chaser >= 0 && this.now - (P.sw || 0) > 2.5 && this.humanIdleAll())) return;
+      // [qa 11-19] 예외: 공이 내가 잡고 있는 선수를 지나쳐 외야로 빠졌으면(내 선수보다 6m+ 멀리, 쫓는 사람이 바뀜) 쫓는 선수로 넘김
+      const passed = P.chaser >= 0 && this.now - (P.sw || 0) > 0.8 && this.humans(this.fieldTeam).some((h) => { const ci = this.ctrlFielder(h.id); if (ci < 0 || ci === P.chaser) return false; const f = this.fielders[ci]; return Math.hypot(b.x, b.z) > Math.hypot(f.x, f.z) + 6 && dist2(f.x, f.z, b.x, b.z) > 7; });
+      if (P.autoChaseDone && !passed && !(P.chaser >= 0 && this.now - (P.sw || 0) > 2.5 && this.humanIdleAll())) return;
       target = P.chaser;
     }
     if (target < 0) return;
@@ -762,7 +764,7 @@ export class Game {
       for (const id of hs) {
         const ci = this.ctrlFielder(id), f = ci >= 0 ? this.fielders[ci] : null;
         if (f && (b.holder === ci || this.now - (f.swT || -9) < 1.5)) continue; // 공 든 사람/방금 바꾼 사람은 그대로
-        if (f && this.now - f.act < 0.6 && f.act > (f.swT || -9)) continue; // 직접 움직이는 중이면 안 뺏음
+        if (f && this.now - f.act < 0.6 && f.act > (f.swT || -9) && !(b.holder < 0 && b.state !== 'thrown' && Math.hypot(b.x, b.z) > Math.hypot(f.x, f.z) + 6 && dist2(f.x, f.z, b.x, b.z) > 7)) continue; // 직접 움직이는 중이면 안 뺏음(공이 이미 지나쳤으면 넘김)
         const d = f ? dist2(f.x, f.z, tf.x, tf.z) : 0;
         if (d < best) { best = d; pick = id; }
       }
