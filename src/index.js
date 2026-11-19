@@ -112,7 +112,8 @@ export class Room {
   async fetch(req) {
     const url = new URL(req.url);
     this.code = this.code || req.headers.get('x-room');
-    if (url.pathname === '/info') return json({ exists: this.socks.size > 0, ...this.info() });
+    // [net] 모두 잠깐 끊겨 90초 보존 중인 방도 '있음' — 전엔 혼자 있던 사람이 새로고침(?room=)하면 '방이 없어'로 막혀 자기 자리에 못 돌아왔음
+    if (url.pathname === '/info') return json({ exists: this.socks.size > 0 || (!!this.idleT && this.tokens.size > 0), ...this.info() });
 
     const name = (url.searchParams.get('name') || '선수').slice(0, 12);
     const token = url.searchParams.get('token') || '';
@@ -165,7 +166,7 @@ export class Room {
   }
 
   startLoop() {
-    clearTimeout(this.idleT);
+    clearTimeout(this.idleT); this.idleT = null;
     if (this.timer) return;
     let last = Date.now();
     this.timer = setInterval(() => {
@@ -187,7 +188,7 @@ export class Room {
   }
 
   stop() {
-    clearTimeout(this.idleT);
+    clearTimeout(this.idleT); this.idleT = null;
     clearInterval(this.timer);
     this.timer = null;
     this.tokens.clear();

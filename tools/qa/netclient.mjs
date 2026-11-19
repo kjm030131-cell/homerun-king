@@ -13,10 +13,10 @@ const lerpAng = (a, b, u) => { let d = b - a; d = Math.atan2(Math.sin(d), Math.c
 const hr = () => Number(process.hrtime.bigint()) / 1e6;
 const rkey = (r) => (r[7] ? 'r' + r[7] : r[2] + '|' + (r[4] || ''));
 
-export function makeClient({ kind, sim, i, now, send, truthAt, rnd, gauss }) {
+export function makeClient({ kind, sim, i, now, send, truthAt, rnd, gauss, srvNow }) {
   const { integrate, inZone, ZONE, runnerXZ } = sim;
   const C = { i, kind, id: null, errors: [] };
-  const stat = C.stat = { down: 0, msgs: 0, perSec: new Map(), parse: [], proc: [], frameMs: [], snapB: 0, snapN: 0, snapMaxB: 0, frames: 0, diag: {}, catchup: 0, under: 0, hold: 0, extrap: 0, delaySum: 0,
+  const stat = C.stat = { down: 0, msgs: 0, perSec: new Map(), parse: [], proc: [], frameMs: [], snapB: 0, snapN: 0, snapMaxB: 0, frames: 0, diag: {}, catchup: 0, lagSum: 0, ballLagSum: 0, under: 0, hold: 0, extrap: 0, delaySum: 0,
     plN: 0, plE2: 0, plErrs: [], stall: 0, lurch: 0, moving: 0, plJump: 0, bN: 0, bE2: 0, bErrs: [], bJump: 0, ev: {} };
   let offset = null, S = null, prevS = null, ballL = null, lastBallSt = '', lastFrame = null;
   const snapHist = [];
@@ -26,7 +26,7 @@ export function makeClient({ kind, sim, i, now, send, truthAt, rnd, gauss }) {
   const A = []; const runners = new Map();
   const merger = SNAP ? SNAP.createSnapMerger() : null;
   C.send = (m) => send(m);
-  C.reset = () => { stat.down = 0; stat.msgs = 0; stat.perSec.clear(); for (const k of ['parse', 'proc', 'frameMs', 'plErrs', 'bErrs']) stat[k].length = 0; for (const k of ['snapB', 'snapN', 'snapMaxB', 'frames', 'under', 'hold', 'extrap', 'delaySum', 'plN', 'plE2', 'stall', 'lurch', 'moving', 'plJump', 'bN', 'bE2', 'bJump', 'catchup']) stat[k] = 0; stat.ev = {}; };
+  C.reset = () => { stat.down = 0; stat.msgs = 0; stat.perSec.clear(); for (const k of ['parse', 'proc', 'frameMs', 'plErrs', 'bErrs']) stat[k].length = 0; for (const k of ['snapB', 'snapN', 'snapMaxB', 'frames', 'under', 'hold', 'extrap', 'delaySum', 'plN', 'plE2', 'stall', 'lurch', 'moving', 'plJump', 'bN', 'bE2', 'bJump', 'catchup', 'lagSum', 'ballLagSum']) stat[k] = 0; stat.ev = {}; };
 
   // ── 수신 ──
   C.recv = (raw) => {
@@ -143,6 +143,7 @@ export function makeClient({ kind, sim, i, now, send, truthAt, rnd, gauss }) {
       ti = t - netQ.delay; IP = interpAt(ti); stat.delaySum += netQ.delay;
       if (snapHist.length && ti > snapHist[snapHist.length - 1].t) { under = true; ext = 0; }
     }
+    stat.lagSum += srvNow() - ti; stat.ballLagSum += srvNow() - t;
     stat.frames++; if (under) { stat.under++; if (!ext) stat.hold++; else stat.extrap += ext; }
     const live = S.ph === 'live';
     const tr = truthAt(ti), trP = truthAt(ti - dt);
@@ -237,7 +238,7 @@ export function makeClient({ kind, sim, i, now, send, truthAt, rnd, gauss }) {
     return {
       kbps: stat.down / 1024 / sec, kbpsMax: +(Math.max(0, ...secs) / 1024).toFixed(2), mps: stat.msgs / sec, snapB: stat.snapB / Math.max(1, stat.snapN), snapMaxB: stat.snapMaxB,
       parse: stat.parse, proc: stat.proc, frameMs: stat.frameMs,
-      underrun: stat.under / Math.max(1, stat.frames), hold: stat.hold / Math.max(1, stat.frames), extrapMs: 1000 * stat.extrap / Math.max(1, stat.under - stat.hold), delayMs: 1000 * stat.delaySum / Math.max(1, stat.frames),
+      underrun: stat.under / Math.max(1, stat.frames), hold: stat.hold / Math.max(1, stat.frames), extrapMs: 1000 * stat.extrap / Math.max(1, stat.under - stat.hold), delayMs: 1000 * stat.delaySum / Math.max(1, stat.frames), lagMs: 1000 * stat.lagSum / Math.max(1, stat.frames), ballLagMs: 1000 * stat.ballLagSum / Math.max(1, stat.frames),
       plErr: Math.sqrt(stat.plE2 / Math.max(1, stat.plN)), plErr99: q(stat.plErrs, 0.99), stall: stat.stall / Math.max(1, stat.moving), lurch: stat.lurch / Math.max(1, stat.plN), plJump: stat.plJump / (sec / 60) / 1, catchup: stat.catchup / Math.max(1, stat.plN + stat.catchup),
       bErr: Math.sqrt(stat.bE2 / Math.max(1, stat.bN)), bErr99: q(stat.bErrs, 0.99), bJump: stat.bJump / Math.max(1e-9, stat.bN / 3600), bN: stat.bN,
     };

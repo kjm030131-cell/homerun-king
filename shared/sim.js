@@ -1312,7 +1312,7 @@ export class Game {
     if (this.now - f.dv < 1.2) return;
     const x = Number(m.x), z = Number(m.z);
     if (!isFinite(x) || !isFinite(z)) return;
-    const el = Math.max(0.05, this.now - (f.lastMvT || this.now - 0.1));
+    const el = Math.max(0.02, this.now - (f.lastMvT || this.now - 0.1)); // [net] 클라가 30Hz 로 보냄(전 20Hz) — 0.05 하한이면 전력질주가 조깅(mv 1)으로 잡힘
     const d = dist2(f.x, f.z, x, z), maxd = SPRINT_SPEED * el * 1.6 + 0.6;
     const k = d > maxd ? maxd / d : 1;
     f.mv = d / el > 0.5 ? (d / el > FIELD_SPEED + 0.5 ? 2 : 1) : 0;

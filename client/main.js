@@ -717,7 +717,8 @@ function updateControl(dt) {
   } else ctl.moving = false;
   if (diveAge >= 0 && diveAge < 1.2) { ctl.x = f[1]; ctl.z = f[2]; }
   if (ctl.active && t - ctl.lastIn > 0.5) ctl.active = false;
-  if (ctl.active && t - ctl.lastSend > 0.05) { ctl.lastSend = t; net.send({ t: 'mv', x: ctl.x, z: ctl.z, ry: ctl.ry, a: 1 }); }
+  // [net] 20Hz → 30Hz(스냅샷 주기와 같게): 20Hz 면 다른 사람 화면에서 사람 수비수가 스냅샷 3개 중 1개는 제자리 → 계단처럼 끊겨 보였음. 숫자는 cm 까지
+  if (ctl.active && t - ctl.lastSend > 0.031) { ctl.lastSend = t; net.send({ t: 'mv', x: Math.round(ctl.x * 100) / 100, z: Math.round(ctl.z * 100) / 100, ry: Math.round(ctl.ry * 100) / 100, a: 1 }); }
 }
 // 모바일 스틱/버튼
 if (TOUCH) {

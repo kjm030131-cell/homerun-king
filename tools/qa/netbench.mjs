@@ -98,7 +98,7 @@ const { makeClient } = await import(pathToFileURL(join(HERE, 'tools/qa/netclient
 const clients = [];
 async function connect(i) {
   const down = link(), up = link();
-  const C = makeClient({ kind: CLIENT, sim: CSIM, i, now: () => VT / 1000, send: (m) => { const s = JSON.stringify(m); up(() => { const a = hr(); sock.fire('message', { data: s }); addSec(hr() - a); }); }, truthAt, rnd: nrnd, gauss });
+  const C = makeClient({ kind: CLIENT, sim: CSIM, i, now: () => VT / 1000, send: (m) => { const s = JSON.stringify(m); up(() => { const a = hr(); sock.fire('message', { data: s }); addSec(hr() - a); }); }, truthAt, rnd: nrnd, gauss, srvNow: () => room.game.now });
   const ls = { message: [], close: [], error: [] };
   const sock = {
     accept() { }, fire(t, e) { for (const f of ls[t]) f(e); },
@@ -155,7 +155,7 @@ const R = {
   downKBps: +mean('kbps').toFixed(2), downKBpsMax: Math.max(...per.map((p) => p.kbpsMax)), msgsPerSec: +mean('mps').toFixed(1), snapAvgB: Math.round(mean('snapB')), snapMaxB: Math.max(...per.map((p) => p.snapMaxB)),
   srv: { loopMs: st(cpu.loop), tickMs: st(cpu.tick), snapMs: st(cpu.snap), jsonMs: st(cpu.json), cpuMsPerSec: st(secs) },
   cl: { parseMs: st(per.flatMap((p) => p.parse)), procMs: st(per.flatMap((p) => p.proc)), frameMs: st(per.flatMap((p) => p.frameMs)) },
-  underrun: +mean('underrun').toFixed(4), holdFrames: +mean('hold').toFixed(4), extrapMs: +mean('extrapMs').toFixed(1), delayMs: +mean('delayMs').toFixed(1),
+  underrun: +mean('underrun').toFixed(4), holdFrames: +mean('hold').toFixed(4), extrapMs: +mean('extrapMs').toFixed(1), delayMs: +mean('delayMs').toFixed(1), lagMs: +mean('lagMs').toFixed(1), ballLagMs: +mean('ballLagMs').toFixed(1),
   pl: { errRms: +mean('plErr').toFixed(3), errP99: +mean('plErr99').toFixed(3), stall: +mean('stall').toFixed(4), lurch: +mean('lurch').toFixed(4), jumpPerMin: +mean('plJump').toFixed(2), catchup: +mean('catchup').toFixed(4) },
   ball: { errRms: +mean('bErr').toFixed(3), errP99: +mean('bErr99').toFixed(3), jumpPerMin: +mean('bJump').toFixed(2), frames: Math.round(mean('bN')) },
   game: { ...host.gameStat(), wallMs: Math.round(wallMs) },
@@ -169,7 +169,7 @@ else {
   console.log(`  내려받기 ${R.downKBps}KB/s(최대 ${R.downKBpsMax}) ${R.msgsPerSec}msg/s 스냅샷 평균 ${R.snapAvgB}B 최대 ${R.snapMaxB}B`);
   console.log(`  서버 루프 1회 ${R.srv.loopMs.avg}ms(p99 ${R.srv.loopMs.p99} 최대 ${R.srv.loopMs.max}) 중 틱 ${R.srv.tickMs.avg}ms(p99 ${R.srv.tickMs.p99} 최대 ${R.srv.tickMs.max}) 스냅샷 ${R.srv.snapMs.avg} 직렬화 ${R.srv.jsonMs.avg} → 서버 CPU 합계 ${R.srv.cpuMsPerSec.avg}ms/초(최대 ${R.srv.cpuMsPerSec.max})`);
   console.log(`  클라 파싱 ${R.cl.parseMs.avg}ms(최대 ${R.cl.parseMs.max}) 처리 ${R.cl.procMs.avg}ms 프레임 모델 ${R.cl.frameMs.avg}ms`);
-  console.log(`  보간 지연 ${R.delayMs}ms · 언더런 ${(R.underrun * 100).toFixed(2)}% 프레임 (멈춤 ${(R.holdFrames * 100).toFixed(2)}%, 외삽 평균 ${R.extrapMs}ms)`);
+  console.log(`  화면이 서버보다 늦은 시간: 선수 ${R.lagMs}ms · 공·투구(시계) ${R.ballLagMs}ms | 보간 지연 ${R.delayMs}ms · 언더런 ${(R.underrun * 100).toFixed(2)}% 프레임 (멈춤 ${(R.holdFrames * 100).toFixed(2)}%, 외삽 평균 ${R.extrapMs}ms)`);
   console.log(`  선수/주자: 오차 RMS ${R.pl.errRms}m p99 ${R.pl.errP99}m · 끊김(움직이는데 멈춤) ${(R.pl.stall * 100).toFixed(2)}% · 튐(과속) ${(R.pl.lurch * 100).toFixed(2)}% · 0.3m+ 점프 ${R.pl.jumpPerMin}/분 (따라가는 중 ${(R.pl.catchup * 100).toFixed(1)}% 제외)`);
   console.log(`  공(타구·송구 ${R.ball.frames}프레임): 오차 RMS ${R.ball.errRms}m p99 ${R.ball.errP99}m · 0.3m+ 점프 ${R.ball.jumpPerMin}/분`);
   console.log(`  경기: ${JSON.stringify(R.game)}`);
