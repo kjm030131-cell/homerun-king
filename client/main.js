@@ -276,7 +276,7 @@ function connectWS(code, name, pw = '') {
     if (wsRetry < 30) { wsRetry++; setTimeout(() => { if (net && net.ws === ws) connectWS(code, name); }, Math.min(4000, 400 * wsRetry)); }
   };
   net = { ws, send: (m) => ws.readyState === 1 && ws.send(JSON.stringify(m)), close: () => { net = null; ws.close(); } };
-  window.__hr = { game: null, getRole: () => getRole(), cam: () => camMode, S: () => S, net: () => net, rp: replay, lct: () => lastContactT, scene, tick: () => { }, renderer, simNow, camera }; // [qa] 멀티에서도 테스트 훅 (tools/qa)
+  window.__hr = { game: null, getRole: () => getRole(), cam: () => camMode, S: () => S, net: () => net, rp: replay, lct: () => lastContactT, scene, tick: () => { }, renderer, simNow, camera, ni: () => NI }; // [qa] 멀티에서도 테스트 훅 (tools/qa) · [net] ni: 보간 상태
   roomCode = code;
   clearInterval(pingIv);
   lastMsgAt = performance.now();
@@ -799,6 +799,7 @@ function updateWorld(dt) {
   const ballW = ballMesh.visible ? ballPos : null;
   // 수비수
   const IP = !net?.local && window.__noInterp !== 1 ? NI.sample(t, dt, s.ph === 'live') : null; // [net] 보간(바닥나면 짧게 외삽)
+  if (IP) { NI.fr = (NI.fr || 0) + 1; if (IP.under) { NI.ur = (NI.ur || 0) + 1; if (!IP.ext) NI.hold = (NI.hold || 0) + 1; } } // [net] QA 집계용(프레임·언더런·멈춤)
   s.fl.forEach((f, i) => {
     const A = fielders[i]; if (!A) return;
     let [pos, x, z, ry, ctrlId, mv, jt, dv] = f;

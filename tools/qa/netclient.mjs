@@ -118,7 +118,7 @@ export function makeClient({ kind, sim, i, now, send, truthAt, rnd, gauss, srvNo
     const a = 1 - Math.exp(-k * dt);
     const ox = o.x, oz = o.z;
     let nx = lerp(ox, x, a), nz = lerp(oz, z, a);
-    if (kind !== 'v20') {
+    if (kind !== 'v20' && !process.env.NOCAP) {
       const jump = Math.hypot(x - ox, z - oz), vmax = 10.5 * dt, mv = Math.hypot(nx - ox, nz - oz);
       if (jump < 50 && mv > vmax) { nx = ox + (nx - ox) * vmax / mv; nz = oz + (nz - oz) * vmax / mv; }
       else if (jump >= 50) { nx = x; nz = z; }

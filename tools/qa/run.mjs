@@ -51,7 +51,7 @@ const { srv, port } = await serve({ api: async (p) => {
   const m = p.match(/^\/api\/room\/(\w{4})$/); if (m && RM) { const r = await RM.roomOf(m[1].toUpperCase()).fetch(new Request('http://x/info', { headers: { 'x-room': m[1].toUpperCase() } })); return r.json(); }
   return null;
 } });
-RM = await attachRooms(srv, root);
+RM = await attachRooms(srv, root, { ping: opt.ping, jit: opt.jit, loss: opt.loss }); // [net] 멀티: --ping=120 --jit=30 --loss=0.01
 const browser = await chromium.launch({ executablePath: chrome, headless: !opt.headed, args: ['--use-gl=angle', '--use-angle=swiftshader', '--enable-unsafe-swiftshader', '--ignore-gpu-blocklist', '--enable-precise-memory-info', '--autoplay-policy=no-user-gesture-required'] });
 const inject = readFileSync(join(root, 'tools/qa/inject.js'), 'utf8') + '\n' + readFileSync(join(root, 'tools/qa/driver.js'), 'utf8');
 const report = {};
@@ -194,12 +194,12 @@ async function runMulti(name, S) {
   const end = Date.now() + (+opt.sec || S.sec) * 1000;
   const smp = [];
   while (Date.now() < end) { await new Promise((ok) => setTimeout(ok, 5000)); smp.push(await Promise.all(pages.map(({ page }) => page.evaluate(() => ({ s: window.__qaSample(), raf: window.__qa.raf.n, c: window.__qa.count })).catch((e) => ({ err: e.message }))))); if (opt.v) console.log('  ..', smp[smp.length - 1].map((x) => x.s ? `${x.s.screen}/${x.s.ph}/${x.s.cam} ${x.s.inn}회 rAF${x.raf} 스윙${x.c.swings} 투구${x.c.pitches}` : x.err).join(' | ')); }
-  for (const { page, cons } of pages) { const q = await page.evaluate(() => ({ errors: window.__qa.errors, raf: window.__qa.raf, count: window.__qa.count })); r.pages.push({ ...q, raf: { n: q.raf.n, err: q.raf.err }, console: [...new Set(cons)].slice(0, 20), last: smp.length ? smp[smp.length - 1][r.pages.length].s : null }); await page.close(); }
+  for (const { page, cons } of pages) { const q = await page.evaluate(() => { const N = window.__hr && window.__hr.ni && window.__hr.ni(); return { errors: window.__qa.errors, raf: window.__qa.raf, count: window.__qa.count, ni: N ? { delay: Math.round(N.delay * 1000), jit: Math.round(N.jit * 1000), fr: N.fr || 0, under: N.ur || 0, hold: N.hold || 0 } : null }; }); r.pages.push({ ...q, raf: { n: q.raf.n, err: q.raf.err }, console: [...new Set(cons)].slice(0, 20), last: smp.length ? smp[smp.length - 1][r.pages.length].s : null }); await page.close(); }
   r.serverErrors = RM.errors.slice(e0);
   for (const rm of RM.rooms.values()) { clearInterval(rm.timer); rm.timer = null; }
   r.bad = r.serverErrors.length + r.pages.reduce((a, p) => a + p.errors.length, 0);
   console.log(`\n══ ${name} (${((Date.now() - t0) / 1000).toFixed(0)}s) — ${S.desc}  방 ${r.code}`);
-  r.pages.forEach((p, i) => { console.log(`  [${i}] 봇 ${JSON.stringify(p.count)} rAF ${p.raf.n} 끝 ${p.last && `${p.last.screen}/${p.last.ph} ${p.last.inn}회 ${JSON.stringify(p.last.score)}`}`); for (const e of p.errors) console.log(`  ✗ [${i}][${e.src}] ×${e.n}\n     ${e.msg.replace(/\n/g, '\n     ')}`); });
+  r.pages.forEach((p, i) => { console.log(`  [${i}] 봇 ${JSON.stringify(p.count)} rAF ${p.raf.n}${p.ni ? ` 보간지연 ${p.ni.delay}ms 늦음p90 ${p.ni.jit}ms 언더런 ${(100 * p.ni.under / Math.max(1, p.ni.fr)).toFixed(2)}%(멈춤 ${p.ni.hold})` : ''} 끝 ${p.last && `${p.last.screen}/${p.last.ph} ${p.last.inn}회 ${JSON.stringify(p.last.score)}`}`); for (const e of p.errors) console.log(`  ✗ [${i}][${e.src}] ×${e.n}\n     ${e.msg.replace(/\n/g, '\n     ')}`); });
   for (const e of r.serverErrors.slice(0, 10)) console.log('  ✗ [서버]', e);
   return r;
 }
