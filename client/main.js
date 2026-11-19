@@ -241,7 +241,7 @@ function startLocal(name, o) {
   };
   const iv = setInterval(tickFn, 1000 / 60);
   net = { send: (m) => game.handle('me', m), close: () => clearInterval(iv), local: true, game };
-  window.__hr = { game, getRole: () => getRole(), cam: () => camMode, S: () => S, net: () => net, rp: replay, lct: () => lastContactT, scene, tick: tickFn, renderer, simNow };
+  window.__hr = { game, getRole: () => getRole(), cam: () => camMode, S: () => S, net: () => net, rp: replay, lct: () => lastContactT, scene, tick: tickFn, renderer, simNow, camera };
   roomCode = null;
   game.start();
   lobby = game.lobbyState();
@@ -269,7 +269,7 @@ function connectWS(code, name, pw = '') {
     if (wsRetry < 30) { wsRetry++; setTimeout(() => { if (net && net.ws === ws) connectWS(code, name); }, Math.min(4000, 400 * wsRetry)); }
   };
   net = { ws, send: (m) => ws.readyState === 1 && ws.send(JSON.stringify(m)), close: () => { net = null; ws.close(); } };
-  window.__hr = { game: null, getRole: () => getRole(), cam: () => camMode, S: () => S, net: () => net, rp: replay, lct: () => lastContactT, scene, tick: () => { }, renderer, simNow }; // [qa] 멀티에서도 테스트 훅 (tools/qa)
+  window.__hr = { game: null, getRole: () => getRole(), cam: () => camMode, S: () => S, net: () => net, rp: replay, lct: () => lastContactT, scene, tick: () => { }, renderer, simNow, camera }; // [qa] 멀티에서도 테스트 훅 (tools/qa)
   roomCode = code;
   clearInterval(pingIv);
   lastMsgAt = performance.now();

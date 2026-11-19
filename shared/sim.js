@@ -105,6 +105,19 @@ const dist2 = (ax, az, bx, bz) => Math.hypot(ax - bx, az - bz);
 const r2 = (v) => Math.round(v * 100) / 100;
 // 송구 시간: 짧은 송구는 빠르게, 60m 넘는 원거리 송구는 포물선이라 평균 속도가 떨어짐 (중계 플레이가 의미 있게)
 const throwT = (d) => d / (THROW_SPEED + Math.min(d, 35) * 0.08 - Math.max(0, d - 45) * 0.06);
+// 송구 조준: 공기저항(integrate 의 thrown 항력)까지 넣어 시간 T 에 (x, 1.3, z) 에 닿게 속도를 몇 번 고쳐 맞춤
+function aimThrow(b, x, z, T) {
+  const dt = 1 / 120, n = Math.max(1, Math.round(T / dt));
+  for (let it = 0; it < 3; it++) {
+    const s = { x: b.x, y: b.y, z: b.z, vx: b.vx, vy: b.vy, vz: b.vz, state: 'thrown' };
+    for (let k = 0; k < n; k++) integrate(s, dt, false);
+    const want = Math.hypot(x - b.x, z - b.z), got = Math.hypot(s.x - b.x, s.z - b.z) || 1e-6;
+    const kx = clamp(want / got, 0.8, 1.6);
+    b.vx *= kx; b.vz *= kx;
+    b.vy += (1.3 - s.y) / T;
+    if (Math.abs(want - got) < 0.15 && Math.abs(1.3 - s.y) < 0.1) break;
+  }
+}
 
 // ═════════════ 투구 궤적 ═════════════
 // 겉보기 목표(목표-변화량)로 직선 진행하다 s^2로 꺾여 실제 목표에 도달 (늦게 꺾이는 변화구)
@@ -1053,6 +1066,14 @@ export class Game {
     return { rid: ++this.seq, pid: this.batter.id, name: this.batter.name, b, target: b === 0 ? 1 : b, start: b, forced: batter, mustReturn: false, out: false, scored: false, manual: 0, batter, steal: false, trot: false };
   }
 
+  // [qa 11-19] 수비수가 펜스·관중석을 뚫고 나가지 않게 (홈런 타구 쫓다가 우익수가 펜스 2~3m 밖까지 달려가던 것)
+  keepInPark() {
+    for (const f of this.fielders) {
+      const r = Math.hypot(f.x, f.z); if (r < 15) continue;
+      const phi = Math.atan2(f.x, f.z), lim = standR(phi) - 0.6;
+      if (r > lim) { const k = lim / r; f.x *= k; f.z *= k; }
+    }
+  }
   pause(dur, after) { if (this.mode !== 'derby' && dur < 4) dur *= TEMPO; this.phase = 'result'; this.phaseUntil = this.now + dur; this.after = after; }
   endPA(dur) { this.pause(dur, this.outs >= 3 ? 'half' : 'next'); }
 
@@ -1348,6 +1369,7 @@ export class Game {
     b.vx = (x - f.x) / T; b.vz = (z - f.z) / T;
     b.vy = (1.3 - 1.8 + 0.5 * G * T * T) / T;
     b.sx = b.sy = b.sz = 0;
+    aimThrow(b, x, z, T); // [qa 11-19] 공기저항 보정: 안 하면 긴 송구(외야→1루 등)가 5~6m 짧게 떨어져 받는 사람 앞에서 바운드(플레이 16%)
     b.state = 'thrown'; b.batted = false; b.holder = -1; b.thrower = i; b.throwAt = this.now; b.tx = x; b.tz = z;
     this.play.traj = null; this.play.nextRole = 0;
     this.throwEv = { id: ++this.seq, i };
@@ -1583,6 +1605,7 @@ export class Game {
       case 'live': {
         const n = Math.max(1, Math.ceil(dt / (1 / 120)));
         for (let i = 0; i < n && this.phase === 'live'; i++) this.liveStep(dt / n);
+        this.keepInPark();
         break;
       }
       case 'result': {

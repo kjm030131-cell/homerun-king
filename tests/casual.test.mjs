@@ -97,7 +97,7 @@ test('같은 스윙 실력이면 캐주얼 타율이 리얼보다 높음', () =>
     }
     return h / ab;
   };
-  const r = withSeed(11, () => avg('real', 6, 9)), c = withSeed(12, () => avg('casual', 15, 3));
+  const r = withSeed(11, () => avg('real', 12, 9)), c = withSeed(12, () => avg('casual', 30, 3)); // [qa 11-19] 6/15판은 표본이 작아 송구 궤적만 바뀌어도 흔들림(큰 표본에선 차이 0.06~0.07)
   assert.ok(c > r + 0.03, `캐주얼 ${c.toFixed(3)} vs 리얼 ${r.toFixed(3)}`);
   assert.ok(c > 0.18 && c < 0.5, `캐주얼 타율 ${c.toFixed(3)}`);
 });
