@@ -20,6 +20,7 @@ import { createUI, cfg, store, TOUCH, banner, feedback, toast, castLine, addChat
 import { bus } from './core/bus.js'; // [gameplay] 게임 이벤트 → bus
 import { createPCI, judgeSwing } from './game/batting.js'; // [gameplay] PCI 타격
 import { createBallLook } from './game/ball.js'; // [pitch] 실밥·구종별 회전축
+import { createNetInterp, mergeBall, stepBall, rkey } from './net/interp.js'; // [net] 서버 시계·보간 버퍼·외삽·공 합류 (tools/qa/netbench.mjs 로 측정)
 
 const $ = (id) => document.getElementById(id);
 const clamp = (v, a, b) => Math.max(a, Math.min(b, v));
@@ -165,9 +166,10 @@ crossMark.renderOrder = 11; scene.add(crossMark);
 
 // ═════════════ 상태 ═════════════
 let net = null, myId = null, myName = '', roomCode = null, myToken = null;
-let lobby = null, S = null, prevS = null, offset = null;
+let lobby = null, S = null, prevS = null;
+const NI = createNetInterp(); // [net]
 let screen = 'title';
-const simNow = () => nowP() + (offset || 0);
+const simNow = () => NI.simNow(nowP()); // [net]
 
 // 인물들
 let fielders = [], fieldTeamBuilt = null, batter = null, batTeamBuilt = null;
@@ -306,7 +308,7 @@ function setScreen(sc) { ui.setScreen(sc); }
 function toTitle() {
   if (net) { const n = net; net = null; n.close(); }
   clearInterval(pingIv);
-  S = null; prevS = null; lobby = null; offset = null; myId = null; snapHist.length = 0; netQ.lastArr = 0;
+  S = null; prevS = null; lobby = null; myId = null; NI.reset(); // [net]
   setScreen(myName ? 'lobby' : 'title'); // [ui] 나가면 닉네임이 있으면 로비로
   history.replaceState(null, '', location.pathname);
   clearActors();
@@ -332,7 +334,7 @@ const ui = createUI({
   applyQuality: () => applyQuality(), applyTimeOfDay: (t) => applyTimeOfDay(t), applyClubs: (cl) => applyClubs(cl),
   setVolume: (v) => setVolume(v), stopReplay: () => replay.stop(), sound: () => { }, /* [audio] 오르간은 사운드가 batterUp 으로 직접 냄 → ui 쪽 호출은 지워도 됨 */ unlockAudio: () => audio(),
   setPitchType: (k) => setPitchType(k),
-  setPaused: (on) => { if (net && net.local) { net.paused = on; if (!on) offset = null; } },
+  setPaused: (on) => { if (net && net.local) { net.paused = on; if (!on) NI.offset = null; } }, // [net]
   onScreen: (sc) => { screen = sc; },
 });
 $('bReconnect').onclick = () => { if (roomCode) { wsRetry = 0; connectWS(roomCode, myName); } };
@@ -343,35 +345,11 @@ let shake = 0, lastHolder = -1, camPunch = 0, lastContactT = 0;
 const replay = new Replay();
 let rpInfo = null;
 function allPlayers() { const a = fielders.map((A) => A.p); if (batter) a.push(batter.p); for (const A of runners.values()) a.push(A.p); for (const U of umps) a.push(U.p); for (const C of coaches) a.push(C.p); return a; }
-// ── 보간 버퍼: 다른 선수 위치를 '조금 과거'의 두 스냅샷 사이로 보간 → 핑이 튀어도 순간이동·덜덜거림 없음.
-// 지연량은 도착 간격의 흔들림(지터)에 맞춰 자동 조절 (안정적인 와이파이면 ~45ms, 흔들리면 최대 220ms)
-const snapHist = [];
-const netQ = { jit: 0.01, lastArr: 0, lastNow: 0, delay: 0.06, loss: 0 };
-function netBuf(s, p) {
-  if (netQ.lastArr) {
-    const d = (p - netQ.lastArr) - (s.now - netQ.lastNow);
-    netQ.jit += (Math.abs(d) - netQ.jit) * (Math.abs(d) > netQ.jit ? 0.2 : 0.03); // 튀면 빨리 늘리고 천천히 줄임
-  }
-  netQ.lastArr = p; netQ.lastNow = s.now;
-  const want = clamp(1 / 30 + netQ.jit * 2.2, 0.045, 0.22);
-  netQ.delay += (want - netQ.delay) * 0.08;
-  const rn = new Map(); for (const r of s.rn || []) rn.set(r[7] ? 'r' + r[7] : r[2] + '|' + (r[4] || ''), r);
-  if (snapHist.length && s.now <= snapHist[snapHist.length - 1].t) return;
-  snapHist.push({ t: s.now, fl: s.fl, rn });
-  while (snapHist.length > 24) snapHist.shift();
-}
-// t 시점의 보간 상태: [a, b, u] (a/b 스냅샷, u 0..1). 버퍼가 비면 null
-function interpAt(t) {
-  const n = snapHist.length; if (n < 2) return null;
-  if (t >= snapHist[n - 1].t) return [snapHist[n - 1], snapHist[n - 1], 0];
-  for (let i = n - 2; i >= 0; i--) { const a = snapHist[i], b = snapHist[i + 1]; if (t >= a.t) return [a, b, b.t > a.t ? (t - a.t) / (b.t - a.t) : 0]; }
-  return [snapHist[0], snapHist[0], 0];
-}
+// ── [net] 보간 버퍼·외삽·서버 시계는 client/net/interp.js (NI) — 지연은 스냅샷 '늦음'의 90% 분위에 맞춰 자동, 바닥나면 최대 0.18초 외삽
 const lerpAng = (a, b, u) => { let d = b - a; d = Math.atan2(Math.sin(d), Math.cos(d)); return a + d * u; };
 function onSnap(s) {
-  const p = nowP(), sample = s.now - p;
-  if (offset === null || sample > offset || Math.abs(sample - offset) > 2) offset = sample; else offset += (sample - offset) * 0.02;
-  if (!net?.local && s.fl) netBuf(s, p);
+  const p = nowP();
+  NI.clock(s, p); if (!net?.local && s.fl) NI.push(s, p); // [net]
   if (s.pg) pgList = s.pg;
   if (s.ph === 'lobby') { S = s; if ((screen === 'game' || screen === 'over') && !net?.local) setScreen('room'); return; }
   if (screen === 'room' || ((screen === 'title' || screen === 'lobby' || screen === 'modes') && net)) setScreen('game');
@@ -413,24 +391,11 @@ function onSnap(s) {
   if (s.we && s.we.id !== seen.we) { { shake = Math.max(shake, 0.15); } seen.we = s.we.id; }
   // 공
   if (s.b) {
-    const [x, y, z, vx, vy, vz, h, st, sx, sy, sz] = s.b;
-    // 지연 보정: 서버 상태(s.now 시점)를 지금 화면 시각까지 앞으로 굴린 뒤 합류 (과거 위치로 당기면 공이 뒤로 끌려가서 느려 보임)
-    // [gameplay] 처음 받은 스냅샷·상태가 바뀐 스냅샷(air→ground 바운드 등)도 앞으로 굴린 뒤 씀 — 예전엔 굴리지 않은 과거 위치로 순간이동해서 바운드 자리가 어긋났음
-    const sb = { x, y, z, vx, vy, vz, sx, sy, sz, state: st, h };
-    if (h < 0) { const age = clamp(simNow() - s.now, 0, 0.25); for (let i = 0, n = Math.ceil(age * 120); i < n; i++) integrate(sb, age / n); }
-    if (!ballL || h >= 0 || ballL.h >= 0 || (st === 'thrown' && lastBallSt !== 'thrown') || Math.hypot(ballL.x - sb.x, ballL.y - sb.y, ballL.z - sb.z) > 2.5) {
-      if (st === 'thrown' && lastBallSt !== 'thrown') fx.trailClear();
-      ballL = sb;
-    } else {
-      const k = 0.35;
-      ballL.x = lerp(ballL.x, sb.x, k); ballL.z = lerp(ballL.z, sb.z, k);
-      // [gameplay] 바운드 직전·직후엔 클라와 서버가 몇 ms 차이로 서로 다른 쪽(내려가는 중/튀어 오른 뒤)에 있을 수 있음 → 그때 세로 속도를 덮어쓰면
-      // 공중에서 튀거나 두 번 튐. 같은 쪽일 때만 높이·세로 속도를 맞추고, 다르면 클라가 자기 바운드를 끝내게 둠
-      const sameSide = (ballL.vy > 0.5) === (sb.vy > 0.5) || (ballL.y > 0.8 && sb.y > 0.8);
-      if (sameSide) { ballL.y = lerp(ballL.y, sb.y, k); ballL.vy = sb.vy; ballL.state = sb.state; }
-      ballL.vx = sb.vx; ballL.vz = sb.vz; ballL.sx = sb.sx; ballL.sy = sb.sy; ballL.sz = sb.sz; ballL.h = h;
-      if (sb.state === 'thrown' || sb.state === 'dead') ballL.state = sb.state;
-    }
+    const h = s.b[6], st = s.b[7];
+    // 지연 보정: 서버 상태(s.now 시점)를 화면 공의 시각까지 앞으로 굴린 뒤 합류 — [gameplay] 처음·상태 바뀐 스냅샷도 굴림 / [net] client/net/interp.js mergeBall
+    const prevBall = ballL;
+    ballL = mergeBall(ballL, s, simNow(), integrate, lastBallSt);
+    if (ballL !== prevBall && st === 'thrown' && lastBallSt !== 'thrown') fx.trailClear();
     lastHolder = h; lastBallSt = st;
   } else { ballL = null; lastBallSt = ''; lastHolder = -1; }
   // 새 타구
@@ -830,14 +795,12 @@ function updateWorld(dt) {
   const hasBall = (i) => s.b && s.b[6] === i;
   const ballW = ballMesh.visible ? ballPos : null;
   // 수비수
-  const IP = !net?.local && window.__noInterp !== 1 ? interpAt(t - netQ.delay) : null;
+  const IP = !net?.local && window.__noInterp !== 1 ? NI.sample(t, dt, s.ph === 'live') : null; // [net] 보간(바닥나면 짧게 외삽)
   s.fl.forEach((f, i) => {
     const A = fielders[i]; if (!A) return;
     let [pos, x, z, ry, ctrlId, mv, jt, dv] = f;
-    if (IP) { const fa = IP[0].fl[i], fb = IP[1].fl[i]; if (fa && fb && fa[0] === pos && fb[0] === pos) { x = lerp(fa[1], fb[1], IP[2]); z = lerp(fa[2], fb[2], IP[2]); ry = lerpAng(fa[3], fb[3], IP[2]);
-      // [gameplay] 타구 중엔 공(현재 시각으로 외삽)과 수비수(보간 지연 netQ.delay 만큼 과거)가 다른 시각에 그려져서, 공이 수비수 몸에 맞거나 잡히는 자리가
-      // 화면에선 수비수 1~6m 앞(허공)이었음 → 보간 구간 속도로 지연만큼 앞으로 밀어 같은 시각에 맞춤 (최대 1.5m)
-      if (s.ph === 'live' && IP[1].t > IP[0].t) { const dtS = IP[1].t - IP[0].t, ah = netQ.delay; let ex = (fb[1] - fa[1]) / dtS * ah, ez = (fb[2] - fa[2]) / dtS * ah; const el = Math.hypot(ex, ez); if (el > 1.5) { ex *= 1.5 / el; ez *= 1.5 / el; } x += ex; z += ez; } } }
+    // [gameplay] 타구 중엔 공(현재 시각으로 외삽)과 수비수(보간 지연만큼 과거)가 다른 시각이라 공이 수비수 앞 허공에서 잡혔음 → 구간 속도로 지연만큼 앞으로(최대 1.5m) — NI.sample/fl 안에서
+    if (IP) { const q = IP.fl(i, pos); if (q) { x = q[0]; z = q[1]; ry = q[2]; } }
     if (i === role.fi && ctl.active) { x = ctl.x; z = ctl.z; ry = ctl.ry; }
     if (pos === 'P' && pitchPhase) ry = Math.PI;
     const sp = place(A, x, z, ry, dt, i === role.fi && ctl.active ? 30 : IP ? 22 : 12);
@@ -924,7 +887,7 @@ function updateWorld(dt) {
   const live = new Set();
   for (const r of s.rn || []) {
     const [x0, z0, name, b, pid, flags, target, rid] = r;
-    const key = rid ? 'r' + rid : name + '|' + (pid || '');
+    const key = rkey(r);
     live.add(key);
     let A = runners.get(key);
     if (!A) {
@@ -933,7 +896,7 @@ function updateWorld(dt) {
       A = takeRunner(pk) || mkActor(o); A.poolKey = pk; runners.set(key, A);
     }
     let x = x0, z = z0;
-    if (IP) { const ra = IP[0].rn.get(key), rb = IP[1].rn.get(key); if (ra && rb) { x = lerp(ra[0], rb[0], IP[2]); z = lerp(ra[1], rb[1], IP[2]); } }
+    if (IP) { const q = IP.rn(key); if (q) { x = q[0]; z = q[1]; } } // [net]
     // 리드 (투구 전 베이스에서 살짝 떨어짐)
     const onBase = Math.abs(b - Math.round(b)) < 0.01 && b >= 1 && b <= 3;
     if (onBase && (s.ph === 'pitch' || s.ph === 'pitching') && !(flags & 1)) {
@@ -1151,13 +1114,10 @@ function updateBall(dt, t, role, pitchPhase) {
     if (ballL.h >= 0) {
       vis = false; // 수비수 손 안의 공(모델)이 보임
       const A = fielders[ballL.h]; if (A) A.p.ball.getWorldPosition(ballPos);
-    } else if (tp >= hitStopUntil) {
-      const steps = Math.ceil(dt / (1 / 120));
-      const prevY = ballL.y, prevVy = ballL.vy;
-      for (let i = 0; i < steps; i++) {
-        const ev = integrate(ballL, dt / steps);
-        if (ev.landed && ev.impact > 2.5) { bus.emit('cue:bounce', { impact: ev.impact, surf: ev.surf, x: ballL.x, z: ballL.z }); /* [audio] */ if (ev.surf === 'dirt' && ev.impact > 3) fx.dustPuff(ballL.x, ballL.z, 0.8, 0.8); }
-      }
+    } else if (tp < hitStopUntil) { ballL.tb = t; vis = true; } // 히트스톱: 공 잠깐 멈춤(시각도 같이 멈춤 → 끝나고 따라잡지 않음) [net]
+    else {
+      // [net] 화면 공 시각(tb) → 지금(t)까지 적분 (프레임 dt 대신: 스냅샷 합류와 같은 시계라 앞서 갔다 끌려오기 없음)
+      stepBall(ballL, t, integrate, (ev) => { if (ev.landed && ev.impact > 2.5) { bus.emit('cue:bounce', { impact: ev.impact, surf: ev.surf, x: ballL.x, z: ballL.z }); /* [audio] */ if (ev.surf === 'dirt' && ev.impact > 3) fx.dustPuff(ballL.x, ballL.z, 0.8, 0.8); } });
       ballPos.set(ballL.x, ballL.y, ballL.z);
       ballLook.spinVec(ballL.sx, ballL.sy, ballL.sz); // [pitch]
       fx.trailPush(ballPos, ballL.state === 'thrown' ? '#9fd0ff' : '#ffe6b0');
@@ -1203,7 +1163,7 @@ function updateBall(dt, t, role, pitchPhase) {
           if (col === '#ffd23a' && dd < 5 && tp - divePromptT > 1.5) { divePromptT = tp; feedback('지금! C 다이빙 / Space 점프', '#ffd23a'); }
         }
       }
-    } else vis = true;
+    }
   } else if (s.ph === 'pitch' || !s.p) vis = false;
   ballMesh.visible = vis;
   if (vis) {
@@ -1481,7 +1441,7 @@ function updateHUD() {
     camMode, gauge: g, pitchType, bunt: !!(buntOn || s.bs), swingMode: mode, aimOn: !!(a && role.batter && camMode !== 'intro'),
     throwPow: tbarPow, landChase: landRing.visible && s.ch === role.fi,
     ballDist: ballL && ballL.h < 0 ? Math.hypot(ballPos.x, ballPos.z) : null,
-    fps: curFps, rtt, pgList, jit: netQ.jit,
+    fps: curFps, rtt, pgList, jit: NI.jit,
   });
 }
 // 미니맵
