@@ -18,7 +18,7 @@ function flag(kind, g, msg) {
 }
 const d2 = (ax, az, bx, bz) => Math.hypot(ax - bx, az - bz);
 
-let plays = 0, ticks = 0;
+let plays = 0, ticks = 0, covT = 0; const cov = {};
 for (let k = 0; k < N; k++) {
   const evs = [];
   const g = new Game({ emit: (m) => { if (m && m.t === 'ev' && m.ev) evs.push(...[].concat(m.ev)); }, sendTo: () => {} });
@@ -79,6 +79,16 @@ for (let k = 0; k < N; k++) {
       // 같은 공으로 3명 이상 몰림(공 3m 안, 움직이는 중)
       const crowd = g.fielders.filter((f) => d2(f.x, f.z, b.x, b.z) < 3 && (f.mv || 0) > 1).length;
       if (b.holder < 0 && crowd >= 3) { st.crowd += 1 / 60; if (st.crowd > 1 && !st.crowdF) { st.crowdF = 1; flag('공 하나에 3명 이상 몰림', g, g.fielders.filter((f) => d2(f.x, f.z, b.x, b.z) < 3).map((f) => f.pos).join(',')); } }
+      // 베이스 커버: 공이 외야(반지름 40m+)에 있고 플레이 2.5초가 지난 뒤 각 베이스 3m 안에 수비수가 있나 (공 든 사람·쫓는 사람 제외)
+      if (t > 2.5 && Math.hypot(b.x, b.z) > 40) {
+        st.covT = (st.covT || 0) + 1 / 60;
+        for (let k = 1; k <= 4; k++) {
+          const B = BASES[k % 4];
+          const has = g.fielders.some((f, fi) => fi !== b.holder && d2(f.x, f.z, B[0], B[1]) < 3); const live = g.alive().some((r) => !r.trot && r.b < k && r.target >= k - 1);
+          if (!has && live) { cov[k] = (cov[k] || 0) + 1 / 60; if (!st['cv' + k] && t > 4) { st['cv' + k] = 1; flag(`${k === 4 ? '홈' : k + '루'} 베이스가 빔(공이 외야, 4초+)`, g, g.fielders.map((f) => f.pos + '(' + d2(f.x, f.z, B[0], B[1]).toFixed(0) + ')').join(' ') + ' holder=' + (b.holder >= 0 ? g.fielders[b.holder].pos : '-') + ' chaser=' + (P.chaser >= 0 ? g.fielders[P.chaser].pos : '-')); } }
+        }
+        covT += 1 / 60;
+      }
       // 주자 겹침(같은 위치 두 명)
       const al = g.alive();
       for (let a = 0; a < al.length; a++) for (let c = a + 1; c < al.length; c++) if (Math.abs(al[a].b - al[c].b) < 0.03 && al[a].b > 0.2 && !st.overF) { st.overF = 1; flag('주자 두 명이 같은 자리', g, `${al[a].b.toFixed(2)} / ${al[c].b.toFixed(2)} target ${al[a].target}/${al[c].target}`); }
@@ -96,6 +106,7 @@ for (let k = 0; k < N; k++) {
 }
 if (V) process.stdout.write('\n');
 console.log(`== 수비 검사 (${RULES}, ${N}경기, 플레이 ${plays}개)`);
+if (covT) console.log('공이 외야에 있을 때 베이스가 빈 시간 비율: ' + [1, 2, 3, 4].map((k) => (k === 4 ? '홈' : k + '루') + ' ' + (100 * (cov[k] || 0) / covT).toFixed(0) + '%').join(' · '));
 if (!found.size) console.log('이상 없음');
 for (const [k, e] of [...found.entries()].sort((a, c) => c[1].n - a[1].n)) {
   console.log(`- ${k}: ${e.n}회 (${(100 * e.n / plays).toFixed(1)}%)`);
