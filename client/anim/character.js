@@ -342,7 +342,11 @@ export class Character {
       const u = B[n + 'Arm'], l = B[n + 'ForeArm'], h = B[n + 'Hand'];
       if (u && l && h) twoBoneIK(u, l, h, this.ikT[s], w);
     }
-    if (this.lookW > 0.01 && B.Head) this._look(B.Head, this.lookT, this.lookW);
+    if (this.lookW > 0.01 && B.Head) {
+      // [anim 11-19] 목·머리에 나눠서 돌림(목 45% → 머리 나머지, 전체 최대 45°). 머리 뼈 하나로 65°까지 돌리면 목 피부가 늘어나 얼굴이 일그러져 보였음
+      if (B.Neck) this._look(B.Neck, this.lookT, this.lookW * 0.45, 45, B.Head);
+      this._look(B.Head, this.lookT, this.lookW, 30);
+    }
   }
   _blob() {
     const h = this.bones.Hips; if (!h || !this.blob) return;
@@ -366,11 +370,16 @@ export class Character {
     B.visible = true;
   }
   // 머리가 목표를 보게(최대 65°). 얼굴 앞 방향(머리 뼈 로컬)은 T포즈에서 미리 계산(lib.faceLocal)
-  _look(head, target, w) {
+  // bone 을 돌려 얼굴(머리 뼈 기준 faceLocal)이 목표를 보게. faceBone 을 주면 그 뼈(머리)의 얼굴 방향을 기준으로 bone(목)을 돌림
+  _look(head, target, w, limDeg = 45, faceBone = null) {
     head.getWorldQuaternion(_qa); head.getWorldPosition(_a);
-    const face = _v1.copy(this.lib.faceLocal).applyQuaternion(_qa).normalize();
+    const fq = faceBone ? faceBone.getWorldQuaternion(_qb) : _qa;
+    const face = _v1.copy(this.lib.faceLocal).applyQuaternion(fq).normalize();
+    if (faceBone) faceBone.getWorldPosition(_a);
     const want = _v2.subVectors(target, _a); if (want.lengthSq() < 1e-6) return; want.normalize();
-    const a = ang(face, want), lim = 65 * DEG;
+    // 위아래는 덜 돌게(고개를 과하게 젖히면 턱·목이 늘어남)
+    want.y = face.y + (want.y - face.y) * 0.55; want.normalize();
+    const a = ang(face, want), lim = limDeg * DEG;
     if (a > lim) want.lerpVectors(face, want, lim / a).normalize();
     _q1.setFromUnitVectors(face, want);
     _q2.identity().slerp(_q1, w);
