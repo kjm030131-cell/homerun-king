@@ -466,8 +466,35 @@ def vertex_colors(j, b):
     return out.astype(np.float32)
 
 # ───────────── 몸 복사(텍스처 축소) ─────────────
+def uv_cover(j, b, size):
+    """UV 삼각형이 덮는 텍셀 마스크(size×size, bool)"""
+    from PIL import Image, ImageDraw
+    pr = j['meshes'][0]['primitives'][0]
+    def accessor(ai):
+        a = j['accessors'][ai]; bv = j['bufferViews'][a['bufferView']]
+        dt = {5126: np.float32, 5121: np.uint8, 5123: np.uint16, 5125: np.uint32}[a['componentType']]
+        n = {'SCALAR': 1, 'VEC2': 2, 'VEC3': 3, 'VEC4': 4}[a['type']]
+        return np.frombuffer(bytes(b), dt, a['count'] * n, bv.get('byteOffset', 0) + a.get('byteOffset', 0)).reshape(-1, n)
+    uv = accessor(pr['attributes']['TEXCOORD_0']).astype(float); ix = accessor(pr['indices']).astype(int).reshape(-1, 3)
+    M = Image.new('L', (size, size), 0); D = ImageDraw.Draw(M)
+    for t in ix:
+        D.polygon([(float(uv[k, 0]) * size, float(uv[k, 1]) * size) for k in t], fill=255, outline=255)
+    return np.asarray(M) > 0
+
+def dilate_gutter(I, cover):
+    """조각 사이 빈 틈(검정)을 가장 가까운 조각 색으로 채움 → 축소·밉맵·JPEG 때 옆 색이 번지지 않음"""
+    from PIL import Image
+    from scipy import ndimage
+    A = np.asarray(I.convert('RGB'))
+    if cover.shape != A.shape[:2]: cover = np.asarray(Image.fromarray(cover.astype(np.uint8) * 255).resize(A.shape[1::-1], Image.NEAREST)) > 0
+    cover = ndimage.binary_erosion(cover, iterations=1)  # 경계 1텍셀은 원래도 섞여 있음 → 안쪽 색으로
+    _, (iy, ix) = ndimage.distance_transform_edt(~cover, return_indices=True)
+    return Image.fromarray(A[iy, ix])
+
 def export_body(src, dst, tex):
     j, b = read_glb(src)
+    if tex.get('keep'):  # 원본 텍스처 그대로(압축·축소 안 함): Tripo UV 는 잘게 쪼개진 아틀라스라 축소·JPEG 압축 때 옆 조각 색이 번져 무늬가 생김
+        write_glb(dst, j, b); return
     try:
         from PIL import Image
     except ImportError:
@@ -502,6 +529,9 @@ def export_body(src, dst, tex):
             im = j['images'][img_views[vi]]
             I = Image.open(io.BytesIO(data)); I.load()
             if cleaned is not None and 'basecolor' in (im.get('name') or '').lower(): I = cleaned
+            if tex.get('dilate', True) and not tex.get('vcolor'):
+                if 'cover' not in locals(): cover = uv_cover(j, b, 4096)
+                I = dilate_gutter(I, cover)
             if tex.get('vcolor'): I = I.resize((4, 4))  # 정점 색 모드: 텍스처 안 씀 → 최소 크기로
             lim = tex.get('base', 2048) if 'basecolor' in (im.get('name') or '').lower() else tex.get('other', 1024)
             if max(I.size) > lim: I = I.resize((lim, lim) if I.size[0] == I.size[1] else (int(I.size[0] * lim / max(I.size)), int(I.size[1] * lim / max(I.size))), Image.LANCZOS)

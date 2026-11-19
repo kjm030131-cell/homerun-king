@@ -1,10 +1,6 @@
 {
   "body": "assets-src/models/player.glb",
-  "tex": {
-    "base": 2048,
-    "other": 1024,
-    "vcolor": true
-  },
+  "tex": {"base": 2048, "other": 1024, "dilate": true},
   "clips": {
     "batStance": {
       "src": "Baseball_Idle.fbx",
