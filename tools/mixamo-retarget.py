@@ -362,6 +362,109 @@ def export_clip(body, name, ts, rot, hips, path):
     j['animations'].append(an)
     write_glb(path, j, b)
 
+# ───────────── 몸 텍스처 정리(뼈 웨이트로 부위별 단색) ─────────────
+# Tripo 가 만든 색 텍스처는 유니폼·얼굴에 위장무늬 같은 기하학 무늬가 구워져 있어서(인게임에서 '텍스처 깨짐'·'얼굴 일그러짐'),
+# 정점마다 가장 큰 웨이트의 뼈로 부위를 정해 UV 공간에 단색으로 다시 칠한다. 마스크(R=상의 G=바지 B=스타킹)도 같이 만든다.
+REGION = {  # 부위 → (색 RGB, 마스크 RGB)
+    'jersey': ((238, 238, 234), (255, 0, 0)), 'pants': ((236, 236, 232), (0, 255, 0)), 'sock': ((232, 232, 230), (0, 0, 255)),
+    'skin': ((206, 160, 128), (0, 0, 0)), 'under': ((34, 36, 44), (0, 0, 0)), 'shoe': ((24, 24, 27), (0, 0, 0)),
+}
+def bone_region(name, y, knee_y, ankle_y):
+    n = name.replace('mixamorig:', '')
+    if n in ('Head', 'HeadTop_End', 'Neck') or 'Eye' in n: return 'skin'
+    if 'Hand' in n: return 'skin'
+    if 'ForeArm' in n: return 'under'
+    if n.endswith('Arm') or 'Shoulder' in n or n.startswith('Spine'): return 'jersey'
+    if n == 'Hips': return 'jersey' if y > knee_y + (1.0 - knee_y) * 0.62 else 'pants'
+    if 'UpLeg' in n: return 'pants'
+    if n.endswith('Leg'): return 'pants' if y > ankle_y + (knee_y - ankle_y) * 0.55 else 'sock'
+    if 'Foot' in n or 'Toe' in n: return 'shoe'
+    return 'jersey'
+
+def clean_textures(j, b, size=1024):
+    from PIL import Image
+    prim = j['meshes'][0]['primitives'][0]
+    def acc(ai, dtype=None):
+        a = j['accessors'][ai]; bv = j['bufferViews'][a['bufferView']]
+        dt = {5126: np.float32, 5121: np.uint8, 5123: np.uint16, 5125: np.uint32}[a['componentType']]
+        n = {'SCALAR': 1, 'VEC2': 2, 'VEC3': 3, 'VEC4': 4}[a['type']]
+        arr = np.frombuffer(bytes(b), dt, a['count'] * n, bv.get('byteOffset', 0) + a.get('byteOffset', 0)).reshape(-1, n).astype(float)
+        if a.get('normalized'): arr /= np.iinfo(dt).max
+        return arr
+    A = prim['attributes']
+    uv = acc(A['TEXCOORD_0']); J = acc(A['JOINTS_0']).astype(int); W = acc(A['WEIGHTS_0']); idx = acc(prim['indices']).astype(int).reshape(-1, 3)
+    V = acc(A['POSITION'])
+    joints = j['skins'][0]['joints']; names = [j['nodes'][i]['name'] for i in joints]
+    dom = J[np.arange(len(J)), W.argmax(1)]
+    # 정점 높이(T포즈, 0=발바닥 1=머리끝)와 무릎·발목 높이: 뼈별 정점 평균 높이로 근사
+    up = int(np.argmax(V.max(0) - V.min(0)))  # 키 방향 축
+    y = (V[:, up] - V[:, up].min()) / (np.ptp(V[:, up]) or 1)
+    def mean_y(part):
+        ks = [k for k, nm in enumerate(names) if nm.replace('mixamorig:', '') in part]
+        m = np.isin(dom, ks); return float(y[m].mean()) if m.any() else None
+    knee = mean_y(('LeftLeg', 'RightLeg')) or 0.3; ankle = mean_y(('LeftFoot', 'RightFoot')) or 0.05
+    # 무릎 뼈 평균 = 정강이 중간쯤 → 무릎 높이로 보정
+    knee_y = knee + (knee - ankle) * 0.9; ankle_y = ankle
+    reg = [bone_region(names[d], y[v], knee_y, ankle_y) for v, d in enumerate(dom)]
+    keys = list(REGION); rid = np.array([keys.index(r) for r in reg])
+    col = np.zeros((size, size, 3), np.uint8); msk = np.zeros((size, size, 3), np.uint8); filled = np.zeros((size, size), bool)
+    P = uv * size - 0.5
+    for t in idx:
+        r = np.bincount(rid[t], minlength=len(keys)).argmax()
+        (x0, y0), (x1, y1), (x2, y2) = P[t[0]], P[t[1]], P[t[2]]
+        xmin, xmax = int(max(0, np.floor(min(x0, x1, x2)))), int(min(size - 1, np.ceil(max(x0, x1, x2))))
+        ymin, ymax = int(max(0, np.floor(min(y0, y1, y2)))), int(min(size - 1, np.ceil(max(y0, y1, y2))))
+        if xmax < xmin or ymax < ymin: continue
+        gx, gy = np.meshgrid(np.arange(xmin, xmax + 1), np.arange(ymin, ymax + 1))
+        d = (y1 - y2) * (x0 - x2) + (x2 - x1) * (y0 - y2)
+        if abs(d) < 1e-12: continue
+        l0 = ((y1 - y2) * (gx - x2) + (x2 - x1) * (gy - y2)) / d
+        l1 = ((y2 - y0) * (gx - x2) + (x0 - x2) * (gy - y2)) / d
+        inside = (l0 >= -0.02) & (l1 >= -0.02) & (1 - l0 - l1 >= -0.02)
+        ys, xs = gy[inside], gx[inside]
+        col[ys, xs] = REGION[keys[r]][0]; msk[ys, xs] = REGION[keys[r]][1]; filled[ys, xs] = True
+    # 이음매 번짐 방지: 빈 텍셀을 가까운 칠한 텍셀 색으로 8번 확장
+    for _ in range(8):
+        sh = [(1, 0), (-1, 0), (0, 1), (0, -1)]
+        nf = filled.copy()
+        for dy, dx in sh:
+            src = np.roll(np.roll(filled, dy, 0), dx, 1) & ~nf
+            if src.any():
+                c2 = np.roll(np.roll(col, dy, 0), dx, 1); m2 = np.roll(np.roll(msk, dy, 0), dx, 1)
+                col[src] = c2[src]; msk[src] = m2[src]; nf |= src
+        filled = nf
+    counts = {k: int((rid == i).sum()) for i, k in enumerate(keys)}
+    return Image.fromarray(col), Image.fromarray(msk), counts
+
+def vertex_colors(j, b):
+    """정점마다 부위 색(RGB 0~1). UV 가 잘게 쪼개진 Tripo 아틀라스라 텍스처로 칠하면 밉맵에서 옆 조각 색이 섞여 무늬가 생김 → 정점 색으로"""
+    prim = j['meshes'][0]['primitives'][0]
+    def acc(ai):
+        a = j['accessors'][ai]; bv = j['bufferViews'][a['bufferView']]
+        dt = {5126: np.float32, 5121: np.uint8, 5123: np.uint16, 5125: np.uint32}[a['componentType']]
+        n = {'SCALAR': 1, 'VEC2': 2, 'VEC3': 3, 'VEC4': 4}[a['type']]
+        arr = np.frombuffer(bytes(b), dt, a['count'] * n, bv.get('byteOffset', 0) + a.get('byteOffset', 0)).reshape(-1, n).astype(float)
+        if a.get('normalized'): arr /= np.iinfo(dt).max
+        return arr
+    A = prim['attributes']
+    J = acc(A['JOINTS_0']).astype(int); W = acc(A['WEIGHTS_0']); V = acc(A['POSITION'])
+    names = [j['nodes'][i]['name'] for i in j['skins'][0]['joints']]
+    up = int(np.argmax(np.ptp(V, 0))); y = (V[:, up] - V[:, up].min()) / (np.ptp(V[:, up]) or 1)
+    # 부위 색은 웨이트 가중 평균(경계가 부드럽게)
+    keys = list(REGION); C = np.array([REGION[k][0] for k in keys], float) / 255.0
+    dom = J[np.arange(len(J)), W.argmax(1)]
+    def mean_y(part):
+        ks = [k for k, nm in enumerate(names) if nm.replace('mixamorig:', '') in part]
+        m = np.isin(dom, ks); return float(y[m].mean()) if m.any() else None
+    knee = mean_y(('LeftLeg', 'RightLeg')) or 0.3; ankle = mean_y(('LeftFoot', 'RightFoot')) or 0.05
+    knee_y = knee + (knee - ankle) * 0.9
+    out = np.zeros((len(V), 3))
+    for k in range(4):
+        reg = np.array([keys.index(bone_region(names[J[v, k]], y[v], knee_y, ankle)) for v in range(len(V))])
+        out += W[:, k:k + 1] * C[reg]
+    s = W.sum(1, keepdims=True); out /= np.where(s > 0, s, 1)
+    return out.astype(np.float32)
+
 # ───────────── 몸 복사(텍스처 축소) ─────────────
 def export_body(src, dst, tex):
     j, b = read_glb(src)
@@ -370,6 +473,27 @@ def export_body(src, dst, tex):
     except ImportError:
         print('  (Pillow 없음 → 텍스처 그대로 복사)'); write_glb(dst, j, b); return
     import io
+    cleaned = None
+    if tex.get('vcolor'):
+        vc = vertex_colors(j, b)
+        while len(b) % 4: b.append(0)
+        off = len(b); b.extend(vc.tobytes())
+        j['bufferViews'].append({'buffer': 0, 'byteOffset': off, 'byteLength': vc.nbytes})
+        j['accessors'].append({'bufferView': len(j['bufferViews']) - 1, 'componentType': 5126, 'count': len(vc), 'type': 'VEC3'})
+        j['meshes'][0]['primitives'][0]['attributes']['COLOR_0'] = len(j['accessors']) - 1
+        for m in j.get('materials', []):
+            pbr = m.setdefault('pbrMetallicRoughness', {})
+            pbr.pop('baseColorTexture', None); pbr.pop('metallicRoughnessTexture', None); pbr['metallicFactor'] = 0.0; pbr['roughnessFactor'] = 0.8
+            m.pop('normalTexture', None)  # 노멀맵도 같은 쪼개진 UV 라 밉맵에서 얼굴·유니폼에 얼룩 → 안 씀
+        print('  정점 색으로 칠함(색 텍스처 안 씀):', len(vc), '정점')
+    elif tex.get('clean'):
+        ci, cm, counts = clean_textures(j, b, tex.get('clean_size', 1024))
+        cleaned = ci
+        mp = os.path.join(os.path.dirname(dst), 'player_mask.png'); cm.save(mp, optimize=True)
+        print('  텍스처 정리(부위별 정점 수):', counts, '→ 마스크', os.path.basename(mp))
+        for m in j.get('materials', []):
+            pbr = m.get('pbrMetallicRoughness', {})
+            pbr.pop('metallicRoughnessTexture', None); pbr['metallicFactor'] = 0.0; pbr['roughnessFactor'] = 0.78
     old = bytes(b); nb = bytearray()
     views = j['bufferViews']; img_views = {im['bufferView']: k for k, im in enumerate(j.get('images', [])) if 'bufferView' in im}
     for vi, bv in enumerate(views):
@@ -377,6 +501,8 @@ def export_body(src, dst, tex):
         if vi in img_views:
             im = j['images'][img_views[vi]]
             I = Image.open(io.BytesIO(data)); I.load()
+            if cleaned is not None and 'basecolor' in (im.get('name') or '').lower(): I = cleaned
+            if tex.get('vcolor'): I = I.resize((4, 4))  # 정점 색 모드: 텍스처 안 씀 → 최소 크기로
             lim = tex.get('base', 2048) if 'basecolor' in (im.get('name') or '').lower() else tex.get('other', 1024)
             if max(I.size) > lim: I = I.resize((lim, lim) if I.size[0] == I.size[1] else (int(I.size[0] * lim / max(I.size)), int(I.size[1] * lim / max(I.size))), Image.LANCZOS)
             buf = io.BytesIO(); I.convert('RGB').save(buf, 'JPEG', quality=88, optimize=True)

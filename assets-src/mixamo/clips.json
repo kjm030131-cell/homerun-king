@@ -2,7 +2,8 @@
   "body": "assets-src/models/player.glb",
   "tex": {
     "base": 2048,
-    "other": 1024
+    "other": 1024,
+    "vcolor": true
   },
   "clips": {
     "batStance": {

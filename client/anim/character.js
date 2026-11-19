@@ -47,7 +47,8 @@ if (uHatC.w > 0.5 && vRP.y > uHatC.y - 0.01) {
 varying vec3 vRP; varying vec3 vRN;
 uniform vec3 uJersey; uniform vec3 uPants; uniform vec3 uSock; uniform vec4 uTintP; uniform float uSockH; uniform float uTintOn;
 uniform sampler2D uMask; uniform float uMaskOn; uniform sampler2D uDecal; uniform vec4 uDecalP;`)
-      .replace('#include <map_fragment>', `#include <map_fragment>
+      // [model 11-19] 몸 색이 정점 색(COLOR_0)이라 팀 색 입히기는 정점 색이 곱해진 뒤(color_fragment)에
+      .replace('#include <color_fragment>', `#include <color_fragment>
 if (uTintOn > 0.5) {
   vec3 c0 = diffuseColor.rgb;
   float mx = max(c0.r, max(c0.g, c0.b)), mn = min(c0.r, min(c0.g, c0.b));
