@@ -6,6 +6,16 @@ import { fenceR, standR } from './layout.js';
 import { canvasTex, noise, rng, inject } from './util.js';
 
 const FX0 = -80, FZ0 = -28, FS = 160; // 텍스처가 덮는 영역(m)
+// [model] 마운드 단면(반지름 m, 높이 m) — 그리는 지오메트리와 선수 발 높이(groundY)가 같은 값을 씀
+export const MOUND_PROFILE = [[0, 0.254], [0.6, 0.254], [1.0, 0.24], [1.6, 0.17], [2.2, 0.07], [2.74, 0.0]];
+export const MOUND_BASE_Y = 0.005;
+// 그 자리 땅 높이(m): 마운드 위면 단면 보간, 아니면 0. 선수 루트 y 를 여기에 맞춰 발이 마운드에 닿게 함(main.js place)
+export function groundY(x, z) {
+  const r = Math.hypot(x - MOUND[0], z - MOUND[1]), P = MOUND_PROFILE;
+  if (r >= P[P.length - 1][0]) return 0;
+  for (let i = 1; i < P.length; i++) if (r <= P[i][0]) { const [r0, y0] = P[i - 1], [r1, y1] = P[i]; return MOUND_BASE_Y + y0 + (y1 - y0) * (r - r0) / (r1 - r0); }
+  return 0;
+}
 const GRASS = '#3a8a3b', DIRT = '#b9784b', TRACK = '#a5683f', CHALK = '#f7f7f2';
 
 function paintField(g, W) {
@@ -166,9 +176,12 @@ float hrSq(float x) { float fw = max(fwidth(x), 1e-4); return clamp(sin(3.141592
   dirtMat.onBeforeCompile = onCompile; dirtMat.customProgramCacheKey = () => 'hr-field';
   const chalk = new THREE.MeshStandardMaterial({ color: CHALK, roughness: 0.8 });
   { // 마운드 (높이 25cm)
-    const prof = [[0, 0.254], [0.6, 0.254], [1.0, 0.24], [1.6, 0.17], [2.2, 0.07], [2.74, 0.0]].map(([r, y]) => new THREE.Vector2(r, y));
+    // [model] 단면을 바깥(지면) → 가운데(정상) 순서로: LatheGeometry 는 점 순서로 면 방향이 정해짐. 전엔 가운데 → 바깥이라 면·노멀이
+    //         아래(-y)를 향해 위에서 보면 뒷면으로 잘려(FrontSide) 마운드 윗면이 안 보였음 → 평평한 흙 그림 + 먼 쪽 안쪽 경사만 검은 띠로 보여
+    //         '투수가 공중에 떠 있는' 것처럼 보였음
+    const prof = MOUND_PROFILE.slice().reverse().map(([r, y]) => new THREE.Vector2(r, y));
     const m = new THREE.Mesh(new THREE.LatheGeometry(prof, 40), dirtMat);
-    m.position.set(MOUND[0], 0.005, MOUND[1]); m.userData.sh = 'ground'; world.add(m);
+    m.position.set(MOUND[0], MOUND_BASE_Y, MOUND[1]); m.userData.sh = 'ground'; world.add(m);
     const rubber = new THREE.Mesh(new THREE.BoxGeometry(0.61, 0.04, 0.15), chalk); rubber.position.set(0, 0.27, MOUND[1]); rubber.userData.sh = 'ground'; world.add(rubber);
   }
   { // 베이스 + 홈플레이트

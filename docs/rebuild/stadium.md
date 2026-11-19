@@ -40,6 +40,7 @@ three r160을 Node에서 돌려(DOM 스텁) 장면을 만들고, 보이는 메�
 - 측정 방법: three r160 소스를 받아 `node --import <DOM 스텁+three 경로 훅> count.mjs client/stadium.js` (스크립트는 저장소 밖 /tmp). 실제 GPU 수치는 맥에서 `tools/test`의 `renderInfo`로 다시 확인.
 
 ## 3. 다른 파트 참고
+- [model 11-19] 마운드 LatheGeometry 단면을 바깥→가운데 순서로 뒤집음(전엔 면이 아래를 향해 윗면이 안 그려졌음). 단면은 `MOUND_PROFILE`, 땅 높이는 `groundY(x,z)` 로 export — main.js 가 선수 발 높이에 씀.
 - `buildStadium()` 반환: `world, crowd(Group), SB, setTimeOfDay, setQuality, drawScoreboard, refreshText, update(t, excite), sky, info`. `stadium.js`의 `glowTex`·`canvasTex`·`textMesh`·`SEAT_ZONES`·`createLook` export 유지(fx.js가 glowTex 사용).
 - 내야 흙 원호는 그림에선 파울라인 바깥 1.8m까지만 칠함. sim의 지면 판정(마운드 29m 원 = 흙)은 파울 지역 일부까지 흙으로 봄 → 바운드 마찰만 아주 조금 다름(물리 수치는 안 건드림).
 - 덕아웃 위치: 라인 따라 17~37m, 라인에서 22.2m(`layout.js DUGOUT`). 벤치 선수 배치하려면 이 값 사용.

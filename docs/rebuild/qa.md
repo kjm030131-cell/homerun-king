@@ -9,6 +9,7 @@ node tools/qa/run.mjs                                # 전부 (약 10분)
 node tools/qa/run.mjs game-real practice --render=0  # 골라서, 렌더 끔(빠름)
 node --import ./tools/qa/three-hook.mjs --test tests/*.test.mjs   # three 패키지 없는 환경에서 단위 테스트
 ```
+- 스크린샷: `node tools/qa/shots.mjs [--lab] [--tag=이름] [--only=practice|game|lab] [--q=?legacy]` → `tools/qa/.out/shot-*.png` (타자 시점·중계·옆·마운드·포수 근접, `?animlab` 장비 확대) + 발바닥−땅 높이·릴리스 손 위치 숫자. 새 캐릭터 로딩을 실시간으로 기다린 뒤 가상 시계 시작(가상 시계 루프 중엔 GLB 로딩이 안 끝남).
 - 진짜 크롬(헤드리스, SwiftShader WebGL) + 가상 시계로 **실제 `client/main.js` 루프**를 돌린다. 봇이 키보드·포인터 이벤트로 타격(맞힘·헛스윙·파울·번트·강타)·투구(구종·게이지)·수비 이동/송구·주루·도루·리플레이 넘기기·다시 하기를 한다.
 - 흐름: 번들(esbuild, 없으면 bun) → `public/` 서빙(three 는 로컬 사본, 폰트·CDN 차단) → 계측(`inject.js`)·봇(`driver.js`) 주입 → 타이틀 → 모드(리얼/캐주얼) → 혼자하기 설정 → 시작.
 - 멀티(`multi`, `multi-casual`): `src/index.js` 의 **진짜 Room 클래스**를 node 에서 돌리고(`room.mjs`, WebSocket 서버 직접 구현) 브라우저 2~3개가 방 만들기·코드 참가·시작까지 UI로 들어간다. 실시간, 렌더 끔.

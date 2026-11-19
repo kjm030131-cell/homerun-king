@@ -55,6 +55,8 @@ export async function openLab() {
   };
   const reclip = (name) => { const e = lib.clips.get(name); if (!e || !e.src) return; const n = prepClip(name, e.src, lib); Object.assign(e, { clip: n.clip, markers: n.markers }); rebuild(); };
   rebuild();
+  // [qa] 스크린샷 하네스(tools/qa/shots.mjs)용 조작 훅
+  window.__lab = { lib, get P() { return P; }, set(o) { if (o.role && o.role !== S.role) { S.role = o.role; rebuild(); } if (o.team && o.team !== S.team) { S.team = o.team; rebuild(); } if (o.focus) S.focus = o.focus; if (o.yaw != null) yaw = o.yaw; if (o.pitch != null) pitch = o.pitch; if (o.dist != null) dist = o.dist; if (o.clip) { S.clip = o.clip; S.t = o.t || 0; S.play = false; } } };
   msg(`${lib.incomplete && lib.incomplete.length ? '※ 필수 클립 없음(' + lib.incomplete.join(', ') + ') → 게임은 아직 옛 몸. 여기서는 있는 클립만 볼 수 있음\n' : ''}클립 ${lib.clips.size}개: ${[...lib.clips.keys()].join(', ')}\n없음: ${Object.keys(CLIPS).filter((k) => !lib.clips.has(k)).join(', ') || '-'}\n장비 GLB: ${['cap', 'helmet', 'bat', 'glove'].map((k) => k + (lib.raw[k] ? '✓' : '(대체)')).join(' ')}`);
 
   // ── 패널 ──

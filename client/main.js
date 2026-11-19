@@ -12,6 +12,7 @@ import { CLUBS, clubOf, emblemURL, uniformsFor } from './emblem.js';
 import { TEX_AVG, FACE_SKINS } from './texinfo.js';
 import { Animator, PITCH_DUR, PITCH_RELEASE_K, THROW_DUR, swingTrack, pitchK } from './anim.js';
 import { buildStadium, glowTex, createLook } from './stadium.js'; // [stadium] 구장 + 조명·톤매핑·블룸(look)
+import { groundY } from './stadium/field.js'; // [model] 마운드 위 선수 발 높이
 import { FX } from './fx.js';
 import { initAudio, setVolume, unlock as audio } from './audio/index.js'; // [audio] 사운드 매니저 (서버 이벤트 + cue:* 로만 소리)
 // [ui] 화면·HUD·설정은 client/ui/ (createUI 하나로 연결)
@@ -782,10 +783,11 @@ function renderTouchButtons(role) {
 const _v = new THREE.Vector3(), _w = new THREE.Vector3(), _u = new THREE.Vector3();
 function place(A, x, z, ry, dt, k = 14) {
   const r = A.p.root;
-  if (!A.init) { r.position.set(x, 0, z); r.rotation.y = ry; A.init = true; A.spd = 0; return 0; }
+  if (!A.init) { r.position.set(x, groundY(x, z), z); r.rotation.y = ry; A.init = true; A.spd = 0; return 0; }
   const a = 1 - Math.exp(-k * dt);
   const ox = r.position.x, oz = r.position.z;
   r.position.x = lerp(ox, x, a); r.position.z = lerp(oz, z, a);
+  r.position.y = groundY(r.position.x, r.position.z); // [model] 마운드(높이 25.9cm) 위에선 발이 마운드에 닿게 — 전엔 y=0 이라 투수 발이 마운드 속
   let d = ry - r.rotation.y; d = Math.atan2(Math.sin(d), Math.cos(d));
   r.rotation.y += d * Math.min(1, dt * 10);
   const sp = Math.hypot(r.position.x - ox, r.position.z - oz) / Math.max(dt, 1e-3);

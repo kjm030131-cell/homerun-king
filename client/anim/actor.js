@@ -10,7 +10,7 @@ import { Animator } from '../anim.js';
 import { bus } from '../core/bus.js';
 import { Character, tintedMaterial } from './character.js';
 import { loadLib, getLib } from './loader.js';
-import { CLIPS, FIT } from './clips.js';
+import { CLIPS, FIT, BODY } from './clips.js';
 import { PITCH_TL, tauFromPitchK } from './timing.js';
 
 const clamp = (v, a, b) => Math.max(a, Math.min(b, v));
@@ -134,9 +134,12 @@ export class ClipAnimator {
     else C.play(st, { fade: 0.3 });
     this.loco = st;
   }
+  // [model] 투수판 맞춤: 루트(sim 투수 위치 = 투수판 가운데)에서 몸을 앞(+z 로컬)으로 BODY.pitchFwd 만큼 — 클립의 축발이 투수판 앞 모서리에 붙게
+  _fwd(on, dt) { const b = this.c.body.position, t = on ? BODY.pitchFwd : 0; if (b.z !== t) b.z = Math.abs(t - b.z) < 1e-3 ? t : b.z + (t - b.z) * Math.min(1, dt * 8); }
   fielder(dt, c) {
     motionEvents(this.ev, this.p, 'fielder', c);
     const C = this.c, P = this.p;
+    this._fwd(false, dt);
     if (c.clip) C.play(c.clip);
     else if (c.celebrate || (c.ground === undefined && c.jumpK >= 0 && !c.ballW && !c.reachW)) C.play('celebrate', { fade: 0.3 });
     else if (c.diveK >= 0) C.scrubK('dive', c.diveK);
@@ -158,6 +161,7 @@ export class ClipAnimator {
       if (this.pk0 < 0) this.pk0 = 0;
       if (c.k === 0) { this.pk0 += dt; tau = Math.min(this.pk0, PITCH_TL.lift); } else tau = tauFromPitchK(c.k);
     }
+    this._fwd(tau >= 0 || (c.speed || 0) <= 0.5, dt);
     if (tau >= 0) { C.scrubPitch(tau); P.ball.visible = tau < PITCH_TL.release; }
     else {
       this.pk0 = -1;
