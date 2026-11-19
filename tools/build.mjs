@@ -32,5 +32,9 @@ if (entries.length) {
   writeFileSync(root + 'dist/solo-artifact.html', frag);
   console.log('built public/app.js', (js.length / 1024).toFixed(0) + 'KB');
   // [anim] 새 몸(player.glb)이 있으면 저폴리 인덱스(player.lod.bin) 생성 — 없거나 meshoptimizer 가 없으면 조용히 건너뜀
-  try { const { makeLod } = await import('./glb-lod.mjs'); await makeLod(root + 'public/assets/models/player.glb', root + 'public/assets/models/player.lod.bin'); } catch (e) { console.warn('[lod] 건너뜀:', e.message); }
+  try {
+    const L = await import('./glb-lod.mjs');
+    const glb = root + 'public/assets/models/player.glb', out = root + 'public/assets/models/player.lod.bin';
+    if (!L.usePrebuilt(glb, root + 'assets-src/models/player.lod.bin', out)) await L.makeLod(glb, out);
+  } catch (e) { console.warn('[lod] 건너뜀:', e.message); }
 }

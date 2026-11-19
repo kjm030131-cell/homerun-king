@@ -34,6 +34,20 @@ export function firstSkinPrim(json) {
   return null;
 }
 
+// 미리 만든 저폴리(assets-src/models/player.lod.bin, 최신 meshoptimizer 로 생성)가 이 GLB 와 맞으면 그걸 씀
+// (CI 의 meshoptimizer 0.21 은 UV 이음매 때문에 49% 에서 멈춤). 맞는지: 최대 인덱스 < 정점 수
+export function usePrebuilt(glbPath, prebuilt, outPath) {
+  if (!existsSync(glbPath) || !existsSync(prebuilt)) return false;
+  const g = readGlb(readFileSync(glbPath)); const prim = firstSkinPrim(g.json); if (!prim) return false;
+  const nv = g.json.accessors[prim.attributes.POSITION].count;
+  const b = readFileSync(prebuilt);
+  if (b.readUInt32LE(0) !== 0x314c5248) return false;
+  const n = b.readUInt32LE(4); if (n % 3 || 8 + n * 4 !== b.length) return false;
+  const ix = new Uint32Array(b.buffer.slice(b.byteOffset + 8, b.byteOffset + 8 + n * 4));
+  let mx = 0; for (const v of ix) if (v > mx) mx = v;
+  if (mx >= nv) { console.warn('[lod] 미리 만든 저폴리가 GLB 와 안 맞음 → 새로 만듦'); return false; }
+  writeFileSync(outPath, b); console.log(`[lod] 미리 만든 저폴리 사용: 삼각형 ${n / 3}`); return true;
+}
 export async function makeLod(glbPath, outPath, ratio = 0.3, force = false) {
   if (!existsSync(glbPath)) return null;
   if (!force && existsSync(outPath) && statSync(outPath).mtimeMs >= statSync(glbPath).mtimeMs) return null;
