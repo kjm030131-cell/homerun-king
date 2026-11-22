@@ -247,7 +247,7 @@ function startLocal(name, o) {
   };
   const iv = setInterval(tickFn, 1000 / 60);
   net = { send: (m) => game.handle('me', m), close: () => clearInterval(iv), local: true, game };
-  window.__hr = { game, getRole: () => getRole(), cam: () => camMode, S: () => S, net: () => net, rp: replay, lct: () => lastContactT, scene, tick: tickFn, renderer, simNow, camera };
+  window.__hr = { game, getRole: () => getRole(), cam: () => camMode, S: () => S, net: () => net, rp: replay, lct: () => lastContactT, scene, tick: tickFn, renderer, simNow, camera, ball: ballMesh /* [cam] qa */ };
   roomCode = null;
   game.start();
   lobby = game.lobbyState();
@@ -276,7 +276,7 @@ function connectWS(code, name, pw = '') {
     if (wsRetry < 30) { wsRetry++; setTimeout(() => { if (net && net.ws === ws) connectWS(code, name); }, Math.min(4000, 400 * wsRetry)); }
   };
   net = { ws, send: (m) => ws.readyState === 1 && ws.send(JSON.stringify(m)), close: () => { net = null; ws.close(); } };
-  window.__hr = { game: null, getRole: () => getRole(), cam: () => camMode, S: () => S, net: () => net, rp: replay, lct: () => lastContactT, scene, tick: () => { }, renderer, simNow, camera, ni: () => NI }; // [qa] 멀티에서도 테스트 훅 (tools/qa) · [net] ni: 보간 상태
+  window.__hr = { game: null, getRole: () => getRole(), cam: () => camMode, S: () => S, net: () => net, rp: replay, lct: () => lastContactT, scene, tick: () => { }, renderer, simNow, camera, ball: ballMesh /* [cam] qa */, ni: () => NI }; // [qa] 멀티에서도 테스트 훅 (tools/qa) · [net] ni: 보간 상태
   roomCode = code;
   clearInterval(pingIv);
   lastMsgAt = performance.now();
@@ -1252,7 +1252,7 @@ function updateCamera(dt, time) {
     tPos.set(Math.sin(a) * 175, 46 + Math.sin(time * 0.13) * 8, Math.cos(a) * 165 + 50);
     tLook.set(0, 4, 52); k = 1.5; camMode = 'title';
   } else {
-    const role = getRole();
+    const role = window.__camRole ? window.__camRole(getRole()) : getRole(); // [cam] qa: 역할 바꿔 찍기(주자·관전 시점)
     const ph = S.ph;
     const pitchPhase = ph === 'pitch' || ph === 'pitching' || (ph === 'result' && !S.b && !(S.p && S.p.res === 'hit'));
     const hr = hrCine && tp - hrCineStart < 5.5;
