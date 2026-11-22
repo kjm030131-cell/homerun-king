@@ -351,8 +351,17 @@ let rpInfo = null;
 function allPlayers() { const a = fielders.map((A) => A.p); if (batter) a.push(batter.p); for (const A of runners.values()) a.push(A.p); for (const U of umps) a.push(U.p); for (const C of coaches) a.push(C.p); return a; }
 // ── [net] 보간 버퍼·외삽·서버 시계는 client/net/interp.js (NI) — 지연은 스냅샷 '늦음'의 90% 분위에 맞춰 자동, 바닥나면 최대 0.18초 외삽
 const lerpAng = (a, b, u) => { let d = b - a; d = Math.atan2(Math.sin(d), Math.cos(d)); return a + d * u; };
+// [net] 새 경기(혼자하기 새로 시작·방 새로 만들어짐)는 서버 id(투구·메시지·이벤트 seq)가 1부터 다시 시작 → 지난 경기에서 본 id 와 겹치면
+//       배너·투구 초기화가 빠지고, swungLocal[같은 id] 가 남아 있으면 그 투구에 스윙이 아예 안 됐음. 시각이 뒤로 가거나 처음 받는 스냅샷이면 전부 비움
+function resetSeen() {
+  for (const k in seen) seen[k] = -1;
+  for (const k in swungLocal) delete swungLocal[k];
+  for (const k in swingInfo) delete swingInfo[k];
+  tracerId = null; contactFreeze = null;
+}
 function onSnap(s) {
   const p = nowP();
+  if (!S || s.now < S.now - 0.5) resetSeen(); // [net]
   NI.clock(s, p); if (!net?.local && s.fl) NI.push(s, p); // [net]
   if (s.pg) pgList = s.pg;
   if (s.ph === 'lobby') { S = s; if ((screen === 'game' || screen === 'over') && !net?.local) setScreen('room'); return; }
