@@ -1321,6 +1321,7 @@ export class Game {
     f.x = clamp(f.x + (x - f.x) * k, -135, 135); f.z = clamp(f.z + (z - f.z) * k, -20, 135);
     f.ry = Number(m.ry) || 0;
     f.act = this.now; f.lastMvT = this.now;
+    const c = Number(m.c); f.mc = isFinite(c) && c > 0 ? Math.round(c) : 0; // [net] 보낸 쪽 시계(ms): 다른 사람 화면이 이 위치를 보낸 시각대로 고르게 보간 (판정엔 안 씀)
     if (pre) { f.x = clamp(f.x, -60, 60); f.z = clamp(f.z, 8, 110); f.shift = [f.x, f.z]; }
   }
   onJump(id) {
@@ -2337,7 +2338,7 @@ export class Game {
     if (this.now - (this.pgAt || -9) > 2) { this.pgAt = this.now; s.pg = [...this.players.values()].filter((p) => p.conn && p.team !== 'spec').map((p) => [p.name, p.ping | 0]); }
     s.bat = this.batter; s.bt = this.batTeam;
     s.msg = [this.msgId, this.msg, this.msgBig ? 1 : 0];
-    s.fl = this.fielders.map((f) => [f.pos, r2(f.x), r2(f.z), r2(f.ry), f.ctrl, f.mv, age(f.jt), age(f.dv), age(f.fum)]);
+    s.fl = this.fielders.map((f) => { const a = [f.pos, r2(f.x), r2(f.z), r2(f.ry), f.ctrl, f.mv, age(f.jt), age(f.dv), age(f.fum)]; if (f.mc && this.now - f.lastMvT < 0.1) a.push(f.mc); return a; }); // [net] [9] = 사람 조작 위치를 보낸 시각(ms, 그 사람 시계) — 최근 0.1초 안에 받은 mv 일 때만
     s.rn = this.alive().map((r) => { const [x, z] = runnerXZ(r.b); return [r2(x), r2(z), r.name, r2(r.b), r.pid, (r.steal ? 1 : 0) | (r.trot ? 2 : 0) | (r.slide ? 4 : 0), r.target, r.rid || 0]; });
     const occ = [false, false, false];
     for (const r of this.alive()) { const k = r.steal ? r.start : r.target; if ((r.b === r.target || r.steal) && k >= 1 && k <= 3) occ[k - 1] = true; }

@@ -22,6 +22,7 @@ import { createPCI, judgeSwing } from './game/batting.js'; // [gameplay] PCI 타
 import { createBallLook } from './game/ball.js'; // [pitch] 실밥·구종별 회전축
 import { createNetInterp, mergeBall, stepBall, rkey } from './net/interp.js'; // [net] 서버 시계·보간 버퍼·외삽·공 합류 (tools/qa/netbench.mjs 로 측정)
 import { createSnapMerger } from './net/snap.js'; // [net] 서버가 바뀐 키만 보냄 → 합치기
+import { pitchPred, windupTau, throwOk, jumpOk, diveOk, diveStep } from './net/predict.js'; // [net] 내 조작 즉시 반응(화면 연출만, 판정은 서버)
 
 const $ = (id) => document.getElementById(id);
 const clamp = (v, a, b) => Math.max(a, Math.min(b, v));
@@ -357,7 +358,7 @@ function resetSeen() {
   for (const k in seen) seen[k] = -1;
   for (const k in swungLocal) delete swungLocal[k];
   for (const k in swingInfo) delete swingInfo[k];
-  tracerId = null; contactFreeze = null;
+  tracerId = null; contactFreeze = null; pred.pitch = null; pred.throwT = 0; pred.jt = pred.dv = -9;
 }
 function onSnap(s) {
   const p = nowP();
@@ -394,7 +395,7 @@ function onSnap(s) {
     if (cfg.replay && lastContactT && nowP() - lastContactT < 8) replay.schedule(nowP() + 2.6, { tEvent: lastContactT, pre: 0.8, post: 1.6, speed: 0.42, cam: 'hr', scene });
   }
   // 송구/포구/펜스 이벤트
-  if (s.te && s.te.id !== seen.te) { if (fielders[s.te.i]) { fielders[s.te.i].throwT = nowP(); } seen.te = s.te.id; }
+  if (s.te && s.te.id !== seen.te) { if (fielders[s.te.i] && !(pred.throwI === s.te.i && p - pred.throwT < 0.8)) { fielders[s.te.i].throwT = nowP(); } if (pred.throwI === s.te.i) pred.throwT = 0; seen.te = s.te.id; } // [net] 내가 미리 시작한 송구 동작은 그대로
   if (s.ce && s.ce.id !== seen.ce) { if (fielders[s.ce.i]) { fielders[s.ce.i].catchT = nowP(); if (s.ce.i === getRole().fi && getRole().defense) { feedback(s.ce.dive ? '다이빙 캐치!! 나이스!' : s.ce.jump ? '점프 캐치!! 나이스!' : '나이스 캐치!', '#4fd18b'); if (s.ce.dive || s.ce.jump) bus.emit('ui:perfect'); }
     if ((s.ce.dive || s.ce.jump) && cfg.replay !== 0) replay.schedule(nowP() + 1.0, { tEvent: nowP(), pre: 1.2, post: 0.5, speed: 0.45, cam: 'catch', focus: fielders[s.ce.i].p, scene }); if (s.ce.dive) { fx.dustPuff(fielders[s.ce.i].p.root.position.x, fielders[s.ce.i].p.root.position.z, 2, 2); } } seen.ce = s.ce.id; }
   if (s.ce2 && s.ce2.id !== seen.ce2) {
@@ -525,6 +526,7 @@ let pitchType = 'FB';
 let gauge = null; // {t0, aim:[x,y]}
 let buntOn = false;
 const swungLocal = {};
+const pred = { pitch: null, throwT: 0, throwI: -1, jt: -9, dv: -9, dvx: 0, dvz: 1 }; // [net] 내 조작 예측 (client/net/predict.js)
 // 한글 입력 상태(ㅈㅁㄴㅇ)에서도 WASD 등이 먹도록 물리 키 기준으로
 function keyOf(e) {
   const c = e.code || '';
@@ -565,16 +567,16 @@ addEventListener('keydown', (e) => {
   if (S.ph === 'live' && role.fi >= 0) {
     const tmap = { '1': 1, '2': 2, '3': 3, '4': 4, 'f': 0, 'r': 5 };
     if (!role.holding && k in tmap) pendThrow = { base: tmap[k], t: nowP() }; // 잡기 직전에 눌러도 잡자마자 송구
-    if (role.holding && e.code === 'Space') { const rb = recBase(); const relay = useRelay(rb, role); net.send({ t: 'throw', base: relay ? 5 : rb, p: 0.55 }); feedback(relay ? `중계 송구 → 커트맨 (${rb === 4 ? '홈' : rb + '루'})` : `추천 송구 → ${rb === 4 ? '홈' : rb + '루'}`, '#ffd23a'); return; }
+    if (role.holding && e.code === 'Space') { const rb = recBase(); const relay = useRelay(rb, role); sendThrow(relay ? 5 : rb, 0.55); feedback(relay ? `중계 송구 → 커트맨 (${rb === 4 ? '홈' : rb + '루'})` : `추천 송구 → ${rb === 4 ? '홈' : rb + '루'}`, '#ffd23a'); return; }
     if (role.holding) {
       const map = tmap;
       // 꾹 누르면 세게(빠르지만 부정확), 톡 치면 정확하게. 터치는 바로 던짐
-      if (k in map) { if (!e.isTrusted) { net.send({ t: 'throw', base: map[k], p: 0.5 }); } else if (!throwCharge) throwCharge = { k, base: map[k], t0: nowP() }; }
+      if (k in map) { if (!e.isTrusted) { sendThrow(map[k], 0.5); } else if (!throwCharge) throwCharge = { k, base: map[k], t0: nowP() }; }
     }
     else {
       if (k === 'q') { net.send({ t: 'sw' }); }
-      if (e.code === 'Space') { net.send({ t: 'jump' }); ctl.lastIn = nowP(); }
-      if (k === 'c') { const d = moveDir(); net.send({ t: 'dive', dx: d[0], dz: d[1] }); }
+      if (e.code === 'Space') { net.send({ t: 'jump' }); ctl.lastIn = nowP(); if (!net.local && jumpOk(S, role.fi, pred.jt, nowP())) pred.jt = nowP(); } // [net] 누른 순간 점프 동작
+      if (k === 'c') { const d = moveDir(); net.send({ t: 'dive', dx: d[0], dz: d[1] }); predDive(role, d); }
     }
   }
   // 공격
@@ -587,8 +589,22 @@ addEventListener('keydown', (e) => {
 });
 let throwCharge = null, pendThrow = null;
 const throwPow = () => (throwCharge ? clamp((nowP() - throwCharge.t0) / 0.7, 0, 1) : 0);
+// [net] 송구: 서버가 받아들일 조건이면 누른 순간 팔 동작 시작(전엔 왕복 뒤 시작 — 그동안 공이 먼저 날아가기도). 공은 서버가 놓는 순간 그대로
+function sendThrow(base, p) {
+  net.send({ t: 'throw', base, p });
+  const fi = getRole().fi;
+  if (!net.local && throwOk(S, fi, base) && fielders[fi]) { fielders[fi].throwT = nowP(); pred.throwT = nowP(); pred.throwI = fi; }
+}
+// [net] 다이빙: 누른 순간 동작 + 몸 이동(서버와 같은 0.05~0.5초 5.5m/s). 그동안 mv 안 보냄 → 서버도 같은 자리에서 다이빙 시작
+function predDive(role, d) {
+  if (net.local || !diveOk(S, role.fi, pred.dv, nowP())) return;
+  const A = fielders[role.fi];
+  if (!ctl.active && A) { ctl.x = A.p.root.position.x; ctl.z = A.p.root.position.z; }
+  ctl.active = true; ctl.idx = role.fi;
+  pred.dv = nowP(); pred.dvx = d[0]; pred.dvz = d[1]; ctl.ry = Math.atan2(d[0], d[1]);
+}
 addEventListener('keyup', (e) => { const k = keyOf(e); keys[k] = false; keys[e.key.toLowerCase()] = false;
-  if (throwCharge && throwCharge.k === k) { const p = 0.25 + throwPow() * 0.75; if (net && getRole().holding) { net.send({ t: 'throw', base: throwCharge.base, p }); if (p > 0.85) feedback('강송구!', '#ff9f43'); } else pendThrow = { base: throwCharge.base, t: nowP() }; throwCharge = null; } ui.handleKeyUp(e); });
+  if (throwCharge && throwCharge.k === k) { const p = 0.25 + throwPow() * 0.75; if (net && getRole().holding) { sendThrow(throwCharge.base, p); if (p > 0.85) feedback('강송구!', '#ff9f43'); } else pendThrow = { base: throwCharge.base, t: nowP() }; throwCharge = null; } ui.handleKeyUp(e); });
 addEventListener('blur', () => { for (const k in keys) keys[k] = false; ui.onBlur(); });
 addEventListener('contextmenu', (e) => { if (screen === 'game') e.preventDefault(); });
 canvas.addEventListener('pointermove', (e) => {
@@ -676,6 +692,7 @@ function pitchClick() {
 }
 function sendPitch(lv) {
   net.send({ t: 'pitch', type: gauge.type, tx: gauge.aim[0], ty: gauge.aim[1], power: lv });
+  if (!net.local) pred.pitch = pitchPred(S, simNow(), rtt / 1000); // [net] 클릭 순간 와인드업 시작 → 서버 투구가 오면 릴리스 전까지 서버 시간표로 합류
   const [pb0, pb1] = pBand(), pf = lv >= pb0 && lv <= pb1; // [gameplay] 모드별 퍼펙트 구간
   const txt = lv > 1.0 ? '과투구! 제구 흔들림' : pf ? '퍼펙트 투구! 공 끝 살아있다' : lv < 0.6 ? '힘 빠진 공' : '좋아';
   feedback(`${txt} (${Math.round(lv * 100)}%)`, pf ? '#4fd18b' : lv > 1 ? '#ff8a80' : '#ffcf3f');
@@ -711,7 +728,8 @@ function updateControl(dt) {
     // [qa 11-19] 조작 선수가 바뀌면 누르고 있던 방향키는 무시(한 번 떼야 움직임): 송구 후 받는 선수로 넘어갔을 때 W 를 계속 누르고 있어서 베이스에서 벗어나 공을 놓치던 것
     ctl.block = ctl.idx >= 0; ctl.idx = role.fi; ctl.active = false;
   }
-  const diveAge = f[7];
+  const tp0 = nowP(), pdv = tp0 - pred.dv, localDive = pdv < 1.2; // [net] 내가 누른 다이빙(예측) 중
+  const diveAge = localDive ? pdv : f[7];
   let fw = (keys.w || keys.arrowup ? 1 : 0) - (keys.s || keys.arrowdown ? 1 : 0) + touchMove.y;
   let rt = (keys.d || keys.arrowright ? 1 : 0) - (keys.a || keys.arrowleft ? 1 : 0) + touchMove.x;
   if (ctl.block) { if (Math.abs(fw) < 0.1 && Math.abs(rt) < 0.1) ctl.block = false; else { fw = 0; rt = 0; } }
@@ -726,10 +744,14 @@ function updateControl(dt) {
     ctl.ry = Math.atan2(mx, mz);
     ctl.moving = true;
   } else ctl.moving = false;
-  if (diveAge >= 0 && diveAge < 1.2) { ctl.x = f[1]; ctl.z = f[2]; }
+  if (localDive) { // [net]
+    const st = diveStep(pdv - dt, pdv, pred.dvx, pred.dvz); if (st) { ctl.x += st[0]; ctl.z += st[1]; }
+    ctl.ry = Math.atan2(pred.dvx, pred.dvz); ctl.lastIn = t; ctl.active = true; ctl.diving = true;
+  } else if (ctl.diving) { ctl.diving = false; if (!ctl.moving) ctl.active = false; } // 끝: 방향키 안 누르면 서버 위치(같은 다이빙)로
+  else if (diveAge >= 0 && diveAge < 1.2) { ctl.x = f[1]; ctl.z = f[2]; }
   if (ctl.active && t - ctl.lastIn > 0.5) ctl.active = false;
   // [net] 20Hz → 30Hz(스냅샷 주기와 같게): 20Hz 면 다른 사람 화면에서 사람 수비수가 스냅샷 3개 중 1개는 제자리 → 계단처럼 끊겨 보였음. 숫자는 cm 까지
-  if (ctl.active && t - ctl.lastSend > 0.031) { ctl.lastSend = t; net.send({ t: 'mv', x: Math.round(ctl.x * 100) / 100, z: Math.round(ctl.z * 100) / 100, ry: Math.round(ctl.ry * 100) / 100, a: 1 }); }
+  if (ctl.active && !localDive && t - ctl.lastSend > 0.031) { ctl.lastSend = t; net.send({ t: 'mv', x: Math.round(ctl.x * 100) / 100, z: Math.round(ctl.z * 100) / 100, ry: Math.round(ctl.ry * 100) / 100, a: 1, c: Math.round(performance.now()) }); } // [net] c: 보낸 시각 → 다른 사람 화면이 고르게 보간
 }
 // 모바일 스틱/버튼
 if (TOUCH) {
@@ -769,10 +791,15 @@ function renderTouchButtons(role) {
 const _v = new THREE.Vector3(), _w = new THREE.Vector3(), _u = new THREE.Vector3();
 function place(A, x, z, ry, dt, k = 14) {
   const r = A.p.root;
-  if (!A.init) { r.position.set(x, groundY(x, z), z); r.rotation.y = ry; A.init = true; A.spd = 0; return 0; }
+  if (!A.init) { r.position.set(x, groundY(x, z), z); r.rotation.y = ry; A.init = true; A.spd = 0; A.tgx = x; A.tgz = z; return 0; } // [net] tgx: 지난 목표
   const a = 1 - Math.exp(-k * dt);
   const ox = r.position.x, oz = r.position.z;
-  let nx = lerp(ox, x, a), nz = lerp(oz, z, a);
+  // [net] 목표(보간 위치)가 이번 프레임 움직인 만큼은 그대로 따라가고(그럴듯한 속도일 때), 남은 차이만 부드럽게 줄임.
+  //       전엔 목표 쪽으로 지수 감쇠만 해서 일정 속도로 뛰는 선수가 늘 v/k 만큼 뒤에 그려졌음(주자 k=16 → 8m/s 면 0.5m, 출발·정지 1/k 초 늦음)
+  const fx_ = A.tgx === undefined ? 0 : x - A.tgx, fz_ = A.tgz === undefined ? 0 : z - A.tgz;
+  A.tgx = x; A.tgz = z;
+  const ff = Math.hypot(fx_, fz_) < 12 * dt + 0.02 ? 1 : 0;
+  let nx = lerp(ox + fx_ * ff, x, a), nz = lerp(oz + fz_ * ff, z, a);
   // [qa 11-19] 화면 이동 속도 상한(사람 최고 속도 근처): 서버 위치가 크게 튀어도 미끄러지듯 날아가지 않고 뛰어감. 50m 넘게 튀면(교대·리셋) 바로 옮김
   const jump = Math.hypot(x - ox, z - oz), vmax = 10.5 * dt, mv = Math.hypot(nx - ox, nz - oz);
   if (jump < 50 && mv > vmax) { nx = ox + (nx - ox) * vmax / mv; nz = oz + (nz - oz) * vmax / mv; }
@@ -823,7 +850,10 @@ function updateWorld(dt) {
     setTag(A, nm ? (ctrlId === myId ? `${nm} ★` : nm) : '', ctrlId === myId ? '#ffcf3f' : '#ffffff', ctrlId === myId && (camMode !== 'field' || cfg.fieldCam === 'tps'));
     if (pos === 'P' && (pitchPhase || (s.p && t - s.p.t0 < 1.2 && s.ph !== 'live'))) {
       let k = -1;
-      if (s.p && (s.ph === 'pitching' || s.ph === 'result')) k = pitchK(t - (s.p.t0 - WINDUP));
+      const tau = role.pitcher && pred.pitch ? windupTau(pred.pitch, s, t) : null; // [net] 내 투구 예측
+      if (tau == null || s.ph === 'result') pred.pitch = null;
+      if (tau != null) k = tau >= 0 ? pitchK(tau) : -1;
+      else if (s.p && (s.ph === 'pitching' || s.ph === 'result')) k = pitchK(t - (s.p.t0 - WINDUP));
       if (k > 1.15) k = -1;
       if (window.__pk != null) k = window.__pk;
       A.a.pitcher(dt, { k, speed: sp, lookW: tossBall.visible ? tossBall.position : _v.set(0, 1.2, 0), catchW: tossing && tk > TOSS.start + TOSS.dur - 0.35 ? _u.set(-0.25, 1.45, 17.75) : null });
@@ -848,6 +878,8 @@ function updateWorld(dt) {
     const splitK = s.ph === 'pitching' && s.p ? (t - s.p.t0) / 0.35 : -1;
     let throwK = -1;
     if (A.throwT && tp - A.throwT < THROW_DUR) throwK = (tp - A.throwT) / THROW_DUR;
+    if (i === role.fi && tp - pred.jt < 1) jt = tp - pred.jt; // [net] 내가 누른 점프·다이빙은 누른 순간부터 (서버 나이로 다시 시작 안 함)
+    if (i === role.fi && tp - pred.dv < 3) dv = tp - pred.dv;
     const diveK = dv >= 0 ? dv / 0.55 : -1, jumpK = jt >= 0 && jt < 0.6 ? jt / 0.6 : -1;
     let reachW = null, ground = false;
     if (ballL && ballL.h < 0 && s.ph === 'live') {
@@ -1042,7 +1074,7 @@ function updateBaseTags(role) {
   relayRing.visible = !!(rl && (rl[0] === role.fi || (role.holding && ['LF', 'CF', 'RF'].includes(role.pos))));
   if (relayRing.visible) { relayRing.position.set(rl[1], 0.08, rl[2]); relayRing.scale.setScalar(1 + 0.12 * Math.sin(nowP() * 8)); }
   const on = role.holding && S && S.ph === 'live';
-  if (on && pendThrow && nowP() - pendThrow.t < 0.7 && !throwCharge) { net && net.send({ t: 'throw', base: pendThrow.base, p: 0.5 }); pendThrow = null; }
+  if (on && pendThrow && nowP() - pendThrow.t < 0.7 && !throwCharge) { net && sendThrow(pendThrow.base, 0.5); pendThrow = null; }
   if (pendThrow && nowP() - pendThrow.t >= 0.7) pendThrow = null;
   const targets = new Set();
   if (on) targets.add(recBase());

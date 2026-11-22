@@ -5,6 +5,7 @@ import { join } from 'node:path';
 const HERE = new URL('../../', import.meta.url).pathname;
 const SNAP = await import(pathToFileURL(join(HERE, 'client/net/snap.js')).href).catch(() => null);
 const NI = await import(pathToFileURL(join(HERE, 'client/net/interp.js')).href).catch(() => null);
+const PR = process.env.NOPRED ? null : await import(pathToFileURL(join(HERE, 'client/net/predict.js')).href).catch(() => null); // [net] 내 조작 예측 (NOPRED=1 → 전처럼 서버 응답 기다림)
 if (NI && process.env.NETCFG) Object.assign(NI.NET, JSON.parse(process.env.NETCFG)); // 튜닝용: NETCFG='{"Q":0.9}'
 
 const clamp = (v, a, b) => Math.max(a, Math.min(b, v));
@@ -13,11 +14,13 @@ const lerpAng = (a, b, u) => { let d = b - a; d = Math.atan2(Math.sin(d), Math.c
 const hr = () => Number(process.hrtime.bigint()) / 1e6;
 const rkey = (r) => (r[7] ? 'r' + r[7] : r[2] + '|' + (r[4] || ''));
 
-export function makeClient({ kind, sim, i, now, send, truthAt, rnd, gauss, srvNow }) {
-  const { integrate, inZone, ZONE, runnerXZ } = sim;
+export function makeClient({ kind, sim, i, now, send, truthAt, rnd, gauss, srvNow, game }) {
+  const { integrate, inZone, ZONE, runnerXZ, WINDUP, SPRINT_SPEED } = sim;
   const C = { i, kind, id: null, errors: [] };
   const stat = C.stat = { down: 0, msgs: 0, perSec: new Map(), parse: [], proc: [], frameMs: [], snapB: 0, snapN: 0, snapMaxB: 0, frames: 0, diag: {}, catchup: 0, lagSum: 0, ballLagSum: 0, under: 0, hold: 0, extrap: 0, delaySum: 0,
-    plN: 0, plE2: 0, plErrs: [], stall: 0, lurch: 0, moving: 0, plJump: 0, bN: 0, bE2: 0, bErrs: [], bJump: 0, ev: {} };
+    plN: 0, plE2: 0, plErrs: [], stall: 0, lurch: 0, moving: 0, plJump: 0, bN: 0, bE2: 0, bErrs: [], bJump: 0, ev: {},
+    // [net] 내 조작 → 내 화면 반응(초), 다른 사람이 조작하는 수비수(내 화면) 끊김, 주자를 공 시각과 비교한 오차
+    latPitch: [], latThrow: [], predMiss: 0, relErr: 0, hMoving: 0, hStall: 0, hJump: 0, hN: 0, hE2: 0, rnNow: [] };
   let offset = null, S = null, prevS = null, ballL = null, lastBallSt = '', lastFrame = null;
   const snapHist = [];
   const netQ = { jit: 0.01, lastArr: 0, lastNow: 0, delay: 0.06 };
@@ -26,7 +29,7 @@ export function makeClient({ kind, sim, i, now, send, truthAt, rnd, gauss, srvNo
   const A = []; const runners = new Map();
   const merger = SNAP ? SNAP.createSnapMerger() : null;
   C.send = (m) => send(m);
-  C.reset = () => { stat.down = 0; stat.msgs = 0; stat.perSec.clear(); for (const k of ['parse', 'proc', 'frameMs', 'plErrs', 'bErrs']) stat[k].length = 0; for (const k of ['snapB', 'snapN', 'snapMaxB', 'frames', 'under', 'hold', 'extrap', 'delaySum', 'plN', 'plE2', 'stall', 'lurch', 'moving', 'plJump', 'bN', 'bE2', 'bJump', 'catchup', 'lagSum', 'ballLagSum']) stat[k] = 0; stat.ev = {}; };
+  C.reset = () => { stat.down = 0; stat.msgs = 0; stat.perSec.clear(); for (const k of ['parse', 'proc', 'frameMs', 'plErrs', 'bErrs', 'latPitch', 'latThrow', 'rnNow']) stat[k].length = 0; for (const k of ['snapB', 'snapN', 'snapMaxB', 'frames', 'under', 'hold', 'extrap', 'delaySum', 'plN', 'plE2', 'stall', 'lurch', 'moving', 'plJump', 'bN', 'bE2', 'bJump', 'catchup', 'lagSum', 'ballLagSum', 'predMiss', 'relErr', 'hMoving', 'hStall', 'hJump', 'hN', 'hE2']) stat[k] = 0; stat.ev = {}; };
 
   // ── 수신 ──
   C.recv = (raw) => {
@@ -35,7 +38,7 @@ export function makeClient({ kind, sim, i, now, send, truthAt, rnd, gauss, srvNo
     try {
       switch (m.t) {
         case 'welcome': C.id = m.id; break;
-        case 'pong': { const rtt = Math.round((now() - m.c) * 1000); send({ t: 'rtt', ms: rtt }); break; }
+        case 'pong': { const rtt = Math.round((now() - m.c) * 1000); C.rtt = rtt / 1000; send({ t: 'rtt', ms: rtt }); break; }
         case 's': {
           if (SNAP) { m = merger.merge(m); if (!m) { C.errors.push('델타인데 기준 없음'); break; } }
           const B = Buffer.byteLength(raw); stat.snapB += B; stat.snapN++; stat.snapMaxB = Math.max(stat.snapMaxB, B);
@@ -79,6 +82,10 @@ export function makeClient({ kind, sim, i, now, send, truthAt, rnd, gauss, srvNo
     if (s.ph === 'lobby') { S = s; return; }
     if (!s.fl || !s.fl.length) { S = s; return; }
     prevS = S; S = s;
+    if (s.te && s.te.id !== bot.teId) { // [net] 송구 이벤트 도착 = (예측 없으면) 송구 동작 시작
+      bot.teId = s.te.id;
+      if (bot.throwSent && s.te.i === bot.throwI) { stat.latThrow.push(bot.throwPred ? bot.throwPred - bot.throwSent : now() - bot.throwSent); bot.throwSent = 0; }
+    }
     if (s.b) {
       const [x, y, z, vx, vy, vz, h, st, sx, sy, sz] = s.b;
       if (kind === 'v20') {
@@ -114,10 +121,15 @@ export function makeClient({ kind, sim, i, now, send, truthAt, rnd, gauss, srvNo
 
   // main.js place() (v20: 속도 상한 없음)
   function place(o, x, z, dt, k) {
-    if (!o.init) { o.x = x; o.z = z; o.init = true; return; }
+    if (!o.init) { o.x = x; o.z = z; o.init = true; o.tgx = x; o.tgz = z; return; }
     const a = 1 - Math.exp(-k * dt);
     const ox = o.x, oz = o.z;
-    let nx = lerp(ox, x, a), nz = lerp(oz, z, a);
+    let nx, nz;
+    if (kind === 'new' && !process.env.OLDPLACE) { // [net] main.js place: 목표 이동분은 그대로 + 남은 차이만 감쇠
+      const fx = x - o.tgx, fz = z - o.tgz; o.tgx = x; o.tgz = z;
+      const ff = Math.hypot(fx, fz) < 12 * dt + 0.02 ? 1 : 0;
+      nx = lerp(ox + fx * ff, x, a); nz = lerp(oz + fz * ff, z, a);
+    } else { nx = lerp(ox, x, a); nz = lerp(oz, z, a); }
     if (kind !== 'v20' && !process.env.NOCAP) {
       const jump = Math.hypot(x - ox, z - oz), vmax = 10.5 * dt, mv = Math.hypot(nx - ox, nz - oz);
       if (jump < 50 && mv > vmax) { nx = ox + (nx - ox) * vmax / mv; nz = oz + (nz - oz) * vmax / mv; }
@@ -127,7 +139,7 @@ export function makeClient({ kind, sim, i, now, send, truthAt, rnd, gauss, srvNo
   }
 
   // ── 프레임 (60fps) ──
-  const bot = { pAt: -1, sw: null, dec: -1 };
+  const bot = { pAt: -1, sw: null, dec: -1, pp: null, pitchSent: 0, pitchAt: 0, teId: -1, throwSent: 0, throwPred: 0, throwI: -1, holdAt: 0, thrown: false, ctl: { active: false, x: 0, z: 0, last: 0 } };
   C.frame = () => {
     const tn = now();
     const dt = lastFrame == null ? 1 / 60 : Math.min(0.1, tn - lastFrame); lastFrame = tn;
@@ -135,7 +147,18 @@ export function makeClient({ kind, sim, i, now, send, truthAt, rnd, gauss, srvNo
     if (!S || !S.fl || !S.fl.length || S.ph === 'lobby') return;
     const f0 = hr();
     const t = simNow();
-    runBot(t);
+    runBot(t, dt);
+    if (bot.pp) { // [net] 투구 클릭 → 내 화면 와인드업 시작
+      const tau = PR ? PR.windupTau(bot.pp, S, t) : null;
+      const srv = S.p && S.p.id !== bot.pp.pid0 && S.ph !== 'pitch' ? t - (S.p.t0 - WINDUP) : null;
+      const vis = tau != null ? tau : srv != null ? srv : -1;
+      if (bot.pitchSent && vis >= 0) { stat.latPitch.push(now() - bot.pitchSent); bot.pitchSent = 0; }
+      if (srv != null && srv >= 1.2 && tau != null) stat.relErr = Math.max(stat.relErr, Math.abs(tau - srv)); // 릴리스 전 서버 시간표와 합류했는지
+      if (srv != null && srv > 2.2) bot.pp = null;
+      else if (tau == null && srv == null && now() - bot.pitchAt > 1.5) bot.pp = null;
+    }
+    if (bot.throwPred && !bot.throwSent && now() - bot.throwPred > 0) bot.throwPred = 0;
+    if (bot.throwSent && now() - bot.throwSent > 1.2) { if (bot.throwPred) { stat.predMiss++; if (process.env.MISSDBG) { const g = game && game(); console.log('miss', C.i, S.ph, S.b && S.b[6], bot.throwI, g && g.phase, g && g.ball && g.ball.holder, g && g.play && g.play.queuedThrow); } } bot.throwSent = 0; bot.throwPred = 0; }
     // 수비수·주자 화면 위치
     let IP = null, ti = t, under = false, ext = 0;
     if (NB) { const r = NB.sample(t, dt, S.ph === 'live'); IP = r; ti = r ? r.ti : t; under = !!(r && r.under); ext = r ? r.ext : 0; stat.delaySum += NB.delay; }
@@ -161,6 +184,7 @@ export function makeClient({ kind, sim, i, now, send, truthAt, rnd, gauss, srvNo
       const o = A[i] || (A[i] = { init: false });
       const ox = o.x, oz = o.z, had = o.init && o.pos === pos;
       place(o, x, z, dt, IP ? 22 : 12); o.pos = pos;
+      C.hum = typeof f[4] === 'string' && f[4] !== C.id && live;
       C.diagTag = 'F' + pos; if (had) measure(o.x - ox, o.z - oz, o.x, o.z, dt, tIntent, (T) => T.fl[i], (T) => T.pos === S.fl.map((q) => q[0]).join(), tr, trP);
     });
     const seen = new Set();
@@ -175,6 +199,8 @@ export function makeClient({ kind, sim, i, now, send, truthAt, rnd, gauss, srvNo
       let o = runners.get(key); if (!o) runners.set(key, (o = { init: false }));
       const ox = o.x, oz = o.z, had = o.init;
       place(o, x, z, dt, 16);
+      C.hum = false;
+      if (had && !onBase && live) { const T = truthAt(t); const a = T && T[0].rn.get(key), bb = T && T[1].rn.get(key); if (a && bb) { const e = Math.hypot(o.x - lerp(a[0], bb[0], T[2]), o.z - lerp(a[1], bb[1], T[2])); if (e < 30) stat.rnNow.push(e); } } // [net] 주자 vs 공·판정 시각(t)
       C.diagTag = 'R'; if (had && !onBase) measure(o.x - ox, o.z - oz, o.x, o.z, dt, ti, (T) => T.rn.get(key), () => true, tr, trP);
     }
     for (const k of runners.keys()) if (!seen.has(k)) runners.delete(k);
@@ -209,16 +235,42 @@ export function makeClient({ kind, sim, i, now, send, truthAt, rnd, gauss, srvNo
     const tag = (w) => { if (!process.env.NBDIAG) return; const k = w + ':' + (C.diagTag || '?') + ':' + S.ph + ':' + (tv > 12 ? 'tv>12' : tv > 6 ? 'tv6-12' : 'tv<6'); stat.diag[k] = (stat.diag[k] || 0) + 1; };
     if (tv > 2) { stat.moving++; if (dv < 0.3 * tv) { stat.stall++; tag('stall'); } }
     if (dv > tv * 1.6 + 1.5) { stat.lurch++; tag('lurch'); }
-    if (Math.hypot(dx - (tx - px), dz - (tz - pz)) > 0.3) { stat.plJump++; tag('jump'); }
+    const jmp = Math.hypot(dx - (tx - px), dz - (tz - pz)) > 0.3;
+    if (jmp) { stat.plJump++; tag('jump'); }
+    if (C.hum) { stat.hN++; stat.hE2 += e * e; if (tv > 2) { stat.hMoving++; if (dv < 0.3 * tv) stat.hStall++; } if (jmp) stat.hJump++; }
   }
   // ── 봇: 투수면 1.5~3.5초 뒤 투구, 타자면 공을 '보고'(σ 7cm) 존 안이면 스윙(타이밍 σ 100ms) ──
-  function runBot(t) {
+  function runBot(t, dt) {
     const s = S; if (!C.id) return;
     const P = s.fl[0];
     if (s.ph === 'pitch' && P && P[4] === C.id) {
       if (bot.pAt < 0) bot.pAt = t + 1.5 + rnd() * 2;
-      if (t >= bot.pAt) { bot.pAt = -1; const ty = ['FB', 'TS', 'SL', 'CB', 'CH', 'SP'][(rnd() * 6) | 0]; send({ t: 'pitch', type: ty, tx: (rnd() - 0.5) * 0.62, ty: 0.42 + rnd() * 0.72, power: 0.84 + rnd() * 0.13 }); }
+      if (t >= bot.pAt) {
+        bot.pAt = -1; const ty = ['FB', 'TS', 'SL', 'CB', 'CH', 'SP'][(rnd() * 6) | 0]; send({ t: 'pitch', type: ty, tx: (rnd() - 0.5) * 0.62, ty: 0.42 + rnd() * 0.72, power: 0.84 + rnd() * 0.13 });
+        bot.pitchSent = bot.pitchAt = now(); bot.pp = PR ? PR.pitchPred(s, t, C.rtt || 0) : { pid0: s.p ? s.p.id : null }; // [net]
+      }
     } else bot.pAt = -1;
+    // [net] 수비: 내가 조작하는 수비수(자동 전환)로 공 쫓기(main.js updateControl 처럼 30Hz mv, cm), 잡으면 0.35초 뒤 1루 송구
+    const fi = s.ph === 'live' ? s.fl.findIndex((f) => f[4] === C.id) : -1, ctl = bot.ctl;
+    if (fi >= 0 && s.b) {
+      const h = s.b[6], f = s.fl[fi];
+      if (h === fi) {
+        ctl.active = false;
+        if (!bot.holdAt) bot.holdAt = t;
+        if (!bot.thrown && t - bot.holdAt > 0.35) {
+          bot.thrown = true; const base = Math.hypot(f[1] - sim.BASES[1][0], f[2] - sim.BASES[1][1]) < 3 ? 2 : 1;
+          send({ t: 'throw', base, p: 0.5 }); bot.throwSent = now(); bot.throwI = fi; bot.throwPred = PR && PR.throwOk(s, fi, base) ? now() : 0;
+        }
+      } else {
+        bot.holdAt = 0; bot.thrown = false;
+        if (h < 0 && s.b[7] !== 'thrown') {
+          if (!ctl.active) { ctl.x = f[1]; ctl.z = f[2]; ctl.active = true; }
+          const dx = s.b[0] - ctl.x, dz = s.b[2] - ctl.z, d = Math.hypot(dx, dz);
+          if (d > 0.4) { const st = Math.min(d, SPRINT_SPEED * dt); ctl.x += dx / d * st; ctl.z += dz / d * st; }
+          if (t - ctl.last > 0.031) { ctl.last = t; send({ t: 'mv', x: Math.round(ctl.x * 100) / 100, z: Math.round(ctl.z * 100) / 100, ry: Math.round(Math.atan2(dx, dz) * 100) / 100, a: 1, ...(process.env.NOMC ? {} : { c: Math.round(now() * 1000) + 5e6 * (C.i + 1) }) }); }
+        } else ctl.active = false;
+      }
+    } else { ctl.active = false; bot.holdAt = 0; bot.thrown = false; }
     const p = s.p;
     if (s.ph === 'pitching' && p && s.bat && s.bat.id === C.id) {
       if (bot.dec !== p.id && t >= p.arrive - 0.3) {
@@ -241,6 +293,8 @@ export function makeClient({ kind, sim, i, now, send, truthAt, rnd, gauss, srvNo
       underrun: stat.under / Math.max(1, stat.frames), hold: stat.hold / Math.max(1, stat.frames), extrapMs: 1000 * stat.extrap / Math.max(1, stat.under - stat.hold), delayMs: 1000 * stat.delaySum / Math.max(1, stat.frames), lagMs: 1000 * stat.lagSum / Math.max(1, stat.frames), ballLagMs: 1000 * stat.ballLagSum / Math.max(1, stat.frames),
       plErr: Math.sqrt(stat.plE2 / Math.max(1, stat.plN)), plErr99: q(stat.plErrs, 0.99), stall: stat.stall / Math.max(1, stat.moving), lurch: stat.lurch / Math.max(1, stat.plN), plJump: stat.plJump / (sec / 60) / 1, catchup: stat.catchup / Math.max(1, stat.plN + stat.catchup),
       bErr: Math.sqrt(stat.bE2 / Math.max(1, stat.bN)), bErr99: q(stat.bErrs, 0.99), bJump: stat.bJump / Math.max(1e-9, stat.bN / 3600), bN: stat.bN,
+      latPitch: stat.latPitch, latThrow: stat.latThrow, predMiss: stat.predMiss, relErr: stat.relErr, rnNow: stat.rnNow,
+      hStall: stat.hStall / Math.max(1, stat.hMoving), hJump: stat.hJump / (sec / 60), hErr: Math.sqrt(stat.hE2 / Math.max(1, stat.hN)), hN: stat.hN,
     };
   };
   return C;
