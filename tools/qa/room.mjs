@@ -5,8 +5,12 @@ import { createHash } from 'node:crypto';
 import { join } from 'node:path';
 import { pathToFileURL } from 'node:url';
 
-export async function attachRooms(srv, root) {
+// [net] net = { ping(왕복 ms), jit(한쪽 지터 σ ms, 반정규), loss(손실 확률 → TCP 재전송: ping+100ms 지연, 뒤 메시지도 순서대로 기다림) } — 양쪽 방향 모두
+export async function attachRooms(srv, root, net = {}) {
   const errors = [];
+  const PING = +net.ping || 0, JIT = +net.jit || 0, LOSS = +net.loss || 0;
+  const gauss = () => { let u = 0, v = 0; while (!u) u = Math.random(); while (!v) v = Math.random(); return Math.sqrt(-2 * Math.log(u)) * Math.cos(2 * Math.PI * v); };
+  const link = () => { let last = 0; return (fn) => { if (!PING && !JIT && !LOSS) return fn(); let t = Date.now() + PING / 2 + (JIT ? Math.abs(gauss()) * JIT : 0); if (LOSS && Math.random() < LOSS) t += PING + 100; t = Math.max(t, last); last = t; setTimeout(fn, t - Date.now()); }; };
   // Room 이 쓰는 전역 흉내
   const RealResponse = globalThis.Response;
   globalThis.Response = class extends RealResponse { constructor(b, o = {}) { const st = o.status; super(b, st === 101 ? { ...o, status: 200 } : o); if (st === 101) Object.defineProperty(this, 'webSocket', { value: o.webSocket }); } };
@@ -28,6 +32,7 @@ export async function attachRooms(srv, root) {
     sock.write(`HTTP/1.1 101 Switching Protocols\r\nUpgrade: websocket\r\nConnection: Upgrade\r\nSec-WebSocket-Accept: ${acc}\r\n\r\n`);
     sock.setNoDelay(true);
     const ls = { message: [], close: [], error: [] };
+    const down = link(), up = link();
     let closed = false, buf = Buffer.alloc(0);
     const frame = (op, payload) => {
       const n = payload.length; let h;
@@ -39,7 +44,7 @@ export async function attachRooms(srv, root) {
     const fire = (t, e) => { for (const f of ls[t]) try { f(e); } catch (err) { errors.push(String(err.stack || err)); } };
     const server = {
       accept() { },
-      send(s) { if (closed) throw new Error('closed'); frame(1, Buffer.from(String(s))); },
+      send(s) { if (closed) throw new Error('closed'); const p = Buffer.from(String(s)); down(() => { if (!sock.destroyed) frame(1, p); }); },
       close(code = 1000, reason = '') { if (closed) return; const p = Buffer.alloc(2 + Buffer.byteLength(reason)); p.writeUInt16BE(code, 0); p.write(reason, 2); try { frame(8, p); } catch { } closed = true; sock.end(); fire('close', { code, reason }); },
       addEventListener(t, f) { (ls[t] || (ls[t] = [])).push(f); },
     };
@@ -52,7 +57,7 @@ export async function attachRooms(srv, root) {
         if (buf.length < o + n) return;
         const pl = Buffer.from(buf.subarray(o, o + n)); buf = buf.subarray(o + n);
         if (mk) for (let i = 0; i < pl.length; i++) pl[i] ^= mk[i & 3];
-        if (op === 1) fire('message', { data: pl.toString('utf8') });
+        if (op === 1) { const d = pl.toString('utf8'); up(() => fire('message', { data: d })); }
         else if (op === 8) { if (!closed) { closed = true; try { frame(8, pl.subarray(0, 2)); } catch { } sock.end(); fire('close', { code: pl.length >= 2 ? pl.readUInt16BE(0) : 1005 }); } }
         else if (op === 9) frame(10, pl);
       }

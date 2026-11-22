@@ -291,8 +291,8 @@ function aero(b, dt) {
   b.vx += ax * dt; b.vy += ay * dt; b.vz += az * dt;
 }
 // 사건 리턴: landed/wall/over/pole. world=false면 순수 비행만(비거리 추정용)
-export function integrate(b, dt, world = true) {
-  const ev = { landed: false, wall: false, over: false, pole: false, surf: null, impact: 0 };
+export function integrate(b, dt, world = true, out = null) { // [net] out: 재사용할 결과 객체(클라 낙구 예측 루프가 초당 수천 번 불러 GC 압력) — 결과는 같음
+  const ev = out ? (out.landed = out.wall = out.over = out.pole = false, out.surf = null, out.impact = 0, out) : { landed: false, wall: false, over: false, pole: false, surf: null, impact: 0 };
   b.vy -= G * dt;
   if (b.state === 'thrown') {
     const sp = Math.hypot(b.vx, b.vy, b.vz), k = 1 - DRAG * 0.5 * sp * dt;
@@ -1314,7 +1314,7 @@ export class Game {
     if (this.now - f.dv < 1.2) return;
     const x = Number(m.x), z = Number(m.z);
     if (!isFinite(x) || !isFinite(z)) return;
-    const el = Math.max(0.05, this.now - (f.lastMvT || this.now - 0.1));
+    const el = Math.max(0.02, this.now - (f.lastMvT || this.now - 0.1)); // [net] 클라가 30Hz 로 보냄(전 20Hz) — 0.05 하한이면 전력질주가 조깅(mv 1)으로 잡힘
     const d = dist2(f.x, f.z, x, z), maxd = SPRINT_SPEED * el * 1.6 + 0.6;
     const k = d > maxd ? maxd / d : 1;
     f.mv = d / el > 0.5 ? (d / el > FIELD_SPEED + 0.5 ? 2 : 1) : 0;
@@ -1970,6 +1970,64 @@ export class Game {
 
   isHumanActive(f) { return f.ctrl && this.isLive(f.ctrl) && this.now - f.act < 0.6; } // 손 떼면 0.6초 뒤 CPU가 이어서 쫓아감
 
+  // ── 수비 분담 (실제 야구 기본 원칙) ──
+  // 좌표: 홈(0,0) 1루(-19.4,19.4) 2루(0,38.8) 3루(19.4,19.4) → x>0 이 좌익수 쪽, x<0 이 우익수 쪽
+  // 내야 타구: 잡는 사람(F)이 처리, 1루=1루수(F가 1루수면 투수) · 2루=F가 2루수/1루수/우측이면 유격수, 아니면 2루수 · 3루=3루수(F가 3루수면 유격수) · 홈=포수(F가 포수면 투수)
+  //            외야수는 송구 갈 베이스 뒤를 백업(우익→1루, 중견→2루, 좌익→3루)
+  // 외야 타구: 공 쪽 키스톤(좌·중앙=유격수, 우=2루수)이 중계로 나가고 다른 한 명이 2루, 1·3루수·포수는 자기 베이스, 투수는 홈 또는 3루 뒤 백업,
+  //            나머지 외야수는 쫓는 외야수 뒤를 백업
+  // 같은 상황(처리한 사람·내야/외야·공 쪽)이면 결과를 그대로 유지해서 수비수가 왔다 갔다 하지 않게
+  defRoles(chaser) {
+    const b = this.ball, P = this.play, I = (p) => POS.indexOf(p);
+    const h = b.holder;
+    const srcF = h >= 0 ? this.fielders[h] : null;
+    const sx = srcF ? srcF.x : P.chasePt ? P.chasePt[0] : b.x, sz = srcF ? srcF.z : P.chasePt ? P.chasePt[2] : b.z;
+    const F = h >= 0 ? h : chaser;
+    const rad = Math.hypot(sx, sz), outfield = rad > 44 || F >= 6;
+    const side = sx > 6 ? 'L' : sx < -6 ? 'R' : 'C';
+    const thrown = b.state === 'thrown';
+    const key = `${F}|${outfield ? 'O' : 'I'}|${side}|${thrown ? b.thrower : ''}|${rad > 55 ? 'D' : ''}`;
+    if (P.roles && P.roles.key === key && !(P.roles.relay && rad > 55 && this.now - P.roles.t > 0.6)) return P.roles;
+    const cov = { 1: -1, 2: -1, 3: -1, 4: -1 }, backup = [], used = new Set([F]);
+    if (thrown) used.add(b.thrower);
+    const take = (...ps) => { for (const p of ps) { const i = I(p); if (i >= 0 && !used.has(i)) { used.add(i); return i; } } return -1; };
+    let relay = null;
+    if (!outfield) {
+      const fp = POS[F] || '';
+      cov[1] = fp === '1B' ? take('P', '2B') : take('1B', 'P');
+      cov[2] = (fp === '2B' || fp === '1B' || (fp === 'P' && sx < 0)) ? take('SS', '2B') : take('2B', 'SS');
+      cov[3] = fp === '3B' ? take('SS', 'P') : take('3B', 'SS');
+      cov[4] = fp === 'C' ? take('P', '3B') : take('C', 'P');
+      // 외야 백업: 송구 갈 베이스 뒤(파울 지역 쪽)로
+      const bk = { RF: [-30, 12], CF: [0, 52], LF: [30, 12] };
+      for (const p of ['RF', 'CF', 'LF']) { const i = I(p); if (!used.has(i)) backup.push([i, bk[p]]); }
+    } else {
+      const R = side === 'R' ? '2B' : 'SS', K = R === 'SS' ? '2B' : 'SS';
+      const ri = I(R);
+      cov[1] = take('1B', 'P'); cov[3] = take('3B'); cov[4] = take('C');
+      if (!used.has(ri)) {
+        used.add(ri);
+        // 깊은 타구(55m+)는 목표 베이스 쪽 중계 위치, 얕은 안타는 2루 앞 컷오프(외야 잔디 끝)
+        const tk = this.relayTarget(), base = BASES[tk % 4];
+        const d = dist2(sx, sz, base[0], base[1]);
+        if (rad > 55 && d > 40) { const s2 = clamp(d * 0.45, 22, 42), ux = (sx - base[0]) / d, uz = (sz - base[1]) / d; relay = { ci: ri, k: tk, x: base[0] + ux * s2, z: base[1] + uz * s2 }; }
+        else { const B2 = BASES[2], d2b = dist2(sx, sz, B2[0], B2[1]) || 1; relay = { ci: ri, k: 2, x: B2[0] + (sx - B2[0]) / d2b * 12, z: B2[1] + (sz - B2[1]) / d2b * 12 }; }
+      }
+      cov[2] = take(K, 'P');
+      // 투수: 앞선 주자가 홈을 노리면 홈 뒤, 아니면 3루 뒤 백업
+      const pi = I('P');
+      if (!used.has(pi)) { const lead = Math.max(0, ...this.alive().map((r) => r.target)); backup.push([pi, lead >= 4 || this.alive().some((r) => r.b >= 2) ? [6, -9] : [26, 12]]); used.add(pi); }
+      // 나머지 외야수: 쫓는 외야수 뒤(홈에서 본 바깥쪽 5m)를 백업
+      for (const p of ['LF', 'CF', 'RF']) {
+        const i = I(p); if (used.has(i)) continue;
+        const hs = HOME_SPOT[p], cx = srcF ? srcF.x : sx, cz = srcF ? srcF.z : sz;
+        const near = dist2(hs[0], hs[1], cx, cz) < 45;
+        backup.push([i, near ? [cx + (cx - 0) / (Math.hypot(cx, cz) || 1) * 5 + (hs[0] - cx) * 0.25, cz + cz / (Math.hypot(cx, cz) || 1) * 5 + (hs[1] - cz) * 0.25] : hs]);
+      }
+    }
+    return (P.roles = { key, t: this.now, cov, relay, backup });
+  }
+
   coverMap(chaser, extra = -1) {
     const b = this.ball;
     const idx = (p) => POS.indexOf(p);
@@ -1999,6 +2057,7 @@ export class Game {
         } else {
           if (!P.traj || this.now - P.trajT > 0.25) { P.traj = this.predict(); P.trajT = this.now; }
           let bestT = 1e9, bestPt = null;
+          P.tiArr = new Array(N).fill(null); P.ptArr = new Array(N).fill(null); // 매번 새로(건너뛴 사람의 옛 값이 남으면 그 사람이 계속 '쫓는 사람'으로 유지돼 플레이가 안 끝났음)
           for (let i = 0; i < N; i++) {
             if (i === b.thrower && this.now - b.throwAt < 0.45) continue;
             const f = this.fielders[i];
@@ -2016,8 +2075,17 @@ export class Game {
             if (!pt) { const q = P.traj[P.traj.length - 1]; pt = q; ti = 6 + dist2(f.x, f.z, q[0], q[2]) / spd; }
             // 투수는 마운드 근처(약 10m) 타구만 처리 — 그 밖은 내·외야수 몫 (실제 야구처럼 투수가 뛰어다니지 않음)
             if (f.pos === 'P' && b.batted && !this.isHumanActive(f) && dist2(MOUND[0], MOUND[1], pt[0], pt[2]) > 10) continue;
+            P.tiArr[i] = ti; P.ptArr[i] = pt;
             if (ti < bestT) { bestT = ti; chaser = i; bestPt = pt; }
           }
+          // [qa 11-19 수비 규칙] ① 뜬공 우선권: 외야수가 0.4초 안 차이로 닿으면 외야수(앞으로 오면서 잡는 쪽), 외야수끼리는 중견수 우선
+          //                     ② 쫓는 사람은 확실히 더 빠른(0.3초+) 사람이 생길 때만 바뀜 — 매 0.2초 바뀌면 커버 담당이 뒤집혀 다들 우르르 이동했음
+          const airBall = b.batted && !b.bounced && b.vy > -2 && bestPt && bestPt[1] > 0.4;
+          if (airBall && chaser >= 0 && chaser < 6) {
+            for (const o of [7, 6, 8]) if (P.tiArr[o] != null && P.tiArr[o] <= bestT + 0.4 && P.tiArr[o] < 6) { chaser = o; bestT = P.tiArr[o]; bestPt = P.ptArr[o]; break; }
+          } else if (airBall && (chaser === 6 || chaser === 8) && P.tiArr[7] != null && P.tiArr[7] <= bestT + 0.3) { chaser = 7; bestT = P.tiArr[7]; bestPt = P.ptArr[7]; }
+          const prev = P.chaser;
+          if (prev >= 0 && prev !== chaser && P.tiArr[prev] != null && P.tiArr[prev] < 6 && P.tiArr[prev] <= bestT + 0.3 && prev !== b.thrower) { chaser = prev; bestT = P.tiArr[prev]; bestPt = P.ptArr[prev]; }
           if (chaser >= 0) {
             let gx = bestPt[0], gz = bestPt[2];
             // 타구 판단: 처음엔 낙구 지점을 정확히 모름(특히 앞뒤 거리) → 시간이 지나며 보정. 사람이 직접 조작 중이면 적용 안 함
@@ -2040,22 +2108,17 @@ export class Game {
         }
       }
       P.chaser = chaser;
-      // 깊은 외야 타구: 커트맨이 중계 위치로
-      P.rl = null;
-      const src = b.holder >= 0 ? this.fielders[b.holder] : P.chasePt && chaser >= 6 ? { x: P.chasePt[0], z: P.chasePt[2] } : null;
-      if (src && (b.holder < 0 || b.holder >= 6) && b.state !== 'thrown' && Math.hypot(src.x, src.z) > 55) {
-        const rp = this.relayPlan(src.x, src.z, this.relayTarget());
-        if (rp && rp.ci !== chaser && rp.ci !== b.holder) { P.rl = rp; goals[rp.ci] = [rp.x, rp.z]; }
-      } else if (b.state === 'thrown' && P.relay && b.thrower >= 6) {
-        const c = this.fielders[P.relay.ci]; P.rl = { ci: P.relay.ci, k: P.relay.k, x: c.x, z: c.z };
-      }
-      const cov = this.coverMap(chaser, P.rl ? P.rl.ci : -1); P.cov = cov;
-      for (const k of [1, 2, 3, 4]) if (cov[k] >= 0) { const base = BASES[k % 4]; goals[cov[k]] = k === 4 ? [0, -0.5] : [base[0], base[1] + 0.4]; }
+      // [qa 11-19] 실제 야구 수비 분담(defRoles): 누가 어느 베이스 커버·중계·백업인지를 타구 방향/처리한 사람 기준으로 정하고 유지
+      const R = this.defRoles(chaser);
+      P.rl = R.relay;
+      if (R.relay) goals[R.relay.ci] = [R.relay.x, R.relay.z];
+      P.cov = R.cov;
+      for (const k of [1, 2, 3, 4]) { const ci = R.cov[k]; if (ci >= 0 && !goals[ci]) { const base = BASES[k % 4]; goals[ci] = k === 4 ? [0, -0.5] : [base[0], base[1] + 0.4]; } }
+      for (const [ci, g] of R.backup) if (!goals[ci]) goals[ci] = g;
       for (let i = 0; i < N; i++) {
         if (goals[i] || i === b.holder) continue;
         const f = this.fielders[i], hs = HOME_SPOT[f.pos];
-        if (['LF', 'CF', 'RF'].includes(f.pos) && b.holder < 0) goals[i] = [hs[0] + (b.x - hs[0]) * 0.4, hs[1] + (b.z - hs[1]) * 0.4];
-        else if (f.pos === 'P') goals[i] = [MOUND[0], MOUND[1]];
+        if (f.pos === 'P') goals[i] = [MOUND[0], MOUND[1]];
         else goals[i] = hs;
       }
       P.goals = goals;
@@ -2132,7 +2195,7 @@ export class Game {
     const f = this.fielders[i], P = this.play;
     P.holderGoal = null;
     let best = null;
-    const cov = this.coverMap(-1);
+    const cov = (P.roles && P.roles.cov) || this.coverMap(-1);
     for (const r of this.alive()) {
       if (r.trot || (r.b === r.target && !r.mustReturn)) continue;
       const k = r.target, base = BASES[k % 4];

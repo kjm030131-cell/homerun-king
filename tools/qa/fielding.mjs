@@ -18,7 +18,7 @@ function flag(kind, g, msg) {
 }
 const d2 = (ax, az, bx, bz) => Math.hypot(ax - bx, az - bz);
 
-let plays = 0, ticks = 0, covT = 0; const cov = {}; const dec = { throws: 0, late: 0, empty: 0, dpChance: 0, dpTo2: 0, dpOther: [] };
+let plays = 0, ticks = 0, covT = 0; const cov = {}; const flips = { chaser: 0, cov: 0 }; const dec = { throws: 0, late: 0, empty: 0, dpChance: 0, dpTo2: 0, dpOther: [] };
 for (let k = 0; k < N; k++) {
   const evs = [];
   const g = new Game({ emit: (m) => { if (m && m.t === 'ev' && m.ev) evs.push(...[].concat(m.ev)); }, sendTo: () => {} });
@@ -34,6 +34,13 @@ for (let k = 0; k < N; k++) {
     if (g.phase === 'live' && P && b) {
       if (!st || st.P !== P) { st = { P, t0: g.now, rest: 0, hold: 0, holder: -2, thrown: null, flyChk: false, crowd: 0, lastB: { x: b.x, z: b.z } }; plays++; }
       const t = g.now - st.t0;
+      // 담당 뒤집힘: 쫓는 사람·베이스 커버 담당이 플레이 중 몇 번 바뀌나
+      const ck = P.chaser + '', cv = P.cov ? [1, 2, 3, 4].map((k) => P.cov[k]).join(',') : '';
+      if (st.ck != null && ck !== st.ck && b.holder < 0 && b.state !== 'thrown') flips.chaser++;
+      if (st.cv && cv && cv !== st.cv) flips.cov++;
+      st.ck = ck; st.cv = cv || st.cv;
+      // 쓸데없이 뛰는 수비수: 공·베이스와 무관하게 10m 넘게 움직이는 사람 수(플레이당 최대)
+      if (!st.start) st.start = g.fielders.map((f) => [f.x, f.z]);
       if (t > 25 && !st.long) { st.long = 1; flag('플레이가 25초 넘게 안 끝남', g, `kind=${P.kind} ball=${b.state} holder=${b.holder} runners=${g.alive().map((r) => r.b.toFixed(2) + '→' + r.target).join(',')}`); }
       // 수비수 위치
       for (const [fi, f] of g.fielders.entries()) {
@@ -120,6 +127,7 @@ for (let k = 0; k < N; k++) {
 if (V) process.stdout.write('\n');
 console.log(`== 수비 검사 (${RULES}, ${N}경기, 플레이 ${plays}개)`);
 if (covT) console.log('공이 외야에 있을 때 베이스가 빈 시간 비율: ' + [1, 2, 3, 4].map((k) => (k === 4 ? '홈' : k + '루') + ' ' + (100 * (cov[k] || 0) / covT).toFixed(0) + '%').join(' · '));
+console.log(`담당 뒤집힘(플레이당): 쫓는 사람 ${(flips.chaser / plays).toFixed(2)}회 · 베이스 커버 ${(flips.cov / plays).toFixed(2)}회`);
 console.log(`송구 판단: 송구 ${dec.throws}회 · 이미 도착한 베이스로 ${dec.late} · 주자 안 가는 베이스로 ${dec.empty} | 1루 주자+땅볼(병살 기회) ${dec.dpChance}회 중 2루 송구 ${dec.dpTo2} (그 외 ${dec.dpOther.slice(0, 8).join(' ')})`);
 if (!found.size) console.log('이상 없음');
 for (const [k, e] of [...found.entries()].sort((a, c) => c[1].n - a[1].n)) {

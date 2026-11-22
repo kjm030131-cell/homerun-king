@@ -59,15 +59,17 @@ export async function makeLod(glbPath, outPath, ratio = 0.3, force = false) {
   const { MeshoptSimplifier } = await import('meshoptimizer');
   await MeshoptSimplifier.ready;
   const target = Math.floor(idx.length * ratio / 3) * 3;
-  // 먼 선수 전용(화면에서 수십 픽셀). 일반 simplify 는 UV 이음매를 지켜서 49% 에서 멈춤 →
-  // 새 meshoptimizer 는 'Permissive'(이음매 넘어 단순화, 품질 좋음), 옛 버전(0.21)은 simplifySloppy 로 목표(30%)까지
+  // 먼 선수 전용. [11-19] 'Permissive'·simplifySloppy 는 UV 이음매를 넘어 삼각형을 이어서
+  // Tripo 모자이크 아틀라스(조각 수천 개)에서 텍스처가 유리 조각처럼 깨졌다 → 이음매를 지키는 일반 simplify 만
+  // (≈49% 에서 멈추지만 정점 버퍼를 공유하므로 UV 가 항상 맞다)
+  // 이음매(같은 위치에 정점 여러 개) 정점은 고정 — 3개 이상 조각이 만나는 곳에서 틈이 벌어지지 않게
   let lo, err;
-  try { [lo, err] = MeshoptSimplifier.simplify(idx, pos, 3, target, 0.06, ['Permissive']); } catch { [lo, err] = MeshoptSimplifier.simplify(idx, pos, 3, target, 0.06, []); }
-  if (lo.length > target * 1.4 && MeshoptSimplifier.simplifySloppy) {
-    const sl = MeshoptSimplifier.simplifySloppy;
-    const r = sl.length >= 6 ? sl(idx, pos, 3, null, target, 0.06) : sl(idx, pos, 3, target, 0.06);
-    if (r && r[0] && r[0].length < lo.length) [lo, err] = r;
-  }
+  if (MeshoptSimplifier.simplifyWithAttributes && MeshoptSimplifier.generatePositionRemap) {
+    const rm = MeshoptSimplifier.generatePositionRemap(pos, 3), cnt = new Uint32Array(rm.length), lock = new Uint8Array(rm.length);
+    for (const r of rm) cnt[r]++;
+    for (let i = 0; i < rm.length; i++) if (cnt[rm[i]] > 1) lock[i] = 1;
+    [lo, err] = MeshoptSimplifier.simplifyWithAttributes(idx, pos, 3, new Float32Array(0), 0, [], lock, target, 0.06, ['LockBorder']);
+  } else [lo, err] = MeshoptSimplifier.simplify(idx, pos, 3, target, 0.06, ['LockBorder']);
   const out = Buffer.alloc(8 + lo.length * 4);
   out.writeUInt32LE(0x314c5248, 0); out.writeUInt32LE(lo.length, 4);
   Buffer.from(lo.buffer, lo.byteOffset, lo.byteLength).copy(out, 8);

@@ -15,37 +15,44 @@ export const PROFILES = {
 
 // ── 오프라인 생성 버퍼 ──
 // 웅성임: '말하는 사람' 여러 명(공명 필터 + 음절 리듬 엔벨로프)을 섞어서 만든 스테레오 루프
+// [net] 첫 소리 켤 때 한 번에 합성하느라 메인 스레드가 멈췄음(이 서버 기준 웅성임 50ms + 박수 85ms, 할당 ~90MB) →
+//       샘플마다 Math.random·Math.exp·나머지 연산 대신 미리 만든 백색잡음 표를 순서대로 읽고 감쇠는 곱셈으로: 웅성임 ~30ms, 박수 ~25ms (소리 성격은 같음)
 function mkBabble(a, sec = 5, talkers = 8) {
   const sr = a.sampleRate, n = (sr * sec) | 0, b = a.createBuffer(2, n, sr);
   const W = E.noise.getChannelData(0), wn = W.length; // 들뜸 신호는 이미 만든 백색잡음을 재사용(빠름)
   for (let ch = 0; ch < 2; ch++) {
     const d = b.getChannelData(ch);
     for (let k = 0; k < talkers; k++) {
-      const f = rnd(350, 1300), r = Math.exp(-Math.PI * (f * 0.35) / sr), c = 2 * r * Math.cos(2 * Math.PI * f / sr);
+      const f = rnd(350, 1300), r = Math.exp(-Math.PI * (f * 0.35) / sr), c = 2 * r * Math.cos(2 * Math.PI * f / sr), r2 = r * r, g0 = 1 - r;
       // 루프 이음매가 안 튀게 음절 리듬은 sec 주기의 정수배로 맞춤
       const syl = Math.round(rnd(3, 6.5) * sec) / sec, phr = Math.max(1, Math.round(rnd(0.15, 0.4) * sec)) / sec;
-      const ph = Math.random() * 6.28, php = Math.random() * 6.28, amp = rnd(0.4, 1), off = (Math.random() * wn) | 0;
-      let y1 = 0, y2 = 0, e = 0;
+      const ph = Math.random() * 6.28, php = Math.random() * 6.28, amp = rnd(0.4, 1) * 0.9;
+      let p = (Math.random() * wn) | 0, y1 = 0, y2 = 0, e = 0;
       for (let i = 0; i < n; i++) {
-        if ((i & 31) === 0) { const t = i / sr; e = Math.max(0, Math.sin(2 * Math.PI * syl * t + ph)) ** 2 * (0.5 + 0.5 * Math.sin(2 * Math.PI * phr * t + php)); }
-        const y = W[(i + off) % wn] * (1 - r) + c * y1 - r * r * y2; y2 = y1; y1 = y;
-        d[i] += y * e * amp * 0.9;
+        if ((i & 31) === 0) { const t = i / sr, sv = Math.sin(2 * Math.PI * syl * t + ph); e = (sv > 0 ? sv * sv : 0) * (0.5 + 0.5 * Math.sin(2 * Math.PI * phr * t + php)) * amp; }
+        const y = W[p] * g0 + c * y1 - r2 * y2; y2 = y1; y1 = y;
+        d[i] += y * e; if (++p === wn) p = 0;
       }
     }
     // 바탕 쉬쉬 소리
-    for (let i = 0; i < n; i++) d[i] = d[i] * 0.5 + W[(i * 7 + ch * 977) % wn] * 0.02;
+    let q = (ch * 977) % wn;
+    for (let i = 0; i < n; i++) { d[i] = d[i] * 0.5 + W[q] * 0.02; q += 7; if (q >= wn) q -= wn; }
   }
   return b;
 }
 // 박수: 짧은 손뼉 펄스를 촘촘히
 function mkApplause(a, sec = 4, rate = 520) {
   const sr = a.sampleRate, n = (sr * sec) | 0, b = a.createBuffer(2, n, sr);
+  const W = E.noise.getChannelData(0), wn = W.length;
   for (let ch = 0; ch < 2; ch++) {
     const d = b.getChannelData(ch), m = (rate * sec) | 0;
+    let o = (Math.random() * wn) | 0;
     for (let k = 0; k < m; k++) {
-      const i0 = (Math.random() * (n - 400)) | 0, A = rnd(0.15, 1), len = (rnd(0.002, 0.006) * sr) | 0;
-      let lp = 0; const c = rnd(0.3, 0.7);
-      for (let j = 0; j < len * 3; j++) { lp += ((Math.random() * 2 - 1) - lp) * c; d[i0 + j] += (lp - (Math.random() * 2 - 1) * 0.2) * A * Math.exp(-j / len) * 0.5; }
+      const i0 = (Math.random() * (n - 400)) | 0, len = (rnd(0.002, 0.006) * sr) | 0, L = len * 3, c = rnd(0.3, 0.7), dk = Math.exp(-1 / len);
+      let lp = 0, env = rnd(0.15, 1) * 0.5;
+      if (o + 2 * L >= wn) o = (Math.random() * (wn - 2 * L - 1)) | 0;
+      for (let j = 0; j < L; j++) { lp += (W[o + j] - lp) * c; d[i0 + j] += (lp - W[o + L + j] * 0.2) * env; env *= dk; }
+      o += 2 * L;
     }
   }
   return b;

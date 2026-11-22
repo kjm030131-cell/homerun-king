@@ -47,7 +47,8 @@ if (uHatC.w > 0.5 && vRP.y > uHatC.y - 0.01) {
 varying vec3 vRP; varying vec3 vRN;
 uniform vec3 uJersey; uniform vec3 uPants; uniform vec3 uSock; uniform vec4 uTintP; uniform float uSockH; uniform float uTintOn;
 uniform sampler2D uMask; uniform float uMaskOn; uniform sampler2D uDecal; uniform vec4 uDecalP;`)
-      .replace('#include <map_fragment>', `#include <map_fragment>
+      // [model 11-19] 몸 색이 정점 색(COLOR_0)이라 팀 색 입히기는 정점 색이 곱해진 뒤(color_fragment)에
+      .replace('#include <color_fragment>', `#include <color_fragment>
 if (uTintOn > 0.5) {
   vec3 c0 = diffuseColor.rgb;
   float mx = max(c0.r, max(c0.g, c0.b)), mn = min(c0.r, min(c0.g, c0.b));
@@ -316,6 +317,9 @@ export class Character {
       if (this.lo) { this.lo.visible = far; this.hi.visible = !far; }
       every = !inView ? BODY.hiddenUpdate : far ? BODY.farUpdate : 1;
     }
+    // [net] 'N 프레임마다'는 fps 가 30 근처로 떨어지면(맥북 에어) 먼 선수 동작이 15Hz·화면 밖이 5Hz 로 뚝뚝 끊겼음 →
+    //       fps 에 맞춰 N 을 줄임(60fps 에선 전과 같음, 30fps 면 먼 선수 매 프레임·화면 밖 3프레임마다 = 둘 다 같은 초당 횟수)
+    if (every > 1 && FR.fk < 1) every = Math.max(1, Math.round(every * FR.fk));
     const run = every <= 1 || ((FR.n + this.phase) % every) === 0 || !this.ran;
     if (run) {
       this.mixer.update(this.acc); this.acc = 0; this.ran = true;
@@ -332,14 +336,18 @@ export class Character {
     this.lookW += ((this.lookReq ?? 0) - this.lookW) * (1 - Math.exp(-8 * dt));
     if (this.lookW > 0.01) any = true;
     if (!any) return;
-    this.root.updateMatrixWorld(true);
+    // [net] root.updateMatrixWorld(true)(뼈 53개+장비 전체)를 지움 — twoBoneIK·_look 의 getWorldPosition/Quaternion 이 필요한 부모 사슬만 갱신함 (qa 요청: 심판 look 이 상시라 매 프레임 전체 갱신이었음)
     const B = this.bones;
     for (const [s, n] of [['L', 'Left'], ['R', 'Right']]) {
       const w = this.ikW[s]; if (w <= 0.01) continue;
       const u = B[n + 'Arm'], l = B[n + 'ForeArm'], h = B[n + 'Hand'];
       if (u && l && h) twoBoneIK(u, l, h, this.ikT[s], w);
     }
-    if (this.lookW > 0.01 && B.Head) this._look(B.Head, this.lookT, this.lookW);
+    if (this.lookW > 0.01 && B.Head) {
+      // [anim 11-19] 목·머리에 나눠서 돌림(목 45% → 머리 나머지, 전체 최대 45°). 머리 뼈 하나로 65°까지 돌리면 목 피부가 늘어나 얼굴이 일그러져 보였음
+      if (B.Neck) this._look(B.Neck, this.lookT, this.lookW * 0.45, 45, B.Head);
+      this._look(B.Head, this.lookT, this.lookW, 30);
+    }
   }
   _blob() {
     const h = this.bones.Hips; if (!h || !this.blob) return;
@@ -363,11 +371,16 @@ export class Character {
     B.visible = true;
   }
   // 머리가 목표를 보게(최대 65°). 얼굴 앞 방향(머리 뼈 로컬)은 T포즈에서 미리 계산(lib.faceLocal)
-  _look(head, target, w) {
+  // bone 을 돌려 얼굴(머리 뼈 기준 faceLocal)이 목표를 보게. faceBone 을 주면 그 뼈(머리)의 얼굴 방향을 기준으로 bone(목)을 돌림
+  _look(head, target, w, limDeg = 45, faceBone = null) {
     head.getWorldQuaternion(_qa); head.getWorldPosition(_a);
-    const face = _v1.copy(this.lib.faceLocal).applyQuaternion(_qa).normalize();
+    const fq = faceBone ? faceBone.getWorldQuaternion(_qb) : _qa;
+    const face = _v1.copy(this.lib.faceLocal).applyQuaternion(fq).normalize();
+    if (faceBone) faceBone.getWorldPosition(_a);
     const want = _v2.subVectors(target, _a); if (want.lengthSq() < 1e-6) return; want.normalize();
-    const a = ang(face, want), lim = 65 * DEG;
+    // 위아래는 덜 돌게(고개를 과하게 젖히면 턱·목이 늘어남)
+    want.y = face.y + (want.y - face.y) * 0.55; want.normalize();
+    const a = ang(face, want), lim = limDeg * DEG;
     if (a > lim) want.lerpVectors(face, want, lim / a).normalize();
     _q1.setFromUnitVectors(face, want);
     _q2.identity().slerp(_q1, w);
@@ -450,6 +463,7 @@ export class Character {
   // 렌더 직전 한 번(skinned.js syncAllSkins 에서 부름): 다음 프레임 컬링·LOD 판단용
   static frame(camera) {
     FR.n++;
+    { const t = performance.now(), d = FR.t0 ? Math.min(0.1, (t - FR.t0) / 1000) : 1 / 60; FR.t0 = t; FR.dtE = (FR.dtE || 1 / 60) + (d - (FR.dtE || 1 / 60)) * 0.05; FR.fk = Math.min(1, (1 / 60) / FR.dtE); } // [net] 프레임 시간 평균 → 갱신 간격 배율
     if (!camera) { FR.has = false; return; }
     camera.updateMatrixWorld();
     _pm.multiplyMatrices(camera.projectionMatrix, camera.matrixWorldInverse);
