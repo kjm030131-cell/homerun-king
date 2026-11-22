@@ -189,7 +189,7 @@ if (want('speed')) {
   const page = await open(21);
   await start(page, { rules: 'real', mode: 'practice' });
   await until(page, "s.ph === 'pitch' && H.cam() !== 'intro'", 40);
-  const res = await page.evaluate(() => {
+  const res = await page.evaluate((HITS) => {
     const H = window.__hr, C = H.camera, Q = window.__qa;
     const win = [[0, 0.3], [0.3, 0.8], [0.8, 2.4]];
     const acc = win.map(() => [0, 0]), accD = win.map(() => [0, 0]); // [실제 px, 고정 px] · accD = 데드존 카메라가 켜진 프레임만
@@ -197,7 +197,7 @@ if (want('speed')) {
     const proj = (cam, p) => { const v = p.clone().project(cam); return [(v.x + 1) / 2 * innerWidth, (1 - v.y) / 2 * innerHeight, v.z]; };
     const ballM = () => (H.ball && H.ball.visible ? H.ball : null);
     Q.bot.on = true; Q.bot.swingP = 1;
-    for (let i = 0; i < 60 * 600 && n < 14; i++) {
+    for (let i = 0; i < 60 * 1800 && n < HITS; i++) {
       window.__qaStep(1 / 60, { render: 0 });
       if (H.cam() === 'intro') dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true }));
       const s = H.S(), L = H.lct(), tc = performance.now() / 1000 - L;
@@ -224,7 +224,7 @@ if (want('speed')) {
     Q.bot.on = false;
     const R = (A) => A.map(([x, y], i) => [win[i].join('~'), y ? +(x / y).toFixed(3) : null, Math.round(y)]);
     return { hits: n, ratio: R(acc), deadzoneOnly: R(accD) };
-  });
+  }, +(opt.hits || 40));
   console.log('[cam] 공 속도(실제 ÷ 고정 카메라):', JSON.stringify(res));
   report.speed = res;
   await page.close();
