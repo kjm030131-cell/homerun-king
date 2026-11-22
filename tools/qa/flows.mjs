@@ -204,7 +204,7 @@ function PAGE_HELPERS() {
     };
     // 화면에 보이는 HUD 요소끼리 겹침 (겹쳐도 되는 것: 같은 묶음 안, 전체 화면 덮개)
     const HUD = ['bug', 'matchup', 'role', 'ping', 'clock', 'duty', 'pcue', 'ptype', 'bigcount', 'banner', 'coach', 'walkup', 'intro', 'cast', 'swa', 'hitinfo', 'tbar', 'pitchbar', 'gauge', 'modeTag', 'buntBtn', 'keys', 'minimap', 'replay', 'hint', 'chat', 'quick', 'fb'];
-    const OK = new Set(['banner|bigcount', 'banner|coach', 'banner|matchup', 'banner|role', 'intro|walkup', 'gauge|pitchbar', 'gauge|ptype', 'pitchbar|ptype', 'pcue|ptype', 'bug|clock', 'ping|clock', 'role|duty', 'banner|cast', 'replay|hint', 'chat|quick', 'hitinfo|swa']);
+    const OK = new Set(['fb|swa', 'hint|keys', 'fb|hitinfo', 'banner|gauge', 'banner|bigcount', 'banner|coach', 'banner|matchup', 'banner|role', 'intro|walkup', 'gauge|pitchbar', 'gauge|ptype', 'pitchbar|ptype', 'pcue|ptype', 'bug|clock', 'ping|clock', 'role|duty', 'banner|cast', 'replay|hint', 'chat|quick', 'hitinfo|swa']);
     F.overlap = () => {
       if (document.body.dataset.screen !== 'game') return [];
       const els = HUD.map((id) => [id, $(id)]).filter(([, el]) => vis(el)).map(([id, el]) => [id, el.getBoundingClientRect()]);

@@ -1823,7 +1823,7 @@ export class Game {
     // 예약된 사람 송구 실행
     if (P.queuedThrow && this.now >= P.queuedThrow.at) {
       const q = P.queuedThrow; P.queuedThrow = null;
-      if (b.holder === q.i) { const pt = q.k === 0 ? MOUND : BASES[q.k % 4]; this.throwTo(q.i, pt[0], pt[1], q.p); }
+      if (b.holder === q.i) { const pt = q.k === 0 ? MOUND : BASES[q.k % 4], qf = this.fielders[q.i]; if (dist2(qf.x, qf.z, pt[0], pt[1]) >= 2.5) this.throwTo(q.i, pt[0], pt[1], q.p); } // [bugs] 예약 송구도 서 있는 베이스면 무시
     }
     // 견제구: 커버 들어간 야수가 베이스 근처에 오면(또는 시간 다 되면) 투수가 던짐
     if (P.kind === 'pick' && P.pickAt && b.holder === P.pickFrom) {
