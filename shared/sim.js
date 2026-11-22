@@ -151,8 +151,8 @@ export function inZone(x, y) {
 // ═════════════ 타격 판정 ═════════════
 // dt = 스윙시각-도달시각(초, 음수=빠름), ax/ay = (배트중심-공) 오차(m)
 export const SWING = {
-  contact: { W: 0.11, R: 0.22, pow: 0.98, lift: 9 },
-  power: { W: 0.085, R: 0.17, pow: 1.08, lift: 18 },
+  contact: { W: 0.11, R: 0.22, pow: 0.98, lift: 12 }, // [11-22] 9→12·18→20: CPU 타구 땅볼 50%→MLB 43%
+  power: { W: 0.085, R: 0.17, pow: 1.08, lift: 20 },
   bunt: { W: 0.3, R: 0.32 },
 };
 // 사람 타자 타격 난이도: 판정 폭 배율 / 공 체감 속도 배율 (0 쉬움, 1 보통, 2 어려움)
@@ -180,10 +180,16 @@ export function evalSwing(mode, dt, ax, ay, pitchV = 40, ease = 1, human = false
   let q = Math.pow(qt, 0.5) * Math.pow(qa, 0.6);
   if (human) q = 1 - (1 - q) * hq; // 사람 타자: 맞힌 공의 질을 조금 후하게 (같은 실수라도 타구가 덜 죽음)
   if (q < 0.2 || (qt < 0.3 && Math.random() < 0.6)) return { v: rand(14, 24), launch: rand(25, 70), spray: (Math.random() < 0.5 ? -1 : 1) * rand(60, 125), q, foul: true };
+  // [11-22] CPU 타자 파울: 실제 메이저는 배트에 맞은 공의 절반 가까이가 파울(뒤로 튀는 공·라인 밖으로 휘는 공). 예전엔 13%라 카운트 싸움이 없었음
+  if (!human && Math.random() < 0.3 + 0.35 * (1 - qt)) {
+    const back = Math.random() < 0.45; // 뒤(백네트)로 / 라인 밖으로
+    return back ? { v: rand(18, 34), launch: rand(15, 60), spray: (Math.random() < 0.5 ? -1 : 1) * rand(100, 170), q, foul: true }
+      : { v: rand(24, 42), launch: rand(-5, 45), spray: (dt < 0 ? 1 : -1) * rand(47, 80), q, foul: true };
+  }
   // 배트 끝/손잡이에 맞으면 빗맞은 타구
   if (qa < 0.3 && Math.random() < (human ? 0.55 : 0.7)) return { v: rand(18, 30), launch: ay > 0 ? rand(-20, 5) : human ? rand(18, 55) : rand(45, 75), spray: clamp(-(dt / M.W) * 40 + gauss() * 12, -78, 78), q: q * 0.5 };
   // 타구 속도: 메이저리그 인플레이 타구 분포(중앙값 ~146km/h, 상위10% ~167km/h, 최고 ~190km/h)에 맞춤
-  const v = (31.5 + 20.2 * q) * M.pow + 0.1 * (pitchV - 35) + rand(-1.2, 1.2);
+  const v = (31.5 + 20.2 * q) * M.pow + 0.18 * (pitchV - 35) + rand(-1.2, 1.2);
   // 발사각: 배트 원 중심이 공보다 아래(ay<0)면 공 아랫면을 때려 뜸, 위(ay>0)면 윗면을 때려 땅볼.
   // 사람 타자는 원 중심에 맞히면 라인드라이브~뜬공 경계(LIFT_H), 원 반지름의 절반만큼 아래를 맞히면 확실한 뜬공이 되게 기울기를 키움
   const lift = human ? (LIFT_H[mode] ?? M.lift) : M.lift;
@@ -237,7 +243,7 @@ export function evalPCI(mode, dt, ax, ay, pitchV = 40, ease = 1, hq = 0.85, pull
   if (Math.random() < pf) return { v: rand(14, 26), launch: rand(20, 70), spray: (dt < 0 ? 1 : -1) * rand(55, 125), q: q * 0.5, foul: true };
   // 커서 맨 가장자리(손잡이·배트 끝): 빗맞은 약한 타구
   if (J.n > 0.88 && Math.random() < 0.5) return { v: rand(19, 31), launch: J.ny > 0 ? rand(-18, 4) : rand(25, 58), spray: clamp(-(dt / J.W) * 40 + gauss() * 12, -78, 78), q: q * 0.5 };
-  const v = (31.5 + 20.2 * q) * P.pow + 0.1 * (pitchV - 35) + rand(-1.2, 1.2);
+  const v = (31.5 + 20.2 * q) * P.pow + 0.18 * (pitchV - 35) + rand(-1.2, 1.2);
   // 발사각: 커서 중심 = LIFT_H(정타 12°·강타 21°), 공이 커서 위쪽(ny<0)일수록 뜸, 아래쪽일수록 땅볼 (11-19 '뜬공 기준 명확' 피드백 값 그대로)
   let launch = clamp((LIFT_H[mode] ?? 12) - J.ny * LIFT_SLOPE_H + gauss() * LIFT_NOISE_H, -25, 70);
   if (q > 0.55) launch += (SWEET_H - launch) * Math.min(pull, (q - 0.55) * 0.9); // 정타는 스윗스팟 쪽으로 살짝 모음
@@ -344,35 +350,51 @@ export function integrate(b, dt, world = true, out = null) { // [net] out: 재�
       }
     }
   }
-  // 지면
+  // 지면 — [11-22 물리] 강체 구 충돌 모델: 수직 반발 + 접점 미끄럼 마찰 충격량 + 스핀 피드백
+  //  접점 미끄럼 속도 slip = v_h + ω × (0,-r,0) = (vx + ωz·r, vz − ωx·r)
+  //  마찰 충격량 Jt = min(μ(1+e)·vin, |slip|/3.5)  (야구공 I ≈ 0.4mr² → 미끄럼이 다 없어지면 '구름' 상태, 속도 2/7 손실)
+  //  → 탑스핀 땅볼은 낮고 빠르게 뻗고, 백스핀(뜬공·찍힌 공)은 바운드 때 브레이크가 걸려 '죽는' 실제 바운드
   if (b.y <= BALL_R) {
     b.y = BALL_R;
-    const surf = surface(b.x, b.z);
+    const surf = surface(b.x, b.z), dirt = surf === 'dirt';
     ev.surf = surf;
-    const vh = Math.hypot(b.vx, b.vz);
+    const R_ = BALL_R;
     if (b.vy < 0) {
       ev.landed = true;
       const vin = -b.vy;
       ev.impact = vin;
-      const e = (surf === 'dirt' ? 0.42 : 0.36) * (vin > 15 ? 0.82 : 1);
-      const mu = surf === 'dirt' ? 0.38 : 0.46;
+      // 반발계수: 흙이 잔디보다 튀고, 세게 떨어질수록 낮아짐(실측 0.5→0.3)
+      const e = clamp((dirt ? 0.56 : 0.5) - (dirt ? 0.011 : 0.013) * vin, dirt ? 0.3 : 0.24, 0.56);
+      const mu = dirt ? 0.42 : 0.5;
       b.vy = vin * e;
-      if (vh > 0) {
-        // 마찰 충격량: 가파르게 떨어질수록 수평속도 손실 큼. 스핀이 방향 성분에 영향
-        const spinBoost = (b.sx * b.vz - b.sz * b.vx) / (vh || 1) * 0.004; // 탑스핀 → 가속, 백스핀 → 감속
-        const dv = Math.min(vh * 0.5, mu * (1 + e) * vin * 0.55) - spinBoost;
-        const s = clamp((vh - dv) / vh, 0.35, 1.08);
-        b.vx *= s; b.vz *= s;
+      const slx = b.vx + (b.sz || 0) * R_, slz = b.vz - (b.sx || 0) * R_, sl = Math.hypot(slx, slz);
+      if (sl > 1e-6) {
+        const Jt = Math.min(mu * (1 + e) * vin, sl / 3.5), ux = slx / sl, uz = slz / sl;
+        b.vx -= Jt * ux; b.vz -= Jt * uz;
+        b.sx = (b.sx || 0) + 2.5 * Jt * uz / R_; b.sz = (b.sz || 0) - 2.5 * Jt * ux / R_;
       }
-      b.sx *= 0.4; b.sy *= 0.3; b.sz *= 0.4;
-      if (b.vy < 1.3) b.vy = 0; // 잔 바운드는 구르기로 (떨림 방지)
+      b.sy *= 0.5; // 옆 회전(사이드스핀)은 바닥에 닿으면 대부분 사라짐
+      // 흙 바운드는 살짝 불규칙(실제 '이레귤러 바운드') — 결정적이면 매 경기 같은 바운드라 어색
+      // (위치 해시로 정함: 클라 보간도 같은 integrate 를 돌리므로 Math.random 이면 서버와 어긋남)
+      if (dirt && vin > 2.5) { const hs = Math.sin(Math.round(b.x * 4) * 12.9898 + Math.round(b.z * 4) * 78.233) * 43758.5453, j = (hs - Math.floor(hs) - 0.5) * 0.07; const c = Math.cos(j), sn = Math.sin(j); const vx = b.vx; b.vx = vx * c - b.vz * sn; b.vz = vx * sn + b.vz * c; }
+      if (b.vy < 1.0) b.vy = 0; // 잔 바운드는 구르기로 (떨림 방지)
       if (b.state === 'air' || b.state === 'thrown') b.state = 'ground';
     }
     if (b.vy === 0) {
-      // 굴러감: 구름저항 + 속도비례 저항
-      const dec = (surf === 'dirt' ? 2.6 : 4.6) + (surf === 'dirt' ? 0.06 : 0.12) * vh;
-      const ns = Math.max(0, vh - dec * dt);
-      if (vh > 0) { b.vx *= ns / vh; b.vz *= ns / vh; }
+      const vh = Math.hypot(b.vx, b.vz);
+      const slx = b.vx + (b.sz || 0) * R_, slz = b.vz - (b.sx || 0) * R_, sl = Math.hypot(slx, slz);
+      if (sl > 0.25 && vh > 0.05) {
+        // 미끄러지는 중: 운동 마찰(μk·g)이 속도를 줄이면서 구름 회전을 만듦
+        const mk = (dirt ? 0.38 : 0.45) * G, dJ = Math.min(mk * dt, sl / 3.5), ux = slx / sl, uz = slz / sl;
+        b.vx -= dJ * ux; b.vz -= dJ * uz;
+        b.sx = (b.sx || 0) + 2.5 * dJ * uz / R_; b.sz = (b.sz || 0) - 2.5 * dJ * ux / R_;
+      } else {
+        // 구름: 구름저항(잔디 > 흙) + 잔디 결·공기 저항(속도비례). 회전은 구름 조건에 맞춤
+        const dec = (dirt ? 2.5 : 4.4) + (dirt ? 0.06 : 0.13) * vh;
+        const ns = Math.max(0, vh - dec * dt);
+        if (vh > 0) { b.vx *= ns / vh; b.vz *= ns / vh; }
+        b.sx = b.vz / R_; b.sz = -b.vx / R_; b.sy *= 0.9;
+      }
     }
   }
   return ev;
@@ -933,6 +955,7 @@ export class Game {
         // 볼 배합: 같은 구종을 연달아 던지면 타자가 눈에 익힘(헛스윙↓·정타↑), 완급(속구↔느린 공) 바꾸면 헛스윙↑
         const sq = R.seqEffect ? this.seqFactor(type) : 1;
         whiff *= sq;
+        whiff *= 0.62; // [11-22] 스윙당 헛스윙 46% → ~28% (MLB 25%, 게임 재미로 조금 높게) — 파울이 실제처럼 늘어서 삼진이 과했음
         if (mode === 'bunt') whiff = 0.12;
         let dt, ax, ay;
         if (Math.random() < whiff) { // 헛스윙: 타이밍이 크게 어긋남
