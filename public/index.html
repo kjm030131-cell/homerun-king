@@ -240,6 +240,7 @@ input,select{font:inherit;color:inherit;user-select:text;-webkit-user-select:tex
 .mu b{color:var(--steel);font-weight:700;font-size:12px;width:26px}
 .mu span{font-weight:700;flex:1;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:130px}
 .mu em{font-style:normal;font-family:var(--num);font-weight:600;color:var(--steel);font-size:14px}
+#windArr{font-style:normal;font-weight:800;color:#7fd3ff;font-size:16px;display:inline-block;transition:transform .4s}
 .sta{width:56px;height:5px;background:rgba(255,255,255,.12);overflow:hidden}
 .sta i{display:block;height:100%;background:var(--turf-t);transform-origin:left;transition:transform .4s}
 .sta i.low{background:var(--seam)}
@@ -652,6 +653,7 @@ table.ls tr.sep th{padding-top:18px;border-top:2px solid var(--line2)}
   <div id="matchup">
     <div class="mu"><b>타자</b><span id="muBat">-</span><em id="muBatS"></em></div>
     <div class="mu" id="muP"><b>투수</b><span id="muPit">CPU</span><div class="sta"><i id="staBar"></i></div><em id="muPc">0구</em></div>
+    <div class="mu hide" id="muW"><b>바람</b><span id="windTxt">무풍</span><i id="windArr" aria-hidden="true">↑</i><em id="windSp"></em></div>
   </div>
   <div id="role"></div>
   <div id="ping"></div>

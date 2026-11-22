@@ -278,20 +278,25 @@ export function battedBall(x, y, res) {
 const AIR_K = 0.5 * 1.19 * Math.PI * 0.0366 * 0.0366 / 0.145;
 export let AERO_CD = 0.28, AERO_CL = 0.8, AERO_CDV = 0.012; // 스탯캐스트 비거리·체공시간에 맞춘 값
 export let SPIN_A = -1100, SPIN_B = 110; // 비거리+체공시간 둘 다 스탯캐스트 평균에 맞춘 값 (직선타 15° 100mph: 92m · 2.8초)
+// [11-22] 바람(m/s, 월드 x·z): 경기마다 정해짐. 공기에 대한 상대 속도로 항력·양력 계산 → 외야로 부는 바람이면 뜬공이 더 뻗음
+// 모듈 전역이라 서버(여러 방이 한 isolate)에선 Game.tick 마다 자기 방 바람으로 다시 맞추고, 클라는 스냅샷 s.wd 로 맞춤
+export let WIND_X = 0, WIND_Z = 0;
+export function setWind(w) { WIND_X = (w && w[0]) || 0; WIND_Z = (w && w[1]) || 0; }
 export function setAero(cd, cl, cdv = 0, sa, sb) { AERO_CD = cd; AERO_CL = cl; AERO_CDV = cdv; if (sa != null) { SPIN_A = sa; SPIN_B = sb; } }
 function aero(b, dt) {
-  const v = Math.hypot(b.vx, b.vy, b.vz);
+  const ux = b.vx - WIND_X, uz = b.vz - WIND_Z; // 공기에 대한 상대 속도
+  const v = Math.hypot(ux, b.vy, uz);
   if (v < 0.3) return;
   const w = Math.hypot(b.sx || 0, b.sy || 0, b.sz || 0);
   const Sp = w > 0 ? 0.0366 * w / v : 0;
   const cd = Math.max(0.2, AERO_CD - AERO_CDV * (v - 40)) + 0.1 * Math.min(Sp, 0.3); // 빠를수록 항력계수↓(실측), 스핀 많을수록 약간↑
   const kd = AIR_K * cd * v;
-  let ax = -kd * b.vx, ay = -kd * b.vy, az = -kd * b.vz;
+  let ax = -kd * ux, ay = -kd * b.vy, az = -kd * uz;
   if (Sp > 0 && b.state === 'air') {
     const cl = AERO_CL / (2.32 + 0.4 / Sp), kl = AIR_K * cl * v / w;
-    ax += kl * (b.sy * b.vz - b.sz * b.vy);
-    ay += kl * (b.sz * b.vx - b.sx * b.vz);
-    az += kl * (b.sx * b.vy - b.sy * b.vx);
+    ax += kl * (b.sy * uz - b.sz * b.vy);
+    ay += kl * (b.sz * ux - b.sx * uz);
+    az += kl * (b.sx * b.vy - b.sy * ux);
     const sd = Math.exp(-dt / 30); b.sx *= sd; b.sy *= sd; b.sz *= sd;
   }
   b.vx += ax * dt; b.vy += ay * dt; b.vz += az * dt;
@@ -636,6 +641,13 @@ export class Game {
   say(text, big = true) { this.msg = text; this.msgBig = big; this.msgId++; }
 
   // ───────── 경기 흐름 ─────────
+  // [11-22] 바람: 무풍~6m/s, 방향 아무 쪽. 홈런더비·연습은 무풍(기록 비교가 공정하게)
+  pickWind() {
+    if (this.mode !== 'game') return [0, 0];
+    const r = Math.random(), sp = r < 0.18 ? 0 : r < 0.6 ? rand(0.8, 2.5) : r < 0.9 ? rand(2.5, 4.5) : rand(4.5, 6.2);
+    const a = Math.random() * Math.PI * 2;
+    return [r2(Math.sin(a) * sp), r2(Math.cos(a) * sp)];
+  }
   start() {
     this.phase = 'starting';
     this.score = [0, 0];
@@ -652,6 +664,7 @@ export class Game {
     this.lastPitch = null; this.lastHit = null; this.hrEv = null;
     this.innLim = 0; this.startT = this.now; this.mercy = false;
     if (this.R.forceAutoField) this.set.fieldCtl = 'auto';
+    this.wind = this.pickWind();
     for (const p of this.players.values()) p.ready = false;
     this.ev('modeChange', { rules: this.set.rules, mode: this.mode, innings: this.set.innings, start: 1 });
     this.emitLobby();
@@ -1624,6 +1637,7 @@ export class Game {
   // ───────── 틱 ─────────
   tick(dt) {
     this.now += dt;
+    setWind(this.wind);
     // 포수 미트에 공 들어감 (안 맞은 투구): 사운드 '팡' · 포수 포구 모션용
     if (this.pitchCatch && this.now >= this.pitchCatch.at) {
       const pc = this.pitchCatch; this.pitchCatch = null;
@@ -2317,7 +2331,7 @@ export class Game {
     const age = (t) => (this.now - t < 3 ? r2(this.now - t) : -1);
     s.mode = this.mode;
     s.inn = this.inning; s.half = this.half; s.sc = this.score; s.ls = this.line; s.hits = this.hits; s.errs = this.errs;
-    s.tn = this.set.teams; s.cl = this.set.clubs; s.tod = this.set.tod; s.he = this.set.hitEase; s.fc = this.set.fieldCtl;
+    s.tn = this.set.teams; s.cl = this.set.clubs; s.tod = this.set.tod; s.wd = this.wind || [0, 0]; s.he = this.set.hitEase; s.fc = this.set.fieldCtl;
     s.cnt = [this.balls, this.strikes, this.outs];
     if (this.play && this.phase === 'live') { if (this.play.rl) s.rl = [this.play.rl.ci, r2(this.play.rl.x), r2(this.play.rl.z), this.play.rl.k]; s.ch = this.play.chaser ?? -1; const c = this.play.cov; s.cv = c ? [c[1] ?? -1, c[2] ?? -1, c[3] ?? -1, c[4] ?? -1] : null; }
     if (this.now - (this.pgAt || -9) > 2) { this.pgAt = this.now; s.pg = [...this.players.values()].filter((p) => p.conn && p.team !== 'spec').map((p) => [p.name, p.ping | 0]); }
