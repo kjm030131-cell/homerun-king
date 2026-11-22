@@ -165,8 +165,10 @@ if (want('field')) {
 if (want('run')) {
   const page = await open(16);
   await start(page, { rules: 'real', mode: 'game', inn: '1', pos: 'SS', team: 'away' });
-  console.log('[cam] 공격 주자 있음', await until(page, "s.ph === 'pitch' && H.getRole().batter && s.rn && s.rn.length > 0 && H.cam() !== 'intro'", 400, true));
-  await role(page, 'r.batter = false; r.runner = 1; return r;'); // 1루 주자인 나(동료가 타석)
+  console.log('[cam] 공격 타석', await until(page, "s.ph === 'pitch' && H.getRole().batter && H.cam() !== 'intro'", 120, false));
+  // 1루에 '나'인 주자를 넣고(동료가 타석인 상황), 타자 역할만 끔
+  await page.evaluate(() => { const g = window.__hr.game; const r = g.mkRunner(1, false); r.pid = 'me'; r.target = 1; r.start = 1; r.forced = false; r.batter = false; g.runners.push(r); });
+  await role(page, 'r.batter = false; return r;');
   await stepS(page, 1.2);
   await shot(page, 'run-wait');
   await role(page, 'r.batter = false; r.offense = false; r.spec = true; return r;');
@@ -190,7 +192,7 @@ if (want('speed')) {
   const res = await page.evaluate(() => {
     const H = window.__hr, C = H.camera, Q = window.__qa;
     const win = [[0, 0.3], [0.3, 0.8], [0.8, 2.4]];
-    const acc = win.map(() => [0, 0]); // [실제 px, 고정 px]
+    const acc = win.map(() => [0, 0]), accD = win.map(() => [0, 0]); // [실제 px, 고정 px] · accD = 데드존 카메라가 켜진 프레임만
     let n = 0, lastL = -1, F = null, prev = null;
     const proj = (cam, p) => { const v = p.clone().project(cam); return [(v.x + 1) / 2 * innerWidth, (1 - v.y) / 2 * innerHeight, v.z]; };
     const ballM = () => (H.ball && H.ball.visible ? H.ball : null);
@@ -215,12 +217,13 @@ if (want('speed')) {
         // 실제: 이번 프레임 카메라에서 본 공 - 지난 프레임 카메라에서 본 지난 공 (카메라 회전이 공 움직임을 상쇄하면 작아짐)
         const da = Math.hypot(a[0] - prev.a[0], a[1] - prev.a[1]), df = Math.hypot(f[0] - prev.f[0], f[1] - prev.f[1]);
         const wi = win.findIndex(([x, y]) => tc >= x && tc < y);
-        if (wi >= 0 && inF) { acc[wi][0] += da; acc[wi][1] += df; }
+        if (wi >= 0 && inF) { acc[wi][0] += da; acc[wi][1] += df; if (window.__camRig && window.__camRig.direct) { accD[wi][0] += da; accD[wi][1] += df; } }
       }
       prev = { a, f };
     }
     Q.bot.on = false;
-    return { hits: n, ratio: acc.map(([x, y], i) => [win[i].join('~'), y ? +(x / y).toFixed(3) : null, Math.round(y)]) };
+    const R = (A) => A.map(([x, y], i) => [win[i].join('~'), y ? +(x / y).toFixed(3) : null, Math.round(y)]);
+    return { hits: n, ratio: R(acc), deadzoneOnly: R(accD) };
   });
   console.log('[cam] 공 속도(실제 ÷ 고정 카메라):', JSON.stringify(res));
   report.speed = res;

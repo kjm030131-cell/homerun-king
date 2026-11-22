@@ -750,6 +750,8 @@ table.ls tr.sep th{padding-top:18px;border-top:2px solid var(--line2)}
     <div><label class="lbl">그래픽</label><div class="seg" id="gq"><button data-v="low">빠르게</button><button data-v="mid">보통</button><button data-v="high">고품질</button></div><p class="note" style="margin-top:6px">노트북이 버벅이면 '빠르게'. 그림자·빛 번짐·해상도가 낮아져. 4초 평균 38fps 밑이면 자동으로 한 단계 낮춰.</p></div>
     <div><label class="lbl">화면 흔들림</label><div class="seg" id="shake"><button data-v="1">켜기</button><button data-v="0">끄기</button></div></div>
     <div><label class="lbl">하이라이트 리플레이 (홈런·호수비)</label><div class="seg" id="replayS"><button data-v="1">켜기</button><button data-v="0">끄기</button></div></div>
+    <div><label class="lbl">시점 거리 (경기 중 Z)</label><div class="seg" id="camDistS"><button data-v="0">가까이</button><button data-v="1">기본</button><button data-v="2">멀리</button></div><p class="note" style="margin-top:6px">가까이 = 존·투수가 크게, 수비 3인칭은 내 선수에 붙어서. 멀리 = 넓게.</p></div>
+    <div><label class="lbl">타자 시점 높이</label><div class="seg" id="batHS"><button data-v="0">낮게</button><button data-v="1">기본</button><button data-v="2">높게</button></div></div>
     <div><label class="lbl">fps 표시 (오른쪽 위)</label><div class="seg" id="fpsS"><button data-v="1">켜기</button><button data-v="0">끄기</button></div></div>
     <div class="setgrp">소리</div>
     <div><label class="lbl" for="vol">전체 음량</label><div class="range"><input id="vol" type="range" min="0" max="100" value="80"><output id="volV">80</output></div></div>
@@ -781,7 +783,7 @@ table.ls tr.sep th{padding-top:18px;border-top:2px solid var(--line2)}
       <dt>마우스</dt><dd>사각 커서(PCI)를 공이 올 길목에 맞추기</dd>
       <dt><span class="kbd">좌클릭</span> <span class="kbd">Space</span></dt><dd>정타 스윙 (커서 크고 타이밍 여유)</dd>
       <dt><span class="kbd">우클릭</span> <span class="kbd">F</span></dt><dd>강타 (커서 작고 타이밍 빡빡, 대신 멀리 감) · F를 누르고 있으면 커서가 강타 크기로</dd>
-      <dt><span class="kbd">V</span></dt><dd>타격 시점 전환 (포수 뒤 중계 / 타자 어깨 뒤)</dd>
+      <dt><span class="kbd">V</span></dt><dd>타격 시점 전환 (포수 뒤 중계 / 가까이 — 존 크게)</dd>
     </dl>
     <p><b>타이밍이 먼저</b>: 타이밍이 정확할수록 커서 판정이 넓어져서(최대 1.6배) 대충 맞춰도 맞아. 타이밍이 빗나가면 커서가 정확해도 헛스윙.</p>
     <p>공이 커서의 <b>아래쪽</b>에 맞으면 땅볼, <b>가운데</b>면 라인드라이브, <b>위쪽</b>이면 뜬공 (커서 안의 가로 눈금 두 줄이 경계). 빠르면 당겨치기(좌측), 늦으면 밀어치기(우측).</p>
@@ -796,6 +798,7 @@ table.ls tr.sep th{padding-top:18px;border-top:2px solid var(--line2)}
       <dt>마우스 + <span class="kbd">클릭</span></dt><dd>코스 찍고 게이지 시작</dd>
       <dt><span class="kbd">클릭</span></dt><dd>게이지가 차오르면 한 번 더. 초록 구간에서 멈추면 최고 구속·정확한 제구, 빨강까지 넘기면 더 빠르지만 공이 흔들려</dd>
       <dt><span class="kbd">Q</span></dt><dd>주자 있을 때 견제 (타석당 3번)</dd>
+      <dt><span class="kbd">X</span> (누르고 있기)</dt><dd>주자 보기 — 앞선 주자 쪽으로 고개, 떼면 조준 화면</dd>
     </dl><p>많이 던지면 체력이 떨어져 구속·제구가 나빠져.</p></section>
     <section><h4>수비</h4><dl>
       <dt><span class="kbd">W</span><span class="kbd">A</span><span class="kbd">S</span><span class="kbd">D</span></dt><dd>이동 (투구 전에는 수비 위치 시프트)</dd>
@@ -818,6 +821,7 @@ table.ls tr.sep th{padding-top:18px;border-top:2px solid var(--line2)}
       <dt><span class="kbd">T</span> → <span class="kbd">1</span>~<span class="kbd">8</span></dt><dd>빠른 채팅</dd>
       <dt><span class="kbd">Tab</span></dt><dd>기록판 (누르고 있는 동안)</dd>
       <dt><span class="kbd">H</span></dt><dd>이 조작법</dd>
+      <dt><span class="kbd">Z</span></dt><dd>시점 거리 바꾸기 (가까이 · 기본 · 멀리) — 설정에서도, 타자 시점 높이도 설정에서</dd>
       <dt><span class="kbd">Esc</span></dt><dd>메뉴 (혼자 하기는 일시정지)</dd>
     </dl></section>
   </div>
