@@ -34,7 +34,7 @@
 | disappointed | Defeated | 전체 |
 | throw | Baseball_Pitching(5.2초 버전) | 1.45~2.75초(스트라이드 → 릴리스 → 팔로스루). 야수 송구 클립 받기 전 임시 |
 
-쓰지 않고 원본만 둔 것: Baseball_Hit_2, Pitching(5.2초 버전), Idle_1/Idle_2(타석 대기 변형), Strike(타자가 타석 벗어났다 돌아옴), Step_In, Walk_In/Out, Milling_Idle(타석 밖 대기, 21초). 필요하면 clips.json 에 한 줄 추가.
+~~쓰지 않고 원본만 둔 것~~ → 11-22 [motion] 에서 23개 전부 씀(아래 절).
 
 ### 다음에 받아야 할 Mixamo (아래 3-3 표 이름 그대로, `assets-src/mixamo/` 에 두고 clips.json 에 등록)
 - `run`(Running, In Place 체크) — 지금은 Fast_Run 임시
@@ -67,6 +67,39 @@
 - 먼 선수(26m+, 저폴리): 노멀·거칠기 맵 없는 가벼운 재질 + 그림자 안 그림. 유니폼 색 uniform 은 공유(데칼 텍스처도 선수당 1장으로).
 - 블룸 후처리는 그래픽 '높음'에서만(`client/stadium/look.js`, [perf] 태그). '중간'(기본)은 4x MSAA HalfFloat 후처리 버퍼 + 블룸 5단계를 건너뛰고 바로 그림 → 밤 경기 조명 번짐이 약해짐. 원하면 설정에서 '높음'.
 - 실측은 맥에서: 오른쪽 위 fps (전/후 비교). 그래도 낮으면 다음 후보 = 리플레이 매 프레임 기록 할당, 선수 그림자 전부 끄기, 몸 삼각형 더 줄이기.
+
+### 11-22 [motion] 받은 Mixamo 23개 전부 상황별로 (rb-motion)
+변환은 그대로 `python3 tools/mixamo-retarget.py <클립>` (Blender 필요 없음). 새 클립 8개 + buntStance 재변환, 모두 늦게 받음(EARLY 아님, +0.9MB).
+
+| FBX | 전 | 후 (클립 · 쓰는 곳) |
+|---|---|---|
+| Baseball_Idle / Idle_1 / Idle_2 | batStance/2/3 (타자 해시) | 같음 + 타자별 템포 0.85~1.15 (Idle_1·Idle_2 는 원본 동작이 같음) |
+| Baseball_Step_In | batStepIn — 인트로 컷씬 때만, 제자리 | 타자 바뀔 때 45%, 루트 이동 살림(anchor:end → 끝 자세 = 타석) |
+| Baseball_Walk_In | 없음 | batWalkIn: 타자 바뀔 때 55%(1.3배속, 3.7초) |
+| Baseball_Hit | swing (모든 스윙) | 정타(good·perfect)·이른 타이밍 |
+| Baseball_Hit_1 | powerSwing — **재생 안 됐음**(main.js 가 power 를 안 넘김) | 강타 모드(director 가 swing/localSwing 의 mode 로) |
+| Baseball_Hit_2 | 없음 | swing2(0~1.36): 늦은 타이밍·빗맞음(ok·weak·tip), 나머지는 타자 버릇 |
+| Baseball_Bunt | buntStance (1.2초 정지) | 0.3~1.22 돌아서기 후 마지막 자세 유지 |
+| Baseball_Strike | 없음 | batStrike(1.75~): 헛스윙 삼진 반응(60%) / 헛스윙 40% |
+| Baseball_Walk_Out | 없음 | batWalkOut: 삼진 뒤(anchor:start) — 다음 타자 Walk_In 과 이어짐 |
+| Defeated | disappointed — **재생 안 됐음** | 삼진(루킹 50%·헛스윙 40%), 홈런 맞은 투수, 경기 끝·끝내기 진 팀 |
+| Victory | celebrate (주자 cheer·끝내기) | + 삼진 잡은 투수 주먹(이닝 끝 삼진 항상, 그 외 45%), 경기 끝 이긴 팀(동작 구간 0.9초~부터) |
+| Baseball_Pitching_1 | pitch | 주자 없을 때 기본(투수 70%) |
+| Baseball_Pitching | throw(일부) | + pitch2(0~3.4): 주자 있으면 세트 포지션, 투수 버릇 30%. hold 마커 1.12 수동 |
+| Baseball_Catcher | catcherSquat | + catcherThrow(4.3~6.6, 포수 송구·공 돌려주기), catcherPop(2.4~4.5, 뜬공 잡은 뒤) |
+| Baseball_Umpire | umpireCall — 0.9초에 끊겨 콜 앞부분만 | 콜 0.45초~ 끝까지, 삼진 콜 0.85배속, 투구 중 무릎 짚은 자세(같은 클립 0.22초 정지 = 추가 메모리 0), 루심 아웃 콜 |
+| Baseball_Milling_Idle | 없음 | mill(2.27~7.07): 야수·코치 서 있을 때 가끔 한 번(선수마다 빈도·시작 다름). 주자는 안 함 |
+| Breathing_Idle·Goalkeeper_Idle·Fast_Run·Diving_Save·Running_Slide | idle·ready·run/sprint·dive·slide | 같음. 반복 클립은 시작 위치를 선수마다 무작위(18명 같은 박자 숨쉬기 방지) |
+
+- **director.js**: bus 이벤트(windup·swing·localSwing·contact·miss·strikeCall·out·hr·score·catch·gameEnd·modeChange)를 고정 객체에 기록 → ClipAnimator 가 읽음. 구독만, 판정 안 건드림, 매 프레임 할당 없음.
+- **한 번 재생(shot)·차례(seq)**: 입장·삼진 반응→Walk_Out·주먹·고개 숙임. 새 windup 이 오면 즉시 끊고 대기 자세로 크로스페이드(0.35s).
+- **타이밍**: 스윙 컨택 마커를 '오른손 속도 최대'(배트가 아직 포수 쪽으로 누운 순간) → '배트 수평 방향이 투구 선에 수직이 되는 순간'으로(loader autoMarkers, swing 1.333→1.396, powerSwing 1.45→1.413, swing2 1.085). main.js 가 swingK 0.5 = sim 스윙 시각으로 주므로 화면 배트가 공 위치를 지나는 프레임 = 타격 순간. 투구 변주는 timing.js 시간표 그대로(릴리스 = windup.at+1.85s, 스크린샷: pitch@1.63·pitch2@2.11 = 각 release 마커). 포수 송구 release 0.867 = throwK 0.55.
+- **구종으로 투구 동작을 고르지 않음**(와인드업 모양으로 구종이 보이면 미리보기와 같음).
+- **net 예측(client/net/predict.js)**: 내 투구는 누른 순간 시작 → 서버 windup(주자 정보)이 세트 자세(0.35s) 안에 오면 변주를 다시 고름. 송구·점프·다이빙 예측은 같은 throwK·jumpK·diveK 경로라 그대로.
+- main.js [motion]: 맞힌 순간 타자가 주자로 바뀌어 스윙이 컨택 프레임에서 끊기던 것 → 0.34초 팔로스루까지 타자 표시, 그동안 홈의 주자·떨어진 배트 숨김.
+- 메모리: 원본 애니메이션(e.src)은 `?animlab` 에서만 보관 → 게임 클립 메모리 약 절반. 프레임 비용 같음(game-real 90초 seed 5: 렌더 끔 0.78→0.71ms, 렌더 1.24→1.18ms/프레임, main 대비).
+- 확인 도구: `node tools/qa/clipsheet.mjs <클립> [--marks] [--view=top|front|side|back]` (클립 한 장 보기, 축 표시) · `node tools/qa/motionshots.mjs` (CPU 경기 돌리며 상황별 장면 → `tools/qa/.out/motion-*.png`).
+- 남은 것: 세이프 콜 클립 없음(umpireSafe → 대기), catchHigh/catchLow 없음(IK), 이닝 교대 때 수비 팀이 뛰어 들어가는 동작 없음.
 
 ## 1. 구조
 

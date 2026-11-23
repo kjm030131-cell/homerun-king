@@ -194,7 +194,7 @@ export class ClipAnimator {
       if (isC && D.catchC.fly && since(D.catchC) < 0.6 && this.popSeen !== D.catchC.at) { this.popSeen = D.catchC.at; this._shot('catcherPop', { from: 0.55, fade: 0.15 }); }
     }
     if (c.clip) C.play(c.clip);
-    else if (c.celebrate || (c.ground === undefined && c.jumpK >= 0 && !c.ballW && !c.reachW)) C.play('celebrate', { fade: 0.3 });
+    else if (c.celebrate || (c.ground === undefined && c.jumpK >= 0 && !c.ballW && !c.reachW)) C.play('celebrate', { fade: 0.3, from: 0.9 + rnd(this.seed, 43) * 0.8 }); // [motion] Victory 앞 1초는 가만히 서 있는 구간
     else if (c.diveK >= 0) C.scrubK('dive', c.diveK);
     // 포수 송구는 Baseball_Catcher 의 짧은 팔 송구(일어서며), 야수는 투구 동작 송구
     else if (c.throwK >= 0) C.scrubK(isC && C.has('catcherThrow') ? 'catcherThrow' : 'throw', c.throwK, { fade: isC ? 0.15 : 0.12 });
@@ -345,7 +345,7 @@ export class ClipAnimator {
     this.noFid = true; // 주자는 서성임 없이(타격 직후 홈에서 서성이면 어색)
     if (c.clip) C.play(c.clip);
     else if (c.slideK >= 0) C.scrubK('slide', c.slideK);
-    else if (c.cheer && sp < 0.5) C.play('celebrate', { fade: 0.3 });
+    else if (c.cheer && sp < 0.5) C.play('celebrate', { fade: 0.3, from: 0.9 + rnd(this.seed, 44) * 0.8 });
     else if (this._mood(sp)) { /* 경기 끝 */ }
     else if (sp < 0.4 && c.lead) { C.play('ready', { fade: 0.3 }); this.loco = 'ready'; }
     else this._loco(sp, 'idle');
