@@ -226,7 +226,9 @@ export class ClipAnimator {
     }
     this._fwd(tau >= 0 || sp <= 0.5, dt);
     if (tau >= 0) {
-      if (!this.inPitch) { this.inPitch = true; this.pv = this._pitchVariant(); this._cut(); }
+      if (!this.inPitch) { this.inPitch = true; this.pv = this._pitchVariant(); this.pvAt = D.windup.at; this._cut(); }
+      // [net 예측] 내 투구는 누른 순간(서버 windup 이벤트 전) 시작 → 이벤트(주자 정보)가 세트 자세 동안 오면 그때 변주를 다시 고름
+      else if (this.pvAt !== D.windup.at && tau < PITCH_TL.lift) { this.pvAt = D.windup.at; this.pv = this._pitchVariant(); }
       C.scrubPitch(tau, undefined, this.pv); P.ball.visible = tau < PITCH_TL.release;
     } else {
       this.inPitch = false; this.pk0 = -1;
