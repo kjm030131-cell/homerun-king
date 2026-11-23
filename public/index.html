@@ -763,6 +763,9 @@ body{word-break:keep-all}
 .empty .ecta{display:inline-flex;margin-top:18px;padding:11px 22px;font-weight:900;font-size:14px;background:var(--mode);color:var(--ink);clip-path:polygon(8px 0,100% 0,calc(100% - 8px) 100%,0 100%);cursor:pointer;border:0}
 .empty .eart{display:block;margin:0 auto 14px;width:84px;height:84px;opacity:.5}
 @media (prefers-reduced-motion:reduce){#lobby:not(.hide) .acts-l > *, #lobby:not(.hide) .rooms{animation:none}}
+
+/* [11-24] "어떤 야구 할래?"가 가운데 사선에 걸려 잘려 보이던 것 → 알약 바탕 */
+#modes .mhead{padding:8px 20px;border-radius:999px;background:rgba(8,14,30,.82);backdrop-filter:blur(8px);-webkit-backdrop-filter:blur(8px);border:1px solid rgba(255,255,255,.14);color:#f3f1ea;box-shadow:0 8px 24px -10px rgba(0,0,0,.6);z-index:5;white-space:nowrap}
 </style>
 <script type="importmap">
 { "imports": { "three": "https://cdn.jsdelivr.net/npm/three@0.160.0/build/three.module.js", "three/addons/": "https://cdn.jsdelivr.net/npm/three@0.160.0/examples/jsm/" } }
