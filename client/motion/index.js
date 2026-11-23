@@ -50,8 +50,10 @@ export function createMotion(api) {
     // [motion] 스윙 높이: 정점 때 핸드폰 윗부분(배트 끝) 각도 el(°). 내 평균 각도 = 존 한가운데, 35° 숙이면/들면 존 아래/위 끝 → 공 높이와 어긋난 만큼 빗맞음(65%만 반영해 조금 너그럽게)
     if (isFinite(el)) {
       const zn = S.zn || [-0.236, 0.236, 0.46, 1.06], zc = (zn[2] + zn[3]) / 2, half = (zn[3] - zn[2]) / 2;
-      const swingY = zc + clamp((el - M.elMean) / 35, -1.6, 1.6) * half;
-      ay = p.ty + (swingY - p.ty) * 0.65 + gauss() * sd * 0.5;
+      const swingY = zc + clamp((el - M.elMean) / 28, -1.6, 1.6) * half; // [11-23] 28°면 존 끝까지 (예전 35°), 85% 반영 (예전 65%라 거의 안 느껴졌음)
+      ay = p.ty + (swingY - p.ty) * 0.85 + gauss() * sd * 0.5;
+      const hk = swingY > zc + half * 0.35 ? '높게' : swingY < zc - half * 0.35 ? '낮게' : '가운데';
+      M.lastH = `스윙 높이 ${hk} (${el > 0 ? '+' : ''}${Math.round(el)}°)`; api.toast(M.lastH);
       M.elMean += (el - M.elMean) * 0.12; store.set('motionEl', Math.round(M.elMean * 10) / 10);
       M.lastSwingY = swingY;
     }
@@ -81,7 +83,7 @@ export function createMotion(api) {
     else if (m.t === 'sws') { // 휘두르기 시작: 정점(=임팩트)은 보통 시작 뒤 ~60ms → 그 시각으로 화면 스윙만 먼저
       const S = api.S(), role = api.role();
       if (S && S.mo && role.batter && S.ph === 'pitching' && S.p) { const lag = performance.now() - M.pad.toLocal(m.at) - M.calib - M.auto + 80; const t = api.simNow() - lag / 1000 + 0.06; if (t >= S.p.t0) api.preSwing(t); }
-    } else if (m.t === 'swing') { const r = swing(M.pad.toLocal(m.at), m.mode === 'power', 'pad', +m.el); M.pad.send({ t: 'ack', k: 'swing', r, lag: r === 'ok' ? M.lastLag : null, auto: Math.round(M.auto) }); }
+    } else if (m.t === 'swing') { const r = swing(M.pad.toLocal(m.at), m.mode === 'power', 'pad', +m.el); M.pad.send({ t: 'ack', k: 'swing', r, lag: r === 'ok' ? M.lastLag : null, auto: Math.round(M.auto), h: r === 'ok' ? M.lastH : null }); M.lastH = null; }
     else if (m.t === 'grip') { M.grip = !!m.on; if (!m.on) { M.aim = null; api.setAim(null); } }
     else if (m.t === 'aim') { M.aim = [clamp(+m.x || 0, -1.6, 1.6), clamp(+m.y || 0, -1.6, 1.6)]; }
     else if (m.t === 'type') { if (TYPES_KO[m.v]) api.setType(m.v); M.hsT = 0; }
