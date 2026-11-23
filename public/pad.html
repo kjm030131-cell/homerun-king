@@ -142,7 +142,7 @@ h1{font-size:26px;font-weight:900;line-height:1.2}
   let fbT = 0;
   function fb(id, txt, col, v) { const e = $(id); e.textContent = txt; e.style.color = col || '#e9f0fb'; e.classList.add('pop'); setTimeout(() => e.classList.remove('pop'), 160); clearTimeout(fbT); fbT = setTimeout(() => { e.textContent = ''; }, 2200); if (v) vib(v); }
   function onAck(m) {
-    if (m.k === 'swing') { if (m.lag != null) $('spdL').textContent = `지연 ${m.lag}ms · 자동 보정 ${m.auto > 0 ? '+' : ''}${m.auto}ms`; if (m.r === 'early') fb('bFb', '투수가 던지기 전이야', '#ffb36b'); else if (m.r === 'skip') fb('bFb', '지금은 칠 공이 없어', '#8ea3bf'); else if (m.r === 'nomo') fb('bFb', '일반 모드 경기야 (키보드·마우스)', '#8ea3bf'); }
+    if (m.k === 'swing') { if (m.lag != null) $('spdL').textContent = (m.h ? m.h + ' · ' : '') + `지연 ${m.lag}ms`; if (m.r === 'early') fb('bFb', '투수가 던지기 전이야', '#ffb36b'); else if (m.r === 'skip') fb('bFb', '지금은 칠 공이 없어', '#8ea3bf'); else if (m.r === 'nomo') fb('bFb', '일반 모드 경기야 (키보드·마우스)', '#8ea3bf'); }
     if (m.k === 'pitch') { if (m.r === 'ok') fb('pFb', `투구! 세기 ${m.lv}%`, m.lv > 100 ? '#ff6b6b' : m.lv >= 84 ? '#4fd18b' : '#ffcf3f', 40); else fb('pFb', '지금은 던질 수 없어', '#8ea3bf'); }
   }
 
@@ -180,6 +180,8 @@ h1{font-size:26px;font-weight:900;line-height:1.2}
   }
   const ARC = 276.5;
   function paintMeter(r) { const k = Math.min(1, r / 2000); $('arc').style.strokeDashoffset = String(ARC * (1 - k)); $('arc').style.stroke = r >= SENS[sens][1] ? '#ff6b6b' : r >= SENS[sens][0] ? '#ffcf3f' : '#56657a'; $('spd').textContent = Math.round(r); }
+  // 기울기 센서가 안 들어오면 높낮이·실시간 배트가 안 됨 → 알려줌
+  setInterval(() => { if (st === 'bat' && hasMotion && !hasOri) fb('bFb', '기울기 센서가 꺼져 있어 높낮이가 안 돼 (설정에서 동작·방향 허용 후 새로고침)', '#ff8a80'); }, 4000);
   setInterval(() => { if (st === 'bat' && performance.now() - meterT > 900) { meterPk = 0; paintMeter(0); } $('tapSwing').classList.toggle('hide', hasMotion || st !== 'bat'); }, 300);
   function onOri(e) { if (e.beta == null) return; ori = { b: e.beta, g: e.gamma || 0 }; }
   // [실시간 배트] 타석에선 1초에 30번 '타석 자세 기준' 기울기를 보냄 → PC 배트가 따라 움직임
