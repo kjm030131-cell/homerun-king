@@ -591,8 +591,8 @@ addEventListener('keydown', (e) => {
   // 타자
   if (role.batter) {
     if (k === 'b') toggleBunt();
-    if (e.code === 'Space') doSwing('contact');
-    if (k === 'f') doSwing('power');
+    if (e.code === 'Space' && !(motion && motion.active())) doSwing('contact');
+    if (k === 'f' && !(motion && motion.active())) doSwing('power');
   }
   // 투수
   if (role.pitcher && S.ph === 'pitch' && /^[1-6]$/.test(k)) setPitchType(PITCH_KEYS[+k - 1]);
@@ -657,6 +657,7 @@ canvas.addEventListener('pointerdown', (e) => {
   if (replay.active) { replay.stop(); return; }
   if (intro && !getRole().pitcher) { endIntro(); return; }
   const role = getRole();
+  if (motion && motion.active()) return; // [motion] 모션 모드: 클릭으로 스윙·투구 안 함(실수 방지) — 핸드폰·웹캠 동작으로만
   if (role.batter) doSwing(e.button === 2 ? 'power' : 'contact');
   else if (role.pitcher && !camRig.peek) pitchClick(); // [cam]
 });

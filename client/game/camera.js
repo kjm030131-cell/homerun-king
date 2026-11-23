@@ -140,7 +140,7 @@ export function createCamRig(camera, ctx) {
   // 키: V(시점 전환) · Z(거리 프리셋) · X(누르고 있는 동안 주자 보기). 처리하면 true
   rig.key = (k, role, S) => {
     if (k === 'v' && S && role.fi >= 0 && !role.pitcher && role.pos !== 'C') { cfg.fieldCam = cfg.fieldCam === 'tps' ? 'tv' : 'tps'; store.set('fieldCam2', cfg.fieldCam); fcam.yawOff = 0; toast(cfg.fieldCam === 'tps' ? '수비 시점: 내 선수 뒤 (드래그로 회전)' : '수비 시점: 중계 화면'); return true; }
-    if (k === 'v') { cfg.batCam = ((cfg.batCam | 0) + 1) % 4; store.set('batCam2', cfg.batCam); toast(['타격 시점: 기본 (포수 바로 뒤)', '타격 시점: 가까이 (존 크게)', '타격 시점: 중계 망원', '타격 시점: 스트라이크존 정면'][cfg.batCam]); return true; }
+    if (k === 'v') { cfg.batCam = ((cfg.batCam | 0) + 1) % 5; store.set('batCam2', cfg.batCam); toast(['타격 시점: 기본 (포수 바로 뒤)', '타격 시점: 가까이 (존 크게)', '타격 시점: 중계 망원', '타격 시점: 스트라이크존 정면 (가까이)', '타격 시점: 스트라이크존 정면 (멀리)'][cfg.batCam]); return true; }
     if (k === 'z') { cfg.camDist = (distI() + 1) % 3; store.set('camDist', cfg.camDist); toast(`시점 거리: ${DIST_NAME[cfg.camDist]} (설정에서도 바꿀 수 있어)`); return true; }
     if (k === 'x') { if (!peek && S && role.pitcher && leadBase(S)) { peek = true; } return !!peek; }
     return false;
@@ -217,7 +217,11 @@ export function createCamRig(camera, ctx) {
       } else if (pitchPhase && role.batter) {
         // 기본: 포수 뒤 망원(pitch.md — 투수 릴리스·존이 한 화면, 타자는 왼쪽 가장자리). 높이 프리셋을 바꿔도 존이 화면의 같은 자리에 오게 시선 높이를 같이 보정
         // V: 가까이(존 크게) — 전엔 존이 화면 맨 아래 왼쪽에 붙어 있었음 → 존·투수가 가운데 세로줄에
-        if (cfg.batCam === 3) {
+        if (cfg.batCam === 4) {
+          // [11-23] 스트라이크존 정면 (멀리): 같은 줄에서 6m 뒤 → 존이 화면 높이의 ~1/4, 투수 투구 폼·궤적이 한눈에
+          const zn = S && S.zn, zy = zn ? (zn[2] + zn[3]) / 2 : 0.76, zx = zn ? (zn[0] + zn[1]) / 2 : 0;
+          tPos.set(zx, zy + 0.32, -6.2); tLook.set(zx, zy + 0.5, 18.4); fov = 27 * FOV_K[di];
+        } else if (cfg.batCam === 3) {
           // [11-23] 스트라이크존 정면: 존 한가운데 바로 뒤(포수 자리) 존 중심 높이 → 존이 화면 정중앙, 투수·공이 존 사각형 안으로 곧장 들어옴 (ABS 판정 화면과 같은 기준)
           const zn = S && S.zn, zy = zn ? (zn[2] + zn[3]) / 2 : 0.76, zx = zn ? (zn[0] + zn[1]) / 2 : 0;
           tPos.set(zx, zy + 0.06, -2.6); tLook.set(zx, zy + 0.55, 18.4); fov = 30 * FOV_K[di];
