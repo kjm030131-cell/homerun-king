@@ -83,11 +83,14 @@ function truthAt(t) { // 이분 탐색 + 선형 보간
 }
 
 // ── 링크 모델: 한쪽 지연 = ping/2 + |N|·jit, 손실이면 재전송(ping + 100ms) 지연, TCP 라 순서 보장(뒤 메시지도 기다림) ──
-function link() {
+// [net] --pings=60,60,60,200 --jits=… : 사람마다 다른 핑(한 명만 느린 집 와이파이). 없으면 모두 --ping/--jit
+const PINGS = opt.pings ? String(opt.pings).split(',').map(Number) : null, JITS = opt.jits ? String(opt.jits).split(',').map(Number) : null;
+function link(i = 0) {
   let last = 0;
+  const P = PINGS ? PINGS[i % PINGS.length] : PING, J = JITS ? JITS[i % JITS.length] : JIT;
   return (fn) => {
-    let t = VT + PING / 2 + (JIT ? Math.abs(gauss()) * JIT : 0);
-    if (LOSS && nrnd() < LOSS) t += PING + 100;
+    let t = VT + P / 2 + (J ? Math.abs(gauss()) * J : 0);
+    if (LOSS && nrnd() < LOSS) t += P + 100;
     t = Math.max(t, last); last = t;
     push(t, fn);
   };
@@ -97,8 +100,8 @@ function link() {
 const { makeClient } = await import(pathToFileURL(join(HERE, 'tools/qa/netclient.mjs')).href);
 const clients = [];
 async function connect(i) {
-  const down = link(), up = link();
-  const C = makeClient({ kind: CLIENT, sim: CSIM, i, now: () => VT / 1000, send: (m) => { const s = JSON.stringify(m); up(() => { const a = hr(); sock.fire('message', { data: s }); addSec(hr() - a); }); }, truthAt, rnd: nrnd, gauss, srvNow: () => room.game.now });
+  const down = link(i), up = link(i);
+  const C = makeClient({ kind: CLIENT, sim: CSIM, i, now: () => VT / 1000, send: (m) => { const s = JSON.stringify(m); up(() => { const a = hr(); sock.fire('message', { data: s }); addSec(hr() - a); }); }, truthAt, rnd: nrnd, gauss, srvNow: () => room.game.now, game: () => room.game });
   const ls = { message: [], close: [], error: [] };
   const sock = {
     accept() { }, fire(t, e) { for (const f of ls[t]) f(e); },
@@ -158,6 +161,10 @@ const R = {
   underrun: +mean('underrun').toFixed(4), holdFrames: +mean('hold').toFixed(4), extrapMs: +mean('extrapMs').toFixed(1), delayMs: +mean('delayMs').toFixed(1), lagMs: +mean('lagMs').toFixed(1), ballLagMs: +mean('ballLagMs').toFixed(1),
   pl: { errRms: +mean('plErr').toFixed(3), errP99: +mean('plErr99').toFixed(3), stall: +mean('stall').toFixed(4), lurch: +mean('lurch').toFixed(4), jumpPerMin: +mean('plJump').toFixed(2), catchup: +mean('catchup').toFixed(4) },
   ball: { errRms: +mean('bErr').toFixed(3), errP99: +mean('bErr99').toFixed(3), jumpPerMin: +mean('bJump').toFixed(2), frames: Math.round(mean('bN')) },
+  // [net] 내 조작 → 내 화면 반응(ms), 다른 사람이 조작하는 수비수를 내 화면에서 본 끊김, 주자 vs 공 시각 오차
+  lat: { pitch: st(per.flatMap((p) => p.latPitch).map((x) => x * 1000)), throw: st(per.flatMap((p) => p.latThrow).map((x) => x * 1000)), predMiss: per.reduce((a, p) => a + p.predMiss, 0), relErrMs: Math.round(Math.max(...per.map((p) => p.relErr)) * 1000) },
+  hum: { stall: +(per.reduce((a, p) => a + p.hStall * 1, 0) / per.length).toFixed(4), jumpPerMin: +mean('hJump').toFixed(2), errRms: +mean('hErr').toFixed(3), perClient: per.map((p) => [+(p.hStall * 100).toFixed(2), +p.hJump.toFixed(1)]) },
+  rnNow: st(per.flatMap((p) => p.rnNow)),
   game: { ...host.gameStat(), wallMs: Math.round(wallMs) },
   errors: errors.slice(0, 5).concat(...clients.map((C) => C.errors.slice(0, 3))),
 };
@@ -172,6 +179,9 @@ else {
   console.log(`  화면이 서버보다 늦은 시간: 선수 ${R.lagMs}ms · 공·투구(시계) ${R.ballLagMs}ms | 보간 지연 ${R.delayMs}ms · 언더런 ${(R.underrun * 100).toFixed(2)}% 프레임 (멈춤 ${(R.holdFrames * 100).toFixed(2)}%, 외삽 평균 ${R.extrapMs}ms)`);
   console.log(`  선수/주자: 오차 RMS ${R.pl.errRms}m p99 ${R.pl.errP99}m · 끊김(움직이는데 멈춤) ${(R.pl.stall * 100).toFixed(2)}% · 튐(과속) ${(R.pl.lurch * 100).toFixed(2)}% · 0.3m+ 점프 ${R.pl.jumpPerMin}/분 (따라가는 중 ${(R.pl.catchup * 100).toFixed(1)}% 제외)`);
   console.log(`  공(타구·송구 ${R.ball.frames}프레임): 오차 RMS ${R.ball.errRms}m p99 ${R.ball.errP99}m · 0.3m+ 점프 ${R.ball.jumpPerMin}/분`);
+  console.log(`  내 조작→내 화면: 투구 와인드업 ${R.lat.pitch.avg.toFixed(0)}ms(p99 ${R.lat.pitch.p99.toFixed(0)}) · 송구 동작 ${R.lat.throw.avg.toFixed(0)}ms(p99 ${R.lat.throw.p99.toFixed(0)}) · 예측 빗나감 ${R.lat.predMiss} · 릴리스 시각 차 ${R.lat.relErrMs}ms`);
+  console.log(`  남이 조작하는 수비수(내 화면): 끊김 ${(R.hum.stall * 100).toFixed(2)}% · 0.3m+ 점프 ${R.hum.jumpPerMin}/분 · 오차 ${R.hum.errRms}m · 클라별 ${JSON.stringify(R.hum.perClient)}`);
+  console.log(`  주자 vs 공·판정 시각: 평균 ${R.rnNow.avg.toFixed(3)}m p99 ${R.rnNow.p99.toFixed(3)}m`);
   console.log(`  경기: ${JSON.stringify(R.game)}`);
   if (R.errors.length) console.log('  ✗ 오류:', R.errors.join('\n    '));
 }
