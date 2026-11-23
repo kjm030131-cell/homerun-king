@@ -675,9 +675,15 @@ export class Game {
     if (strike) this.countStrike(false); else this.countBall();
     this.quietCall = false;
   }
+  chalBy(c) {
+    if (c.call) return this.batter && this.batter.id ? [this.batter.id] : [];
+    return this.fielders.filter((f) => (f.pos === 'P' || f.pos === 'C') && f.ctrl && this.isLive(f.ctrl)).map((f) => f.ctrl);
+  }
   onChallenge(id) {
     const c = this.chal, p = this.players.get(id);
     if (!c || c.req || this.phase !== 'result' || this.after !== 'chal' || !p || p.team !== c.team) return;
+    // 실제 규칙(MLB 2026): 타자·투수·포수만 신청 — 스트라이크 콜은 타자, 볼 콜은 투수·포수(사람이 맡았을 때)
+    if (!this.chalBy(c).includes(id)) return;
     c.req = id;
     const over = c.call !== c.truth;
     if (!over) this.chalLeft[c.team] = Math.max(0, (this.chalLeft[c.team] || 0) - 1); // 실패하면 1개 잃음 (성공하면 유지)
@@ -1837,7 +1843,7 @@ export class Game {
             // [ABS 챌린지] 리얼: 주심이 콜(경계 근처는 가끔 틀림) → 3초 안에 손해 본 쪽 사람이 챌린지 → 슬로모션 ABS 판독
             const call = this.umpCall(zn, p.tx, p.ty, strike);
             const tm = call ? this.batTeam : this.batTeam === 'home' ? 'away' : 'home'; // 스트라이크 콜 → 타격팀, 볼 콜 → 수비팀이 신청
-            const can = this.R.abs !== false && this.mode === 'game' && !this.runners.some((r) => r.steal && !r.out) && (this.chalLeft[tm] ?? 0) > 0 && this.humans(tm).some((h) => this.isLive(h.id)) && edgeOf(zn, p.tx, p.ty) < 0.12;
+            const can = this.R.abs !== false && this.mode === 'game' && !this.runners.some((r) => r.steal && !r.out) && (this.chalLeft[tm] ?? 0) > 0 && this.chalBy({ call }).length > 0 && edgeOf(zn, p.tx, p.ty) < 0.12;
             this.absEv = { id: ++this.seq, pid: p.id, x: r2(p.tx), y: r2(p.ty), z: [zn.x0, zn.x1, zn.y0, zn.y1], s: strike ? 1 : 0, c: call ? 1 : 0, abs: 0 };
             if (can) {
               this.chal = { pid: p.id, call, truth: strike, team: tm, x: r2(p.tx), y: r2(p.ty), z: [zn.x0, zn.x1, zn.y0, zn.y1], until: this.now + 3.2, req: null };
@@ -2565,7 +2571,7 @@ export class Game {
     if (this.hrEv) s.hr = this.hrEv;
     if (this.throwEv) s.te = this.throwEv;
     if (this.absEv) s.ab = this.absEv; // [ABS] 마지막 판정
-    if (this.chal && this.phase === 'result') s.ch2 = [this.chal.pid, this.chal.call ? 1 : 0, this.chal.team, r2(Math.max(0, this.phaseUntil - this.now)), this.chal.req ? 1 : 0, this.chalLeft[this.chal.team]]; // [ABS] 챌린지 창
+    if (this.chal && this.phase === 'result') s.ch2 = [this.chal.pid, this.chal.call ? 1 : 0, this.chal.team, r2(Math.max(0, this.phaseUntil - this.now)), this.chal.req ? 1 : 0, this.chalLeft[this.chal.team], this.chalBy(this.chal)]; // [ABS] 챌린지 창
     if (this.chalLeft) s.cl2 = [this.chalLeft.away, this.chalLeft.home];
     s.gs = this.guess || null; // [guess]
     if (this.batter && this.mode === 'game') { const z = this.zoneNow(); s.zn = [z.x0, z.x1, z.y0, z.y1]; } // [ABS] 지금 타자 존(그림)

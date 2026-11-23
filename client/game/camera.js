@@ -140,7 +140,7 @@ export function createCamRig(camera, ctx) {
   // 키: V(시점 전환) · Z(거리 프리셋) · X(누르고 있는 동안 주자 보기). 처리하면 true
   rig.key = (k, role, S) => {
     if (k === 'v' && S && role.fi >= 0 && !role.pitcher && role.pos !== 'C') { cfg.fieldCam = cfg.fieldCam === 'tps' ? 'tv' : 'tps'; store.set('fieldCam2', cfg.fieldCam); fcam.yawOff = 0; toast(cfg.fieldCam === 'tps' ? '수비 시점: 내 선수 뒤 (드래그로 회전)' : '수비 시점: 중계 화면'); return true; }
-    if (k === 'v') { cfg.batCam = cfg.batCam === 1 ? 0 : 1; store.set('batCam', cfg.batCam); toast(cfg.batCam === 1 ? '타격 시점: 가까이 (존 크게)' : '타격 시점: 포수 뒤 (중계)'); return true; }
+    if (k === 'v') { cfg.batCam = ((cfg.batCam | 0) + 1) % 3; store.set('batCam2', cfg.batCam); toast(['타격 시점: 기본 (포수 바로 뒤)', '타격 시점: 가까이 (존 크게)', '타격 시점: 중계 망원'][cfg.batCam]); return true; }
     if (k === 'z') { cfg.camDist = (distI() + 1) % 3; store.set('camDist', cfg.camDist); toast(`시점 거리: ${DIST_NAME[cfg.camDist]} (설정에서도 바꿀 수 있어)`); return true; }
     if (k === 'x') { if (!peek && S && role.pitcher && leadBase(S)) { peek = true; } return !!peek; }
     return false;
@@ -218,7 +218,14 @@ export function createCamRig(camera, ctx) {
         // 기본: 포수 뒤 망원(pitch.md — 투수 릴리스·존이 한 화면, 타자는 왼쪽 가장자리). 높이 프리셋을 바꿔도 존이 화면의 같은 자리에 오게 시선 높이를 같이 보정
         // V: 가까이(존 크게) — 전엔 존이 화면 맨 아래 왼쪽에 붙어 있었음 → 존·투수가 가운데 세로줄에
         if (cfg.batCam === 1) { tPos.set(-0.55 * sd, 1.66, -3.6); tLook.set(0.7 * sd, -0.35, 14); fov = 38 * FOV_K[di]; }
-        else { const H = BAT_H[clamp(cfg.batH ?? 1, 0, 2) | 0]; tPos.set(-0.32 * sd, H, -6.6); tLook.set(-0.08 * sd, H + (1.26 - H) * (18.6 / 6.6), 12); fov = 25 * FOV_K[di]; }
+        else if (cfg.batCam === 2) { const H = BAT_H[clamp(cfg.batH ?? 1, 0, 2) | 0]; tPos.set(-0.32 * sd, H, -6.6); tLook.set(-0.08 * sd, H + (1.26 - H) * (18.6 / 6.6), 12); fov = 25 * FOV_K[di]; }
+        else {
+          // [11-23] 기본 = 더쇼식 '포수 바로 뒤': 3.2m 뒤 눈높이·화각 34° → 공이 다가올수록 커지는 원근이 살아서 궤적·변화가 읽힘
+          //  (예전 기본 6.6m 뒤 망원 25° 는 원근이 납작해 공이 투수 손 근처에 한참 있다가 마지막에 들이닥치는 것처럼 보였음 → V 로 '중계 망원' 선택 가능)
+          // 구도: 투수 = 화면 위 1/3, 존 = 아래 1/3 (조작 안내판에 안 가림). 높이 프리셋(batH)은 카메라만 올리고 내림
+          const H = BAT_H[clamp(cfg.batH ?? 1, 0, 2) | 0] + 0.18;
+          tPos.set(-0.18 * sd, H, -3.6); tLook.set(0.02 * sd, 0.0, 8); fov = 40 * FOV_K[di];
+        }
         k = 8; mode = 'bat';
       } else if (pitchPhase && role.pitcher) {
         const lb = peek && ph === 'pitch' ? leadBase(S) : 0;

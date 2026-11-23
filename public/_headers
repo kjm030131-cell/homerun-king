@@ -1,0 +1,9 @@
+# [deploy 11-23] 배포해도 브라우저가 옛 app.js·index.html 을 캐시에서 써서 '적용 안 된 것 같다'던 것 → 매번 서버에 새 버전인지 확인(ETag, 안 바뀌었으면 304라 가벼움)
+/
+  Cache-Control: no-cache
+/index.html
+  Cache-Control: no-cache
+/app.js
+  Cache-Control: no-cache
+/assets/models/manifest.json
+  Cache-Control: no-cache
