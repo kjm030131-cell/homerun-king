@@ -385,6 +385,7 @@ const lerpAng = (a, b, u) => { let d = b - a; d = Math.atan2(Math.sin(d), Math.c
 function resetSeen() {
   for (const k in seen) seen[k] = -1;
   for (const k in swungLocal) delete swungLocal[k];
+  for (const k in swingPre) delete swingPre[k];
   for (const k in swingInfo) delete swingInfo[k];
   tracerId = null; contactFreeze = null; pred.pitch = null; pred.throwT = 0; pred.jt = pred.dv = -9;
 }
@@ -562,6 +563,7 @@ let pitchType = 'FB';
 let gauge = null; // {t0, aim:[x,y]}
 let buntOn = false;
 const swungLocal = {};
+const swingPre = {}; // [motion] 핸드폰이 '휘두르기 시작'을 먼저 알려주면 화면 속 배트를 미리 돌림 (판정은 나중에 오는 실제 스윙 시각으로)
 const pred = { pitch: null, throwT: 0, throwI: -1, jt: -9, dv: -9, dvx: 0, dvz: 1 }; // [net] 내 조작 예측 (client/net/predict.js)
 // 한글 입력 상태(ㅈㅁㄴㅇ)에서도 WASD 등이 먹도록 물리 키 기준으로
 function keyOf(e) {
@@ -714,6 +716,7 @@ function initMotion() {
     motion = createMotion({
       store, S: () => S, role: () => getRole(), simNow: () => simNow(), net: () => net, screen: () => screen, offline: !!window.HR_OFFLINE,
       swing: (mode, opt) => doSwing(mode, opt),
+      preSwing: (t) => { if (S && S.p && S.ph === 'pitching' && !swungLocal[S.p.id] && !swingPre[S.p.id]) swingPre[S.p.id] = t; },
       pitch: (aim, lv) => { if (!S || S.ph !== 'pitch') return; if (intro) endIntro(); gauge = { t0: nowP(), aim, type: pitchType }; sendPitch(lv); },
       setAim: (a) => { if (!a) return; tmpV.set(a[0], a[1], 0).project(camera); const k = cfg.sens / 100 || 1; mouseRaw.set(clamp(tmpV.x / k, -1, 1), clamp(tmpV.y / k, -1, 1)); },
       aimNow: () => aimPoint() || [0, 0.8],
@@ -991,7 +994,7 @@ function updateWorld(dt) {
         //  와인드업 끝 ~ 공 도착 0.1초 전까지 load(0.25) → 출발 직전(0.28·1.12 = 0.31)까지 천천히, 안 치면 0.3초 뒤 풀어줌
         { const a = s.p.t0 - 0.45, b = Math.max(a + 0.5, s.p.arrive - 0.1), u = clamp((t - a) / (b - a), 0, 1); loadK = u < 0.55 ? (u / 0.55) * (2 - u / 0.55) : 1 + 0.12 * (u - 0.55) / 0.45; }
         if (t > s.p.arrive + 0.3 && !s.p.swingAt && !swungLocal[s.p.id]) loadK = clamp(1 - (t - s.p.arrive - 0.3) / 0.4, 0, 1) * 1.12;
-        swingAt = role.batter && swungLocal[s.p.id] ? swungLocal[s.p.id] : s.p.swingAt;
+        swingAt = role.batter && swungLocal[s.p.id] ? swungLocal[s.p.id] : role.batter && swingPre[s.p.id] ? swingPre[s.p.id] : s.p.swingAt;
         const info = swingInfo[s.p.id];
         const tgt = info ? info.a : [s.p.tx, s.p.ty];
         contactL = batter.p.root.worldToLocal(_v.set(tgt[0], tgt[1], 0)).clone();
