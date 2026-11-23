@@ -3,6 +3,7 @@ import * as THREE from 'three';
 import {
   Game, HIT_EASE, pitchPos, integrate, fenceR, BASES, MOUND, ZONE, PITCHES, PITCH_KEYS, POS_KO, HOME_SPOT, FOUL, SPRINT_SPEED, FIELD_SPEED,
   RELEASE, WINDUP, SWING, PCI, BALL_R, runnerXZ, RULES, inZone, // [gameplay] RULES: 모드별 퍼펙트 투구 구간 · PCI 타격 · [pitch] inZone: 지나간 공 볼/스트 색
+  setWind,
 } from '../shared/sim.js';
 import { Player, UNIFORMS, setFaceTextures } from './player.js';
 import { loadSkin, attachSkin, syncAllSkins } from './skinned.js';
@@ -358,6 +359,7 @@ function onSnap(s) {
   if (screen === 'room' || ((screen === 'title' || screen === 'lobby' || screen === 'modes') && net)) setScreen('game');
   if (s.cl) applyClubs(s.cl); // [ui] HUD 갱신에서 옮겨옴 (값 바뀔 때만 실제 작업)
   if (s.tod) applyTimeOfDay(s.tod);
+  if (s.wd) setWind(s.wd); // [physics] 바람: 공 예측·보간도 서버와 같은 바람으로
   if (!s.fl || !s.fl.length) { S = s; return; }
   buildTeams(s);
   if (!S || !S.fl) { seen.ce2 = s.ce2 ? s.ce2.id : -2; seen.hr = s.hr ? s.hr.id : -2; seen.te = s.te ? s.te.id : -2; seen.ce = s.ce ? s.ce.id : -2; seen.we = s.we ? s.we.id : -2; }
