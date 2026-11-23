@@ -399,3 +399,23 @@ export function inningCard(d, S) {
   e.classList.remove('show'); void e.offsetWidth; e.classList.add('show');
   clearTimeout(innT); innT = setTimeout(() => e.classList.remove('show'), 3200);
 }
+
+// [ABS] KBO 자동 투구 판정 그래픽 — 판정마다 오른쪽 아래에 존(3×3)과 공 위치, STRIKE/BALL (2.4초)
+let absT = 0;
+export function absCall(a, bat) {
+  const e = $('absCard'); if (!e || !a || !a.z) return;
+  const [x0, x1, y0, y1] = a.z, W = 120, H = 150, padX = 34, padY = 30;
+  const sx = W / (x1 - x0), sy = H / (y1 - y0);
+  const px = padX + (-(a.x) - x0) * sx, py = padY + (y1 - a.y) * sy; // 포수 시점(중계 화면과 같은 방향)
+  const r = Math.max(5, 0.037 * sx);
+  const st = a.s ? 'strike' : 'ball';
+  const grid = [1, 2].map((i) => `<line x1="${padX + W * i / 3}" y1="${padY}" x2="${padX + W * i / 3}" y2="${padY + H}"/><line x1="${padX}" y1="${padY + H * i / 3}" x2="${padX + W}" y2="${padY + H * i / 3}"/>`).join('');
+  const ht = bat && bat.ht ? ` · ${Math.round(bat.ht * 100)}cm` : '';
+  e.className = 'abs-' + st;
+  e.innerHTML = `<div class="ab-top"><b>ABS</b><span>투구 판정${ht}</span></div>
+    <svg viewBox="0 0 ${W + padX * 2} ${H + padY * 2}" aria-hidden="true"><rect x="${padX}" y="${padY}" width="${W}" height="${H}" class="zb"/><g class="zg">${grid}</g>
+    <circle cx="${clamp(px, 6, W + padX * 2 - 6)}" cy="${clamp(py, 6, H + padY * 2 - 6)}" r="${r.toFixed(1)}" class="pt"/></svg>
+    <div class="ab-call">${a.s ? 'STRIKE' : 'BALL'}</div>`;
+  e.classList.remove('show'); void e.offsetWidth; e.classList.add('show');
+  clearTimeout(absT); absT = setTimeout(() => e.classList.remove('show'), 2400);
+}

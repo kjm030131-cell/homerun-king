@@ -557,6 +557,24 @@ body[data-screen=over] #hud{opacity:0;transition:opacity .35s ease}
 #innCard .ic-row.bat span{color:var(--bulb)}
 #innCard .ic-foot{background:var(--ink2);color:var(--steel);font-size:13px;font-weight:700;padding:6px 14px}
 #innCard .ic-foot b{color:var(--bulb);font-family:var(--num);font-size:16px}
+
+/* [ABS] 자동 투구 판정 카드 */
+#absCard{position:absolute;right:calc(var(--side) + 168px);bottom:max(14px,env(safe-area-inset-bottom));width:150px;opacity:0;pointer-events:none;filter:drop-shadow(0 10px 24px rgba(0,0,0,.45))}
+#absCard.show{animation:abIn 2.4s var(--ease) both}
+@keyframes abIn{0%{opacity:0;transform:translateY(16px)}8%,88%{opacity:1;transform:none}100%{opacity:0;transform:translateY(6px)}}
+#absCard .ab-top{display:flex;align-items:center;gap:6px;background:var(--ink);padding:5px 8px;border-top:3px solid var(--sky)}
+#absCard .ab-top b{font-family:var(--num);font-weight:800;font-size:15px;letter-spacing:.06em;color:var(--sky)}
+#absCard .ab-top span{font-size:10.5px;color:var(--steel);font-weight:700;white-space:nowrap}
+#absCard svg{display:block;width:100%;background:rgba(9,17,42,.9)}
+#absCard .zb{fill:rgba(255,255,255,.06);stroke:rgba(255,255,255,.85);stroke-width:2.5}
+#absCard .zg line{stroke:rgba(255,255,255,.22);stroke-width:1.2;stroke-dasharray:5 4}
+#absCard .pt{stroke:#fff;stroke-width:2.5;animation:abPt .5s var(--ease) both}
+@keyframes abPt{0%{transform:scale(2.4);opacity:0}100%{transform:none;opacity:1}}
+#absCard svg .pt{transform-box:fill-box;transform-origin:center}
+#absCard.abs-strike .pt{fill:#ffcf3f} #absCard.abs-ball .pt{fill:#5be08f}
+#absCard .ab-call{text-align:center;font-family:var(--num);font-style:italic;font-weight:800;font-size:24px;padding:3px 0;letter-spacing:.04em}
+#absCard.abs-strike .ab-call{background:var(--bulb);color:var(--ink)} #absCard.abs-ball .ab-call{background:var(--turf);color:#062012}
+@media (max-width:760px){#absCard{right:var(--side);bottom:120px;width:120px}}
 @media (prefers-reduced-motion:reduce){*{transition:none!important;animation:none!important}}
 
 /* ═══ [ui] 모션 레이어 — 중계 그래픽 전환·등장·버튼 반응 ═══
@@ -815,6 +833,7 @@ body[data-screen=over] #hud{opacity:0;transition:opacity .35s ease}
   <div id="bigcount" class="hide"><span class="bc-b"><b>B</b><i></i><i></i><i></i></span><span class="bc-s"><b>S</b><i></i><i></i></span><span class="bc-o"><b>O</b><i></i><i></i></span></div>
   <div id="banner"><span></span></div>
   <div id="innCard" aria-live="polite"></div>
+  <div id="absCard" aria-live="polite"></div>
   <div id="coach"><b></b><span></span></div>
   <div id="walkup"><div class="wu-no"></div><div class="wu-main"><div class="wu-nm"></div><div class="wu-st"></div></div></div>
   <div id="intro"><div class="in-l"><div class="in-tag"></div><div class="in-nm"></div><div class="in-today"></div><div class="in-car"></div></div><div class="in-r"><div class="in-big"></div><div class="in-bigl"></div><div class="in-sit"></div></div></div>

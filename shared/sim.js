@@ -149,6 +149,13 @@ export function pitchPos(p, s) {
 export function inZone(x, y) {
   return x >= ZONE.x0 - BALL_R && x <= ZONE.x1 + BALL_R && y >= ZONE.y0 - BALL_R && y <= ZONE.y1 + BALL_R;
 }
+// [ABS 11-23] KBO 자동 투구 판정 시스템(2025 기준): 존 높이 = 타자 키의 27.04% ~ 55.75%, 폭 = 홈플레이트(43.18cm) + 양옆 2cm
+//  공이 존에 조금이라도 걸치면 스트라이크(공 반지름만큼 넓게). 리얼 모드 판정, 캐주얼은 기존 넓은 존
+export const ABS = { top: 0.5575, bot: 0.2704, halfW: 0.2159 + 0.02 };
+export function absZone(h) { return { x0: -ABS.halfW, x1: ABS.halfW, y0: r2(ABS.bot * h), y1: r2(ABS.top * h) }; }
+export function inZoneOf(z, x, y) { return x >= z.x0 - BALL_R && x <= z.x1 + BALL_R && y >= z.y0 - BALL_R && y <= z.y1 + BALL_R; }
+// CPU 타자 키: 이름·슬롯 해시로 172~192cm (같은 타자는 늘 같은 키)
+export function cpuHeight(key) { let h = 2166136261; for (const c of String(key)) { h ^= c.charCodeAt(0); h = Math.imul(h, 16777619); } return 1.72 + ((h >>> 0) % 2001) / 10000; }
 
 // ═════════════ 타격 판정 ═════════════
 // dt = 스윙시각-도달시각(초, 음수=빠름), ax/ay = (배트중심-공) 오차(m)
@@ -652,6 +659,8 @@ export class Game {
   say(text, big = true) { this.msg = text; this.msgBig = big; this.msgId++; }
 
   // ───────── 경기 흐름 ─────────
+  // [ABS] 지금 타자의 존: 리얼 = KBO ABS(키 비례), 캐주얼(R.abs === false) = 기존 넓은 존
+  zoneNow() { return this.R.abs === false || !this.batter ? ZONE : absZone(this.batter.ht || 1.8); }
   // [11-22] 바람: 무풍~6m/s, 방향 아무 쪽. 홈런더비·연습은 무풍(기록 비교가 공정하게)
   pickWind() {
     if (this.mode !== 'game') return [0, 0];
@@ -740,6 +749,7 @@ export class Game {
     } else {
       this.batter = { id: null, name: `CPU ${slot}번`, n, slot };
     }
+    { const pl = this.batter.id && this.players.get(this.batter.id); this.batter.ht = pl && pl.ht ? clamp(pl.ht, 1.6, 2.05) : this.batter.id ? 1.8 : r2(cpuHeight(team + slot + (this.set.clubs ? this.set.clubs.join() : ''))); } // [ABS] 타자 키(m)
     this.batter.h = handOf(this.batter.id ? this.players.get(this.batter.id)?.bats : cpuBats(this.set.clubs ? this.set.clubs[team === 'home' ? 1 : 0] : 0, team, slot)); // [lefty] 1 우타 · -1 좌타 (스냅샷 s.bat.h)
     this.lineIdx[team]++;
     if (this.set.pitRot === 'batter' && this.mode === 'game' && this.fielders.length && n > 1) this.rotatePitcher();
@@ -905,6 +915,7 @@ export class Game {
       const keys = ['FB', 'FB', 'FB', 'TS', 'SL', 'CB', 'CH', 'SP'];
       const type = this.ppick && this.ppick !== 'MIX' && PITCHES[this.ppick] ? this.ppick : keys[(Math.random() * keys.length) | 0];
       const inZ = Math.random() < 0.7;
+      const ZONE = this.zoneNow();
       const tx = inZ ? rand(ZONE.x0 + 0.03, ZONE.x1 - 0.03) : (Math.random() < 0.5 ? -1 : 1) * rand(0.3, 0.4);
       const ty = inZ ? rand(ZONE.y0 + 0.03, ZONE.y1 - 0.03) : rand(0.25, 1.1);
       return this.throwPitch(type, tx, ty, rand(0.8, 0.95), false, 0.03);
@@ -919,6 +930,7 @@ export class Game {
     if (this.strikes === 2) keys = ['FB', 'SL', 'SL', 'CB', 'SP', 'SP', 'CH'];
     const type = keys[(Math.random() * keys.length) | 0];
     let tx, ty;
+    const ZONE = this.zoneNow(); // [ABS] 지금 타자 존 기준으로 던짐
     if (Math.random() < zoneP) { tx = rand(ZONE.x0 + 0.03, ZONE.x1 - 0.03); ty = rand(ZONE.y0 + 0.03, ZONE.y1 - 0.03); }
     else {
       const side = Math.random() < 0.5 ? -1 : 1;
@@ -976,7 +988,7 @@ export class Game {
     this.aiSwing = null;
     if (this.batterIsCPU() && !this.pitch.hbp) {
       const D = this.D;
-      const zone = inZone(tx, ty);
+      const zone = inZoneOf(this.zoneNow(), tx, ty); // [ABS] CPU 타자도 지금 존 기준으로 판단
       const breaking = !['FB', 'TS', 'BP'].includes(type);
       const edge = Math.max(Math.abs(tx) - 0.25, Math.abs(ty - 0.78) - 0.3, 0); // 존 밖 거리
       let p = zone ? 0.68 : Math.max(0.03, (0.36 + (breaking ? 0.1 : 0)) * (1 - D.eye) * 2 - edge * 2.2);
@@ -1784,7 +1796,9 @@ export class Game {
           else if (p.hbp) this.hitByPitch();
           else {
             const wild = (p.ty < 0.22 || Math.abs(p.tx) > 0.62) && this.runners.some((r) => !r.out && !r.scored && !r.steal) && Math.random() < 0.14;
-            if (inZone(p.tx, p.ty)) this.countStrike(false); else this.countBall();
+            const zn = this.zoneNow(), strike = inZoneOf(zn, p.tx, p.ty);
+            this.absEv = { id: ++this.seq, pid: p.id, x: r2(p.tx), y: r2(p.ty), z: [zn.x0, zn.x1, zn.y0, zn.y1], s: strike ? 1 : 0, abs: this.R.abs === false ? 0 : 1 }; // [ABS] 판정 그래픽
+            if (strike) this.countStrike(false); else this.countBall();
             if (wild && this.phase === 'result' && this.after === 'pitch') this.wildPitch();
           }
         }
@@ -2502,6 +2516,8 @@ export class Game {
     if (this.mode === 'derby' && this.dy) s.dy = { pr: this.dy.pr ? 1 : 0, sw: this.dy.sw, xh: r2(this.dy.xh), pp: this.ppick, n: this.dy.n, outs: this.dy.outs, idx: this.dy.idx, list: this.dy.order.map((o) => [o.id, o.name, o.hr, o.max, o.done ? 1 : 0]) };
     if (this.hrEv) s.hr = this.hrEv;
     if (this.throwEv) s.te = this.throwEv;
+    if (this.absEv) s.ab = this.absEv; // [ABS] 마지막 판정
+    if (this.batter && this.mode === 'game') { const z = this.zoneNow(); s.zn = [z.x0, z.x1, z.y0, z.y1]; } // [ABS] 지금 타자 존(그림)
     s.ar = this.play && this.play.autoRun && this.now < this.play.autoRun.until ? this.play.autoRun.i : -1; // 사람 야수 자동 베이스 밟기 중(클라 조작 잠금)
     if (this.catchEv) s.ce = this.catchEv;
     if (this.wallEv) s.we = this.wallEv;

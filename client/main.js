@@ -398,7 +398,7 @@ function onSnap(s) {
   if (s.wd) setWind(s.wd); // [physics] 바람: 공 예측·보간도 서버와 같은 바람으로
   if (!s.fl || !s.fl.length) { S = s; return; }
   buildTeams(s);
-  if (!S || !S.fl) { seen.ce2 = s.ce2 ? s.ce2.id : -2; seen.hr = s.hr ? s.hr.id : -2; seen.te = s.te ? s.te.id : -2; seen.ce = s.ce ? s.ce.id : -2; seen.we = s.we ? s.we.id : -2; }
+  if (!S || !S.fl) { seen.ce2 = s.ce2 ? s.ce2.id : -2; seen.hr = s.hr ? s.hr.id : -2; seen.te = s.te ? s.te.id : -2; seen.ce = s.ce ? s.ce.id : -2; seen.we = s.we ? s.we.id : -2; seen.ab = s.ab ? s.ab.id : -2; }
   prevS = S; S = s;
   // 메시지
   if (s.msg && s.msg[0] !== seen.msg) {
@@ -422,6 +422,7 @@ function onSnap(s) {
     if (cfg.replay && lastContactT && nowP() - lastContactT < 8) replay.schedule(nowP() + 2.6, { tEvent: lastContactT, pre: 0.8, post: 1.6, speed: 0.42, cam: 'hr', scene });
   }
   // 송구/포구/펜스 이벤트
+  if (s.ab && s.ab.id !== seen.ab) { if (s.ab.abs) ui.absCall && ui.absCall(s.ab, s.bat); seen.ab = s.ab.id; } // [ABS] 판정 그래픽
   if (s.te && s.te.id !== seen.te) { if (fielders[s.te.i]) { if (!(pred.throwI === s.te.i && p - pred.throwT < 0.8)) fielders[s.te.i].throwT = nowP(); fielders[s.te.i].throwDur = s.te.w ? s.te.w / 0.55 : THROW_DUR; } if (pred.throwI === s.te.i) pred.throwT = 0; seen.te = s.te.id; } // [net] 내가 미리 시작한 송구 동작은 그대로 · [11-23] 클립 길이 = 서버 송구 동작(릴리스 55%)
   if (s.ce && s.ce.id !== seen.ce) { if (fielders[s.ce.i]) { fielders[s.ce.i].catchT = nowP(); if (s.ce.i === getRole().fi && getRole().defense) { feedback(s.ce.dive ? '다이빙 캐치!! 나이스!' : s.ce.jump ? '점프 캐치!! 나이스!' : '나이스 캐치!', '#4fd18b'); if (s.ce.dive || s.ce.jump) bus.emit('ui:perfect'); }
     if ((s.ce.dive || s.ce.jump) && cfg.replay !== 0) replay.schedule(nowP() + 1.0, { tEvent: nowP(), pre: 1.6, post: 0.6, speed: 0.45, cam: 'catch', focus: fielders[s.ce.i].p, scene }); if (s.ce.dive) { fx.dustPuff(fielders[s.ce.i].p.root.position.x, fielders[s.ce.i].p.root.position.z, 2, 2); } } seen.ce = s.ce.id; }
@@ -1365,6 +1366,10 @@ function updateHUD() {
   zoneGroup.visible = pitchPhase && camMode !== 'intro' && (role.batter || role.pitcher || camMode === 'tv' || camMode === 'catch');
   if (zoneGroup.visible && zoneMesh) { // 타석일 땐 진하게, 와인드업~투구 중엔 살짝 더 밝게
     const live = s.ph === 'pitching';
+    // [ABS] 타자 키 비례 존으로 판 늘이기 (그림은 ZONE 크기로 만들어 둠)
+    const zn = s.zn || [ZONE.x0, ZONE.x1, ZONE.y0, ZONE.y1];
+    zoneMesh.scale.set((zn[1] - zn[0]) / (ZONE.x1 - ZONE.x0), (zn[3] - zn[2]) / (ZONE.y1 - ZONE.y0), 1);
+    zoneMesh.position.set((zn[0] + zn[1]) / 2, (zn[2] + zn[3]) / 2, 0);
     zoneMesh.material.opacity = role.batter ? (live ? 1 : 0.9) : role.pitcher ? 0.85 : 0.6;
   }
   pci.visible = false; aimMark.visible = false; assistDot.visible = false; timeRing.visible = false; pciHot = false;

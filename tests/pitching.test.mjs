@@ -2,14 +2,16 @@
 // 사용자: "친구랑 1대1 하면 공이 어디로 오는지, 볼인지 스트라이크인지 구분이 안 된다" — 공 위치 미리보기 없이 해결
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { Game, inZone, ZONE, BALL_R, COMMAND } from '../shared/sim.js';
+import { Game, inZone, inZoneOf, ZONE, BALL_R, COMMAND } from '../shared/sim.js';
 
 const seeded = (s) => () => { s |= 0; s = (s + 0x6D2B79F5) | 0; let t = Math.imul(s ^ (s >>> 15), 1 | s); t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t; return ((t ^ (t >>> 14)) >>> 0) / 4294967296; };
 const withSeed = (seed, fn) => { const r = Math.random; Math.random = seeded(seed); try { return fn(); } finally { Math.random = r; } };
 const gs = (s) => { let u = 0, v = 0; while (!u) u = Math.random(); while (!v) v = Math.random(); return s * Math.sqrt(-2 * Math.log(u)) * Math.cos(2 * Math.PI * v); };
 const R = (a, b) => a + Math.random() * (b - a);
 const pick = (w) => { let s = 0; for (const k in w) s += w[k]; let r = Math.random() * s; for (const k in w) { r -= w[k]; if (r <= 0) return k; } return 'FB'; };
-const edgeD = (x, y) => Math.min(x - (ZONE.x0 - BALL_R), ZONE.x1 + BALL_R - x, y - (ZONE.y0 - BALL_R), ZONE.y1 + BALL_R - y);
+const edgeD = (x, y, Z = ZONE) => Math.min(x - (Z.x0 - BALL_R), Z.x1 + BALL_R - x, y - (Z.y0 - BALL_R), Z.y1 + BALL_R - y);
+// [ABS 11-23] 리얼 모드 존은 타자 키 비례(ABS) → 사람 투수·타자 흉내도 화면에 그려진 '지금 존'을 기준으로 (예전 존 좌표를 지금 존으로 옮김)
+const toZone = (Z, tx, ty) => [tx * (Z.x1 - Z.x0) / (ZONE.x1 - ZONE.x0), Z.y0 + (ty - ZONE.y0) * (Z.y1 - Z.y0) / (ZONE.y1 - ZONE.y0)];
 
 // 잘하는 사람 투수 흉내: 구종 섞기(같은 공 3연속 안 함) · 코너/경계 노리기 · 2스트라이크 유인구 · 3볼이면 가운데 쪽 · 퍼펙트 게이지 85%
 function pitcherAim(g, last) {
@@ -25,6 +27,7 @@ function pitcherAim(g, last) {
     else if (c < 0.8) { tx = R(-0.25, 0.25); ty = brk || Math.random() < 0.6 ? R(0.44, 0.52) : R(1.04, 1.11); }
     else { tx = side * R(0.23, 0.29); ty = Math.random() < 0.6 ? R(0.45, 0.52) : R(1.04, 1.1); }
   }
+  [tx, ty] = toZone(g.zoneNow(), tx, ty);
   const u = Math.random(), band = g.R.perfectPitch;
   return { type, tx, ty, power: u < 0.85 ? R(band[0], band[1]) : u < 0.95 ? R(0.74, band[0] - 0.005) : R(1.0, 1.1) };
 }
@@ -54,11 +57,12 @@ function humanVsHuman({ games, innings = 9, rules = 'real', cpuPitch = false }) 
       if (p && p._sw && !p.swung && game.phase === 'pitching' && game.now >= p.arrive + p._sw.dt) { const w = p._sw; p._sw = null; game.handle(game.batter.id, { ...w.m, dt: game.now - p.arrive }); }
       if (game.phase === 'pitching' && game.batter.id && !p.swung && !p._d && game.now >= p.arrive - 0.3) {
         p._d = 1; o.n++;
-        if (inZone(p.tx, p.ty)) o.zone++;
-        if (Math.abs(edgeD(p.tx, p.ty)) < 0.05) o.edge5++;
+        const Z = game.zoneNow();
+        if (inZoneOf(Z, p.tx, p.ty)) o.zone++;
+        if (Math.abs(edgeD(p.tx, p.ty, Z)) < 0.05) o.edge5++;
         const brk = ['FB', 'TS'].includes(p.type) ? 1 : 1.3, two = game.strikes === 2, first = game.balls + game.strikes === 0, b3 = game.balls === 3 && game.strikes === 0;
         const px = p.tx + gs(0.07 * brk * 0.8), py = p.ty + gs(0.07 * brk), m = two ? 0.04 : game.balls === 3 && game.strikes < 2 ? -0.03 : 0;
-        const pz = px >= ZONE.x0 - BALL_R - m && px <= ZONE.x1 + BALL_R + m && py >= ZONE.y0 - BALL_R - m && py <= ZONE.y1 + BALL_R + m;
+        const pz = px >= Z.x0 - BALL_R - m && px <= Z.x1 + BALL_R + m && py >= Z.y0 - BALL_R - m && py <= Z.y1 + BALL_R + m;
         if (Math.random() < (pz ? (two ? 0.93 : b3 ? 0.3 : first ? 0.6 : 0.8) : two ? 0.15 : 0.06)) {
           const d = Math.hypot(px, py - 0.78), mo = 0.06 + 0.22 * d;
           p._sw = { dt: gs(0.1 * brk * (1 + 0.5 * d)), m: { t: 'swing', pid: p.id, ax: px - p.tx + gs(mo), ay: py - p.ty + gs(mo), mode: !two && Math.random() < 0.25 ? 'power' : 'contact' } };

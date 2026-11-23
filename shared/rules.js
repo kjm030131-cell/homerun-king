@@ -6,6 +6,7 @@
 export const RULES = {
   real: {
     id: 'real', name: '리얼',
+    abs: true, // [ABS] KBO 자동 투구 판정(타자 키 비례 존)
     innings: 9, // 방 만들 때 기본 이닝(방장이 1~9로 바꿀 수 있음)
     maxExtra: 3, // 연장 최대 이닝 (넘으면 무승부)
     ghost: null, // 연장 승부치기 주자 (null = 없음)
@@ -35,6 +36,7 @@ export const RULES = {
   },
   casual: {
     id: 'casual', name: '캐주얼',
+    abs: false, // 넓은 기존 존(입문자용)
     innings: 3,
     maxExtra: 1, // 연장 1회까지(승부치기), 그래도 같으면 무승부
     ghost: [1, 2], // 연장 무사 1·2루에서 시작 (WBC·KBO 승부치기 방식)
