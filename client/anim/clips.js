@@ -30,7 +30,8 @@ export const CLIPS = {
   // swing: k 0~0.25 = 준비(로드, 투구 따라 체중 이동), 0.3 = 출발, 0.5 = 컨택, 1 = 끝(anim.js SWING_CONTACT_K 와 같음)
   swing: { loop: false, lockXZ: false, kmap: [[0, 'start'], [0.25, 'load'], [0.3, 'launch'], [0.5, 'contact'], [1, 'end']], fallback: 'batStance' },
   powerSwing: { loop: false, lockXZ: false, kmap: [[0, 'start'], [0.25, 'load'], [0.3, 'launch'], [0.5, 'contact'], [1, 'end']], fallback: 'swing' },
-  buntStance: { loop: true, lockXZ: true, fallback: 'batStance' },
+  // [motion] buntStance: 타격 자세 → 번트 자세로 돌아서는 0.9초 후 마지막 자세 유지(clamp)
+  buntStance: { loop: false, lockXZ: true, fallback: 'batStance' },
   // pitch 는 kmap 대신 timing.js 의 투구 시간표(와인드업 초) ↔ markers 로 맞춘다
   pitch: { loop: false, lockXZ: false, fallback: 'throw' },
   // throw: anim.js THROW_RELEASE_K(0.55) 에 놓음
@@ -46,6 +47,21 @@ export const CLIPS = {
   umpireCall: { loop: false, lockXZ: true, fallback: 'idle' },
   // (선택) 고정 목록 밖 — 있으면 세이프 판정에 씀
   umpireSafe: { loop: false, lockXZ: true, fallback: 'idle', optional: true },
+  // [motion] 상황별 변주 클립(전부 선택 — 없으면 fallback 사슬로 기존 클립). 뒤에서 늦게 받음(EARLY 아님) → 시작 로딩·메모리 영향 작음
+  //  kind   : 마커 자동 추정 방식(swing·pitch·throw …) — 이름이 달라도 같은 방식으로
+  //  anchor : 'end' = 마지막 프레임 엉덩이 수평 위치를 제자리(타석)로 / 'start' = 첫 프레임을 제자리로 (걸어 들어오기·나가기)
+  batStepIn: { loop: false, lockXZ: false, anchor: 'end', optional: true, fallback: 'batStance' }, // Step_In: 타석에 들어서며 자리 잡기(0.44m)
+  batWalkIn: { loop: false, lockXZ: false, anchor: 'end', optional: true, fallback: 'batStepIn' }, // Walk_In: 1.3m 걸어 들어와 자세
+  batWalkOut: { loop: false, lockXZ: false, anchor: 'start', optional: true, fallback: 'idle' }, // Walk_Out: 삼진 뒤 걸어 나감
+  batStance2: { loop: true, lockXZ: true, optional: true, fallback: 'batStance' },
+  batStance3: { loop: true, lockXZ: true, optional: true, fallback: 'batStance2' },
+  swing2: { loop: false, lockXZ: false, kind: 'swing', kmap: [[0, 'start'], [0.25, 'load'], [0.3, 'launch'], [0.5, 'contact'], [1, 'end']], optional: true, fallback: 'swing' },
+  batStrike: { loop: false, lockXZ: true, optional: true, fallback: 'disappointed' }, // 헛스윙 뒤 반응
+  mill: { loop: false, lockXZ: true, optional: true, fallback: 'idle' }, // 투구 사이 서성임(한 번 재생)
+  // pitch2 hold: 다리 든 채 버티는 끝(1.12초, 눈으로 고름) — 정점 멈춤(1.25~1.45s)을 이 구간으로 → 스트라이드 배속 3.1→2.35배
+  pitch2: { loop: false, lockXZ: false, kind: 'pitch', markers: { hold: 1.12 }, optional: true, fallback: 'pitch' }, // 세트 포지션 투구
+  catcherThrow: { loop: false, lockXZ: true, kind: 'throw', kmap: [[0, 'start'], [0.55, 'release'], [1, 'end']], optional: true, fallback: 'throw' },
+  catcherPop: { loop: false, lockXZ: true, optional: true, fallback: 'ready' },
 };
 export const CLIP_NAMES = Object.keys(CLIPS).filter((k) => !CLIPS[k].optional);
 // 이게 다 있어야 새 캐릭터로 바꾼다(없으면 옛 몸 유지 — 반쪽짜리 동작으로 게임이 어색해지는 것 방지)

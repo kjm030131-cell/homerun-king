@@ -1,6 +1,10 @@
 {
   "body": "assets-src/models/player.glb",
-  "tex": {"base": 2048, "other": 1024, "dilate": true},
+  "tex": {
+    "base": 2048,
+    "other": 1024,
+    "dilate": true
+  },
   "clips": {
     "batStance": {
       "src": "Baseball_Idle.fbx",
@@ -25,7 +29,11 @@
     "buntStance": {
       "src": "Baseball_Bunt.fbx",
       "yaw": 90,
-      "hold": 1.2
+      "trim": [
+        0.3,
+        1.22
+      ],
+      "note": "[motion] 타격 자세 → 번트 자세로 돌아서기(0.3~1.22초) 후 마지막 자세 유지(clamp). 전엔 1.2초 자세 하나로 정지"
     },
     "pitch": {
       "src": "Baseball_Pitching_1.fbx",
@@ -97,7 +105,76 @@
     "batStance3": {
       "src": "Baseball_Idle_2.fbx",
       "yaw": 90,
-      "note": "타석 대기 변형"
+      "note": "타석 대기 변형 — 원본 FBX 동작이 Idle_1 과 같음(파일 머리글만 다름). 게임에선 재생 속도·시작 위치를 달리해 구분"
+    },
+    "swing2": {
+      "src": "Baseball_Hit_2.fbx",
+      "yaw": 90,
+      "trim": [
+        0,
+        1.36
+      ],
+      "note": "[motion] 짧고 간결한 스윙(밀어치기·늦은 타이밍·빗맞음). 1.4초 뒤 배트 놓고 뛰는 구간 잘라냄"
+    },
+    "batStrike": {
+      "src": "Baseball_Strike.fbx",
+      "yaw": 90,
+      "trim": [
+        1.75,
+        6.93
+      ],
+      "note": "[motion] 헛스윙 뒤 반응(배트 내리고 고개 숙임 → 다시 타격 자세). 앞쪽 스윙 구간(0~1.75)은 게임 스윙 클립을 씀"
+    },
+    "batWalkIn": {
+      "src": "Baseball_Walk_In.fbx",
+      "yaw": 90,
+      "trim": [
+        0.6,
+        5.43
+      ],
+      "note": "[motion] 타석으로 걸어 들어와 자세 잡기. 루트 이동 있음 — loader anchor:end 로 끝 자세 = 타석 자리"
+    },
+    "batWalkOut": {
+      "src": "Baseball_Walk_Out.fbx",
+      "yaw": 90,
+      "trim": [
+        0,
+        3.3
+      ],
+      "note": "[motion] 삼진 뒤 타석에서 걸어 나가기(1.4m). anchor:start"
+    },
+    "mill": {
+      "src": "Baseball_Milling_Idle.fbx",
+      "yaw": 90,
+      "note": "[motion] 투구 사이 서성임(체중 이동·글러브/배트 툭툭). 21초 중 2.27~7.07초(처음·끝 자세가 가장 비슷한 구간). 한 번 재생 후 대기 자세로 돌아감(가끔 나오는 버릇) — 9초 이후 쪼그려 앉기·스트레칭은 안 씀",
+      "trim": [
+        2.267,
+        7.067
+      ]
+    },
+    "pitch2": {
+      "src": "Baseball_Pitching.fbx",
+      "trim": [
+        0,
+        3.4
+      ],
+      "note": "[motion] 세트 포지션(퀵모션 느낌) 투구 — 주자 있을 때·투수별 버릇. 시간표는 timing.js 로 같게(릴리스 1.85초)"
+    },
+    "catcherThrow": {
+      "src": "Baseball_Catcher.fbx",
+      "trim": [
+        4.3,
+        6.6
+      ],
+      "note": "[motion] 포수 송구(일어선 자세 → 짧은 팔 송구, 릴리스 ≈ 0.92초)"
+    },
+    "catcherPop": {
+      "src": "Baseball_Catcher.fbx",
+      "trim": [
+        2.4,
+        4.5
+      ],
+      "note": "[motion] 포수 뜬공 포구(글러브 머리 위 → 내림)"
     }
   }
 }

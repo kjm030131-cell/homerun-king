@@ -852,7 +852,10 @@ function updateWorld(dt) {
     A.a.fielder(dt, { speed: sp, ready, knees, splitK, hasBall: hasBall(i), throwK, diveK, jumpK, ballW, reachW, ground, reachWeight: 1 });
   });
   // 타자
-  const showBatter = pitchPhase || (s.ph === 'result' && s.p && s.p.res !== 'hit' && !s.b);
+  // [motion] 맞힌 순간(phase → live) 타자가 바로 주자로 바뀌어 스윙이 컨택 프레임에서 끊기던 것 → 팔로스루(0.34초)까지 타자를 보여 주고 홈의 주자는 그동안 숨김
+  const swingHold = !pitchPhase && s.ph === 'live' && s.p && s.p.res === 'hit' && s.p.swingAt != null && t - s.p.swingAt < 0.34 && !replay.active;
+  const showBatter = pitchPhase || swingHold || (s.ph === 'result' && s.p && s.p.res !== 'hit' && !s.b);
+  if (swingHold) { if (droppedBat.visible) { droppedBat.visible = false; droppedBat.userData.pend = 1; } } else if (droppedBat.userData.pend) { droppedBat.userData.pend = 0; droppedBat.visible = s.ph !== 'pitch'; } // [motion] 배트는 팔로스루 끝나고 땅에
   if (batter) {
     batter.p.root.visible = showBatter && !(camMode === 'bat' && false);
     if (showBatter) {
@@ -921,7 +924,7 @@ function updateWorld(dt) {
     const nm = nameOf(pid);
     setTag(A, nm || '', pid === myId ? '#ffcf3f' : '#fff');
     A.a.runner(dt, { speed: sp, slideK, lead: onBase && (s.ph === 'pitch' || s.ph === 'pitching'), cheer: !!(flags & 2), lookW: onBase ? _v.set(0, 1.2, 15) : null });
-    A.p.root.visible = !(showBatter && b === 0);
+    A.p.root.visible = !(showBatter && (b === 0 || (swingHold && b < 0.3))); // [motion] swingHold
   }
   for (const [k, A] of runners) if (!live.has(k)) { parkRunner(A); runners.delete(k); }
   // 심판/코치

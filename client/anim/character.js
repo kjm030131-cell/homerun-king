@@ -179,8 +179,11 @@ function blobAssets() {
 const POST = ['LeftArm', 'LeftForeArm', 'RightArm', 'RightForeArm', 'Neck', 'Head']; // IK/시선이 건드리는 뼈(리플레이에 같이 기록)
 
 export class Character {
-  constructor(lib, { colors = null, num = '', name = '', scale = 1 } = {}) {
+  constructor(lib, { colors = null, num = '', name = '', scale = 1, seed = Math.random() * 1e4 } = {}) {
     this.lib = lib;
+    // [motion] 선수별 난수(반복 클립 시작 위치를 흩뜨려 18명이 같은 박자로 숨쉬지 않게)
+    let rs = (Math.floor(seed * 7919) ^ 0x9e3779b9) >>> 0 || 1;
+    this.rng = () => { rs ^= rs << 13; rs >>>= 0; rs ^= rs >>> 17; rs ^= rs << 5; rs >>>= 0; return rs / 4294967296; };
     this.root = new THREE.Group(); this.root.name = 'char';
     this.body = new THREE.Group(); this.root.add(this.body);
     this.facing = new THREE.Group(); this.body.add(this.facing);
@@ -228,7 +231,7 @@ export class Character {
     this.post = POST.map((n) => this.bones[n] || null);
     this.yaw = 0;
     if (colors) this.setUniform(colors, num, name);
-    this.play('idle', { fade: 0 });
+    this.play('idle', { fade: 0, from: 0 });
   }
 
   has(name) { return this.lib.clips.has(name); }
@@ -241,7 +244,8 @@ export class Character {
 
   // 클립 재생(크로스페이드). 같은 클립을 다시 부르면 속도만 바뀜(restart: true 면 처음부터)
   duration(name) { const e = this.resolve(name); return e ? e.clip.duration : 0; }
-  play(name, { fade = 0.2, speed = 1, loop, restart = false, sync = false } = {}) {
+  // [motion] from: 처음 시작할 때 이 클립 시각(초)부터 / 반복 클립을 새로 틀면 시작 위치를 선수마다 무작위로(sync·from 이 없을 때)
+  play(name, { fade = 0.2, speed = 1, loop, restart = false, sync = false, from = null } = {}) {
     const e = this.resolve(name); if (!e) return null;
     const cur = this.current();
     let L = this.layers.get(e.name);
@@ -251,7 +255,12 @@ export class Character {
     const lp = loop ?? e.cfg.loop;
     if (isNew || restart || L.scrub >= 0) {
       a.setLoop(lp ? THREE.LoopRepeat : THREE.LoopOnce, Infinity); a.clampWhenFinished = !lp;
-      if (L.w <= 0.001 || restart) { a.reset(); if (sync && cur && cur !== L && cur.e.cfg.loop && lp) a.time = (cur.action.time / cur.e.clip.duration) * e.clip.duration; }
+      if (L.w <= 0.001 || restart) {
+        a.reset();
+        if (sync && cur && cur !== L && cur.e.cfg.loop && lp) a.time = (cur.action.time / cur.e.clip.duration) * e.clip.duration;
+        else if (from != null) a.time = clamp(from, 0, e.clip.duration - 1e-3);
+        else if (lp && !sync) a.time = this.rng() * e.clip.duration;
+      }
       a.enabled = true; a.play();
       L.scrub = -1;
       this._fadeTo(L, fade);
@@ -278,11 +287,14 @@ export class Character {
     return this.scrub(e.name, kClipTime(k, e.cfg.kmap, e.markers), opts);
   }
   // 투구: 와인드업 시작부터 tau 초(timing.js 시간표 ↔ 클립 마커)
-  scrubPitch(tau, opts) {
-    const e = this.resolve('pitch'); if (!e) return null;
-    if (e.name !== 'pitch') return this.scrubK(e.name, clamp(tau / (PITCH_TL.release / 0.55), 0, 1.2), opts);
-    return this.scrub('pitch', pitchClipTime(tau, e.markers), opts);
+  // [motion] name: 투구 변주(pitch·pitch2) — 어떤 클립이든 같은 시간표(릴리스 = 와인드업 + 1.85초)로 구간마다 늘이고 줄임
+  scrubPitch(tau, opts, name = 'pitch') {
+    const e = this.resolve(name); if (!e) return null;
+    if (!(e.cfg.kind === 'pitch' || e.name === 'pitch')) return this.scrubK(e.name, clamp(tau / (PITCH_TL.release / 0.55), 0, 1.2), opts);
+    return this.scrub(e.name, pitchClipTime(tau, e.markers), opts);
   }
+  // [motion] 지금 재생 중인 클립 시각(초) — 없으면 -1 (한 번 재생 클립이 끝났는지 볼 때)
+  clipTime(name) { const e = this.resolve(name); const L = e && this.layers.get(e.name); return L && L.target > 0 ? L.action.time : -1; }
   _fadeTo(L, fade) {
     for (const o of this.layers.values()) {
       const tgt = o === L ? 1 : 0;
