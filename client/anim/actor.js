@@ -333,7 +333,7 @@ export class ClipAnimator {
         const o = c.batOff, k = swinging ? 0.45 : 1, Q = c.batQ;
         if (Q) { _bq2.set(Q[0], Q[1], Q[2], Q[3]); if (k < 1) _bq2.slerp(_bqI, 1 - k); b.quaternion.copy(b.userData.q0).multiply(_bq2); C.motionBody(b, top, k); } // [위 방식] 핸드폰 3D 방향 그대로 + 상체가 따라감
         else if (o) { _be.set(clamp(o[0], -0.95, 0.95) * k, 0, clamp(o[1], -0.8, 0.8) * k); b.quaternion.copy(b.userData.q0).multiply(_bq.setFromEuler(_be)); } else b.quaternion.copy(b.userData.q0); }
-      if (c.pose) C.motionPose(c.pose, 1); // [motion] 웹캠 전신: 내 몸 그대로
+      if (c.pose) C.motionPose(c.pose, 1, !!c.poseMir); // [motion] 웹캠 전신: 내 몸 그대로
       if (P.bat && P.bat.visible && this.gripW > 0.01) C.grip(P.bat, side, top, this.gripW); }
     C.update(dt);
   }

@@ -28,6 +28,7 @@ export function createMotion(api) {
   const { store } = api;
   const M = {
     pad: null, cam: null, code: store.get('padCode', null) || newPadCode(),
+    mirror: !!store.get('motionMir', false), // 웹캠 좌우 반전
     calib: store.get('motionCal', 0), // 타이밍 보정(ms, +면 더 늦게 친 걸로)
     auto: store.get('motionAuto', 0), elMean: store.get('motionEl', -12), ori: null, oriT: 0, // [11-23] 자동 보정(ms): 스윙마다 내 평균 타이밍 쪽으로 조금씩
     camLag: 90, // 웹캠 캡처 지연(ms) 기본값
@@ -39,6 +40,8 @@ export function createMotion(api) {
   M.active = () => M.connected() && api.mg(); // 모션 플레이 경기에서만 입력을 받음
 
   // ── 타격 ──
+  // 화면 배트 임팩트 시각: 미리 돌기 시작한 배트(sws)의 임팩트, 없으면 지금 바로 휘두름
+  const visT = () => { const pre = api.preT(), n = api.simNow(); return Math.max(isFinite(pre) ? pre : n + 0.06, n + 0.02); };
   function swing(atLocalMs, strong, src, el) {
     const S = api.S(), role = api.role();
     if (!S || !S.mo || !role.batter || S.ph !== 'pitching' || !S.p) return S && !S.mo ? 'nomo' : 'skip';
@@ -48,6 +51,17 @@ export function createMotion(api) {
     if (t < S.p.t0 - 0.05) return 'early'; // 공 놓기 전 동작(준비 동작)은 무시
     const p = S.p, sd = src === 'cam' ? 0.07 : 0.055;
     let ay = p.ty + gauss() * sd * 0.8;
+    // [11-24] 핸드폰만: 휘두르기 직전(0.15초 전) 커서 위치로 스윙 — 배트 위치를 공 오는 곳에 맞춰 놓고 치기 (공 쪽으로 20%만 도와줌)
+    const ca = src === 'pad' ? M.cursorAt(atLocalMs - 150) : null;
+    if (ca) {
+      const ax = ca[0] + (p.tx - ca[0]) * 0.2 + gauss() * 0.02, ay2 = ca[1] + (p.ty - ca[1]) * 0.2 + gauss() * 0.02;
+      api.swing(strong ? 'power' : 'contact', { t, aim: [ax, ay2], vis: visT() });
+      M.log.push({ src, lag: Math.round(lagMs), dt: Math.round((t - p.arrive) * 1000), cur: 1 }); if (M.log.length > 20) M.log.shift();
+      M.lastLag = Math.round(lagMs);
+      const dtMs = (t - p.arrive) * 1000; if (Math.abs(dtMs) < 250) { M.auto = Math.max(-220, Math.min(220, M.auto - dtMs * 0.3)); store.set('motionAuto', Math.round(M.auto)); }
+      const off = ca[1] - p.ty; M.lastH = Math.abs(off) < 0.1 ? '높이 딱 맞음' : off > 0 ? '배트가 공보다 위' : '배트가 공보다 아래';
+      return 'ok';
+    }
     // [motion] 스윙 높이: 정점 때 핸드폰 윗부분(배트 끝) 각도 el(°). 내 평균 각도 = 존 한가운데, 35° 숙이면/들면 존 아래/위 끝 → 공 높이와 어긋난 만큼 빗맞음(65%만 반영해 조금 너그럽게)
     if (isFinite(el)) {
       const zn = S.zn || [-0.236, 0.236, 0.46, 1.06], zc = (zn[2] + zn[3]) / 2, half = (zn[3] - zn[2]) / 2;
@@ -60,7 +74,7 @@ export function createMotion(api) {
       M.lastSwingY = swingY;
     }
     const aim = [p.tx + gauss() * sd, ay];
-    api.swing(strong ? 'power' : 'contact', { t, aim });
+    api.swing(strong ? 'power' : 'contact', { t, aim, vis: visT() });
     M.log.push({ src, lag: Math.round(lagMs), dt: Math.round((t - p.arrive) * 1000) }); if (M.log.length > 20) M.log.shift();
     M.lastLag = Math.round(lagMs);
     // 자동 보정: 공 근처(±250ms)에서 휘두른 스윙만, 어긋난 만큼의 30%씩 반영 (5~6번이면 내 타이밍에 맞춰짐)
@@ -80,10 +94,11 @@ export function createMotion(api) {
 
   // ── 핸드폰 ──
   function onPad(m) {
-    if (m.t === 'ori') { M.ori = [+m.b || 0, +m.g || 0]; M.oriQ = Array.isArray(m.q) && m.q.length === 4 ? m.q.map(Number) : null; M.oriT = performance.now(); }
+    if (m.t === 'ori') { M.ori = [+m.b || 0, +m.g || 0]; if (!(performance.now() < M.curFreeze)) M.curRaw = [M.ori[1], M.ori[0]]; M.oriQ = Array.isArray(m.q) && m.q.length === 4 ? m.q.map(Number) : null; M.oriT = performance.now(); }
     else if (m.t === 'chk') { const S = api.S(), role = api.role(); if (S && S.mo && role.batter && S.ph === 'pitching' && S.p && api.simNow() > S.p.t0 && api.net()) { api.net().send({ t: 'chk' }); api.toast('체크스윙'); } }
     else if (m.t === 'sws') { // 휘두르기 시작: 정점(=임팩트)은 보통 시작 뒤 ~60ms → 그 시각으로 화면 스윙만 먼저
       const S = api.S(), role = api.role();
+      M.curFreeze = performance.now() + 700; // 휘두르는 동안 커서 고정
       if (S && S.mo && role.batter && S.ph === 'pitching' && S.p) { const lag = performance.now() - M.pad.toLocal(m.at) - M.calib - M.auto + 80; const t = api.simNow() - lag / 1000 + 0.06; if (t >= S.p.t0) api.preSwing(t); }
     } else if (m.t === 'swing') { const r = swing(M.pad.toLocal(m.at), m.mode === 'power', 'pad', +m.el); M.pad.send({ t: 'ack', k: 'swing', r, lag: r === 'ok' ? M.lastLag : null, auto: Math.round(M.auto), h: r === 'ok' ? M.lastH : null }); M.lastH = null; }
     else if (m.t === 'grip') { M.grip = !!m.on; if (!m.on) { M.aim = null; api.setAim(null); } }
@@ -153,6 +168,7 @@ export function createMotion(api) {
   $('mPadBtn').onclick = () => M.connectPad();
   $('mNewCode').onclick = () => M.newCode();
   $('mCamBtn').onclick = () => M.toggleCam();
+  if ($('mMir')) { $('mMir').checked = M.mirror; $('mMir').onchange = (e) => { M.mirror = !!e.target.checked; store.set('motionMir', M.mirror); }; }
   $('mCal').value = M.calib;
   $('mCal').oninput = (e) => { M.calib = +e.target.value | 0; store.set('motionCal', M.calib); paint(); };
   camCanvas = $('mCamView');
@@ -205,6 +221,17 @@ export function createMotion(api) {
     const n = Math.hypot(bq[0], bq[1], bq[2], bq[3]) || 1; for (let i = 0; i < 4; i++) bq[i] /= n;
     return bq;
   };
+  // [11-24] 핸드폰 조준 커서: 타석 자세 기준 좌우 기울기 → 좌우, 앞뒤 기울기 → 높낮이 (22°면 존 끝)
+  M.cur = null; M.curHist = [];
+  M.updateCursor = () => {
+    const S = api.S(); if (!M.curRaw || performance.now() - M.oriT > 300 || (M.cam && M.cam.on && M.pose && M.pose.ready)) { M.cur = null; return null; }
+    const zn = (S && S.zn) || [-0.236, 0.236, 0.46, 1.06], cx = (zn[0] + zn[1]) / 2, cy = (zn[2] + zn[3]) / 2, hw = (zn[1] - zn[0]) / 2, hh = (zn[3] - zn[2]) / 2;
+    const tx = cx + clamp(M.curRaw[0] / 22, -1.7, 1.7) * hw, ty = cy + clamp(M.curRaw[1] / 22, -1.7, 1.7) * hh;
+    if (!M.cur) M.cur = [tx, ty]; else { M.cur[0] += (tx - M.cur[0]) * 0.35; M.cur[1] += (ty - M.cur[1]) * 0.35; }
+    const n = performance.now(); M.curHist.push([n, M.cur[0], M.cur[1]]); while (M.curHist.length > 90) M.curHist.shift();
+    return M.cur;
+  };
+  M.cursorAt = (tMs) => { if (!M.cur || !M.curHist.length) return null; let r = M.curHist[0]; for (const h of M.curHist) { if (h[0] > tMs) break; r = h; } return [r[1], r[2]]; };
   M.poseNow = () => (M.pose && M.pose.ready && M.cam && M.cam.on ? M.pose.now() : null);
   M.batOff = () => {
     if (!M.ori || performance.now() - M.oriT > 250) return null;
