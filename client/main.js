@@ -593,6 +593,8 @@ addEventListener('keydown', (e) => {
   // 투수
   if (role.pitcher && S.ph === 'pitch' && /^[1-6]$/.test(k)) setPitchType(PITCH_KEYS[+k - 1]);
   if (role.batter && S.dy && S.dy.pr && /^[0-6]$/.test(k)) net.send({ t: 'ppick', type: k === '0' ? 'MIX' : PITCH_KEYS[+k - 1] }); // 타격 연습: 구종 고정
+  // [guess] 구종 예측(더쇼식): 1 직구 · 2 변화구 · 3 오프스피드 · 같은 키 다시 = 취소
+  if (role.batter && S.mode === 'game' && (S.ph === 'pitch' || S.ph === 'pitching') && /^[1-3]$/.test(k)) { const g = ['FB', 'BRK', 'OFF'][+k - 1]; net.send({ t: 'guess', g: S.gs === g ? null : g }); }
   if (role.pitcher && e.code === 'Space' && !camRig.peek) pitchClick(); // [cam] 주자 보기(X) 중엔 조준 안 함
   if (role.pitcher && S.ph === 'pitch' && k === 'q') { net.send({ t: 'pick' }); gauge = null; }
   // 수비

@@ -151,6 +151,7 @@ export function inZone(x, y) {
 }
 // [ABS 11-23] KBO 자동 투구 판정 시스템(2025 기준): 존 높이 = 타자 키의 27.04% ~ 55.75%, 폭 = 홈플레이트(43.18cm) + 양옆 2cm
 //  공이 존에 조금이라도 걸치면 스트라이크(공 반지름만큼 넓게). 리얼 모드 판정, 캐주얼은 기존 넓은 존
+export const GUESS_CAT = { FB: ['FB', 'TS', 'BP'], BRK: ['SL', 'CB'], OFF: ['CH', 'SP'] }; // [guess] 직구 · 변화구 · 오프스피드
 export const ABS = { top: 0.5575, bot: 0.2704, halfW: 0.2159 + 0.02 };
 export function absZone(h) { return { x0: -ABS.halfW, x1: ABS.halfW, y0: r2(ABS.bot * h), y1: r2(ABS.top * h) }; }
 export function edgeOf(z, x, y) { const ix = Math.min(x - (z.x0 - BALL_R), z.x1 + BALL_R - x), iy = Math.min(y - (z.y0 - BALL_R), z.y1 + BALL_R - y); return ix >= 0 && iy >= 0 ? Math.min(ix, iy) : Math.hypot(Math.max(0, -ix), Math.max(0, -iy)); } // 존 경계까지 거리(m, 안·밖 모두 양수)
@@ -607,6 +608,7 @@ export class Game {
       case 'dive': this.onDive(id, m); break;
       case 'throw': this.onThrow(id, m); break;
       case 'challenge': this.onChallenge(id); break; // [ABS]
+      case 'guess': this.onGuess(id, m); break; // [guess] 구종 예측
       case 'run': this.onRunCmd(id, m); break;
       case 'slide': this.onSlideCmd(id); break;
       case 'chat': {
@@ -905,6 +907,7 @@ export class Game {
   enterPitch() {
     this.phase = 'pitch';
     this.pitch = null; this.ball = null; this.aiSwing = null; this.play = null;
+    this.guess = null; // [guess] 투구마다 다시 찍음
     this.resetFielders(this.mode !== 'derby');
     this.backUntil = this.now + 4.5; // 이때까지 못 오면 남은 거리만 맞춤
     this.runners = this.runners.filter((r) => !r.out && !r.scored && !r.trot).map((r) => ({ ...r, b: r.target, start: r.target, forced: false, mustReturn: false, manual: 0, steal: false, trot: false }));
@@ -1070,10 +1073,18 @@ export class Game {
     return (HIT_EASE[this.set.hitEase] || 1) * this.R.hitEase * (this.clutchOn() ? this.R.clutch.ease : 1);
   }
 
+  // [guess 11-23] 더쇼식 구종 예측: 투구 전에 타자가 '직구 / 변화구 / 오프스피드' 중 하나를 찍음 → 맞히면 판정 배율 ×1.18, 틀리면 ×0.9 (안 찍으면 그대로)
+  onGuess(id, m) {
+    if (this.mode !== 'game' || !this.batter || this.batter.id !== id) return;
+    if (!(this.phase === 'pitch' || (this.phase === 'pitching' && this.pitch && this.now < this.pitch.t0 - 0.4))) return; // 와인드업 끝나기 전까지만
+    this.guess = GUESS_CAT[m.g] ? m.g : null;
+  }
   onSwing(id, m) {
     if (this.phase !== 'pitching' || !this.pitch || this.pitch.swung || this.batter.id !== id || m.pid !== this.pitch.id) return;
     const mode = this.mode === 'game' && (this.buntStance || m.mode === 'bunt') ? 'bunt' : (m.mode === 'power' ? 'power' : 'contact');
-    this.resolveSwing(Number(m.dt), Number(m.ax), Number(m.ay), mode, this.humanEase(mode), true);
+    let ease = this.humanEase(mode);
+    if (this.guess && mode !== 'bunt') { const ok = GUESS_CAT[this.guess].includes(this.pitch.type); ease *= ok ? 1.18 : 0.9; this.ev('guessResult', { pid: this.pitch.id, g: this.guess, ok: ok ? 1 : 0, type: this.pitch.type }); }
+    this.resolveSwing(Number(m.dt), Number(m.ax), Number(m.ay), mode, ease, true);
   }
 
   resolveSwing(dt, ax, ay, mode = 'contact', ease = 1, human = false) {
@@ -2556,6 +2567,7 @@ export class Game {
     if (this.absEv) s.ab = this.absEv; // [ABS] 마지막 판정
     if (this.chal && this.phase === 'result') s.ch2 = [this.chal.pid, this.chal.call ? 1 : 0, this.chal.team, r2(Math.max(0, this.phaseUntil - this.now)), this.chal.req ? 1 : 0, this.chalLeft[this.chal.team]]; // [ABS] 챌린지 창
     if (this.chalLeft) s.cl2 = [this.chalLeft.away, this.chalLeft.home];
+    s.gs = this.guess || null; // [guess]
     if (this.batter && this.mode === 'game') { const z = this.zoneNow(); s.zn = [z.x0, z.x1, z.y0, z.y1]; } // [ABS] 지금 타자 존(그림)
     s.ar = this.play && this.play.autoRun && this.now < this.play.autoRun.until ? this.play.autoRun.i : -1; // 사람 야수 자동 베이스 밟기 중(클라 조작 잠금)
     if (this.catchEv) s.ce = this.catchEv;
