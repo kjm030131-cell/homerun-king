@@ -159,6 +159,12 @@ export function hudFrame(c, role, f) {
     prevSc = s.sc;
   }
 
+  // [ABS 챌린지] 주심 콜 직후 3초: 손해 본 팀에게 'C · ABS 챌린지' (남은 횟수·시간 막대)
+  { const ch = s.ch2, myT = role.offense ? s.bt : role.defense ? (s.bt === 'home' ? 'away' : 'home') : null;
+    const on = !!(ch && !ch[4] && ch[5] > 0 && myT === ch[2] && ch[3] > 0.05) && !$('absRev').classList.contains('show');
+    show('chalBar', on);
+    if (on) { setHTML('chalTxt', `주심 <b>${ch[1] ? '스트라이크' : '볼'}</b> · 억울하면 <span class="kbd">C</span> ABS 챌린지 <small>남은 ${ch[5]}회</small>`); style($('chalBar').querySelector('i'), 'transform', `scaleX(${clamp(ch[3] / 3.2, 0, 1).toFixed(3)})`); }
+    const cl = s.cl2; if (cl && myT) setText('chalLeft', `챌린지 ${cl[myT === 'away' ? 0 : 1]}`); }
   // ── 이하 값이 바뀔 때만 ──
   const dy = s.dy, bat = s.bat || {};
   const key = `${s.sc}|${s.inn}|${s.half}|${s.cnt}|${s.occ}|${bat.id}|${bat.name}|${bat.n}|${s.bt}|${role.pos}|${role.batter}|${role.pitcher}|${s.ph}|${role.holding}|${role.offense}|${role.fi}|${s.tn}|${s.sta}|${s.pc}|${dy ? [dy.sw, dy.xh, dy.idx, dy.outs, dy.pp, dy.list[dy.idx]?.[2]] : ''}|${c.nPlayers}|${s.mode}|${f.bunt}|${s.ch}|${s.cv}|${s.rl}|${f.landChase}|${s.fc}|${c.rules}|${s.cl}`;
@@ -418,4 +424,20 @@ export function absCall(a, bat) {
     <div class="ab-call">${a.s ? 'STRIKE' : 'BALL'}</div>`;
   e.classList.remove('show'); void e.offsetWidth; e.classList.add('show');
   clearTimeout(absT); absT = setTimeout(() => e.classList.remove('show'), 2400);
+}
+
+// [ABS 챌린지] 판독 화면 오버레이: 0 = 판독 중(신청자·원심), 1 = 결과(번복/유지 + ABS 카드), null = 끝
+export function absReview(ab, stage) {
+  const e = $('absRev'); if (!e) return;
+  if (!ab) { e.classList.remove('show', 'done'); $('absCard') && $('absCard').classList.remove('rv'); return; }
+  if (stage === 0) {
+    show('chalBar', false);
+    e.className = 'show';
+    e.innerHTML = `<div class="ar-top"><b>ABS</b> CHALLENGE</div><div class="ar-sub">${esc(ab.by || '')} 신청 · 원심 <b>${ab.c ? '스트라이크' : '볼'}</b></div><div class="ar-res"></div>`;
+  } else {
+    const over = !!ab.over;
+    e.classList.add('done', over ? 'over' : 'keep');
+    e.querySelector('.ar-res').innerHTML = `<b>${over ? '판정 번복' : '원심 유지'}</b><span>${ab.s ? 'STRIKE' : 'BALL'}</span>`;
+    absCall({ ...ab }, null); $('absCard').classList.add('rv');
+  }
 }
