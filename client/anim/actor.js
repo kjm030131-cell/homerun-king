@@ -322,6 +322,12 @@ export class ClipAnimator {
     else if (c.loadK > 0.02) C.scrubK(sw0, 0.25 * clamp(c.loadK, 0, 1.12), { fade: 0.25 }); // [anim] 1.12 = 출발(launch) 직전까지 스트라이드
     else C.play(this._m(this.stance), { fade: 0.35, speed: this.stSpeed });
     if (c.lookW && !(swinging) && !this.shot) C.look(c.lookW, 0.4);
+    // [model 11-23] 두 손 그립: 대기·준비·스윙(임팩트까지)은 두 손, 팔로스루 끝에서 한 손 놓음. 입장·반응 동작 중엔 안 함
+    { const P = this.p, top = P.hand < 0 ? 'L' : 'R', side = top === 'L' ? 'R' : 'L';
+      let w = this._shotOn() && !swinging ? 0 : 1;
+      if (swinging) w = c.swingK < 0.6 ? 1 : clamp(1 - (c.swingK - 0.6) / 0.14, 0, 1);
+      this.gripW = (this.gripW ?? w) + (w - (this.gripW ?? w)) * Math.min(1, dt * 14);
+      if (P.bat && P.bat.visible && this.gripW > 0.01) C.grip(P.bat, side, top, this.gripW); }
     C.update(dt);
   }
   catcher(dt, c) {

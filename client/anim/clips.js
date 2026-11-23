@@ -9,7 +9,7 @@ export const FILES = {
   player: 'player.glb', // Mixamo 자동 리깅된 몸(T포즈, With Skin) → Blender 로 GLB
   playerLod: 'player.lod.bin', // (선택) 저폴리 인덱스 — CI 빌드가 tools/glb-lod.mjs 로 만든다
   cap: 'cap.glb', helmet: 'helmet.glb', bat: 'bat.glb', glove: 'glove.glb',
-  mask: null, // (선택) 유니폼 색 마스크 PNG(R=상의 G=바지 B=스타킹). 없으면 흰색 자동 판정
+  mask: 'player.mask.png', // 유니폼 색 마스크 PNG(R=상의 G=바지 B=스타킹) — tools/make-mask.py 로 만듦. 없으면 흰색 자동 판정(주름 그림자가 안 칠해져 얼룩)
 };
 
 // 게임 클립 이름(고정) → 파일/재생 규칙
@@ -101,7 +101,7 @@ export const BODY = {
   farUpdate: 2, // 먼 선수는 N 프레임마다 한 번 애니메이션 갱신
   hiddenUpdate: 6, // 화면 밖 선수는 N 프레임마다 한 번
   // 유니폼 색 자동 판정(마스크 PNG 없을 때): 흰/옅은 회색 텍셀만 팀 색으로. 높이는 발(0)~정수리(1)
-  tint: { satMax: 0.16, lumMin: 0.5, neck: 0.83, belt: 0.535, sock: 0.2 },
+  tint: { satMax: 0.16, lumMin: 0.5, neck: 0.865, belt: 0.585, sock: 0.2 }, // [model 11-23] 벨트·어깨 높이를 실제 몸에 맞춤(예전 값이면 바지 윗부분이 상의 색)
   // 등번호·가슴 글씨 투영 영역(키 대비)
   decal: { y0: 0.6, y1: 0.79, halfW: 0.12 },
 };

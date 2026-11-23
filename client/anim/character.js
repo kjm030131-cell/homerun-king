@@ -125,6 +125,7 @@ const _qOa = new THREE.Quaternion(), _qOb = new THREE.Quaternion(), _m4 = new TH
 const ang = (u, v) => Math.acos(clamp(u.dot(v) / Math.max(1e-9, u.length() * v.length()), -1, 1));
 
 // 2관절 해석 IK(위팔·아래팔): 월드 목표점으로 손을 보냄. 팔꿈치 방향은 지금(클립) 자세의 굽힘 평면을 유지.
+const _gp = new THREE.Vector3();
 export function twoBoneIK(upper, lower, end, target, w = 1) {
   if (w <= 0) return;
   upper.getWorldPosition(_a); lower.getWorldPosition(_b); end.getWorldPosition(_c);
@@ -305,6 +306,8 @@ export class Character {
 
   // 팔 IK/시선 요청(이번 프레임만). update 에서 클립 위에 덧입힘
   reach(side, worldPos, w = 1) { if (!worldPos) return; this.ikReq[side] = w; this.ikT[side].copy(worldPos); }
+  // [model 11-23] 두 손 그립: 배트(bat, +y 축)를 쥔 손(top) 바로 아래(손잡이 쪽 gap m)로 다른 손(side)을 IK — 클립이 한 손만 배트에 붙어 있어 다른 손이 떠 있던 것
+  grip(bat, side, top, w = 1, gap = 0.085) { if (!bat || w <= 0.01) return; this.gripReq = { bat, side, top, w, gap }; }
   look(worldPos, w = 1) { if (!worldPos) return; this.lookReq = w; this.lookT.copy(worldPos); }
 
   update(dt) {
@@ -325,7 +328,7 @@ export class Character {
       const r = this.root;
       _sph.center.setFromMatrixPosition(r.matrixWorld); _sph.center.y += 1; _sph.radius = 2.2 * r.scale.x;
       const inView = FR.frustum.intersectsSphere(_sph);
-      const far = _sph.center.distanceToSquared(FR.cam) > BODY.lodDist * BODY.lodDist;
+      const far = !window.__noLod && _sph.center.distanceToSquared(FR.cam) > BODY.lodDist * BODY.lodDist; // __noLod: qa 클로즈업
       if (this.lo) { this.lo.visible = far; this.hi.visible = !far; }
       every = !inView ? BODY.hiddenUpdate : far ? BODY.farUpdate : 1;
     }
@@ -347,10 +350,23 @@ export class Character {
     for (const s of ['L', 'R']) { const tw = this.ikReq[s] ?? 0; this.ikW[s] += (tw - this.ikW[s]) * k; if (this.ikW[s] > 0.01) any = true; }
     this.lookW += ((this.lookReq ?? 0) - this.lookW) * (1 - Math.exp(-8 * dt));
     if (this.lookW > 0.01) any = true;
-    if (!any) return;
+    if (!any && !this.gripReq) return;
     // [net] root.updateMatrixWorld(true)(뼈 53개+장비 전체)를 지움 — twoBoneIK·_look 의 getWorldPosition/Quaternion 이 필요한 부모 사슬만 갱신함 (qa 요청: 심판 look 이 상시라 매 프레임 전체 갱신이었음)
     const B = this.bones;
+    const G = this.gripReq; this.gripReq = null;
+    if (G) { // 클립 자세가 나온 뒤 배트 위치로 목표 계산 → IK
+      const th = B[G.top === 'L' ? 'LeftHand' : 'RightHand'];
+      if (th) {
+        G.bat.updateWorldMatrix(true, false);
+        th.getWorldPosition(_gp); G.bat.worldToLocal(_gp);
+        _gp.set(0, _gp.y - G.gap, 0); G.bat.localToWorld(_gp);
+        this.ikT[G.side].copy(_gp); this.ikW[G.side] = Math.max(this.ikW[G.side], G.w * 0.999);
+        const u = B[(G.side === 'L' ? 'Left' : 'Right') + 'Arm'], l = B[(G.side === 'L' ? 'Left' : 'Right') + 'ForeArm'], h = B[(G.side === 'L' ? 'Left' : 'Right') + 'Hand'];
+        if (u && l && h) twoBoneIK(u, l, h, _gp, G.w);
+      }
+    }
     for (const [s, n] of [['L', 'Left'], ['R', 'Right']]) {
+      if (G && s === G.side) continue;
       const w = this.ikW[s]; if (w <= 0.01) continue;
       const u = B[n + 'Arm'], l = B[n + 'ForeArm'], h = B[n + 'Hand'];
       if (u && l && h) twoBoneIK(u, l, h, this.ikT[s], w);
