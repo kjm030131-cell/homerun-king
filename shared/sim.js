@@ -1151,6 +1151,8 @@ export class Game {
   endPA(dur) { this.pause(dur, this.outs >= 3 ? 'half' : 'next'); }
 
   addRun(r) {
+    // [bugs] 끝내기: 결승점이 들어오면 경기 끝 — 그 뒤 주자 득점은 인정 안 함 (홈런은 전부 인정)
+    if (this.walkoff && this.mode === 'game' && !(r && r.trot)) { this.woExtra = (this.woExtra || 0) + 1; return; }
     this.score[this.half]++;
     this.halfRuns++;
     if (this.play) this.play.runs++;
@@ -1189,7 +1191,7 @@ export class Game {
     if (a.half !== this.half || a.inn !== this.inning) return;
     const p = this.pstat(a.key, a.name, a.team), t = this.sumStats();
     p.outs += Math.max(0, this.outs - a.outs); p.r += Math.max(0, this.score[this.half] - a.runs); p.h += Math.max(0, this.hits[this.half] - a.hits);
-    p.k += Math.max(0, t.k - a.k); p.bb += Math.max(0, t.bb - a.bb); p.hr += Math.max(0, t.hr - a.hr); p.bf++;
+    p.k += Math.max(0, t.k - a.k); p.bb += Math.max(0, t.bb - a.bb); p.hr += Math.max(0, t.hr - a.hr); if (!a.noBF) p.bf++;
   }
   // 현재 투수 오늘 기록 (진행 중 타석 제외)
   curPitcher() {
@@ -1357,6 +1359,7 @@ export class Game {
     f.x = clamp(f.x + (x - f.x) * k, -135, 135); f.z = clamp(f.z + (z - f.z) * k, -20, 135);
     f.ry = Number(m.ry) || 0;
     f.act = this.now; f.lastMvT = this.now;
+    const c = Number(m.c); f.mc = isFinite(c) && c > 0 ? Math.round(c) : 0; // [net] 보낸 쪽 시계(ms): 다른 사람 화면이 이 위치를 보낸 시각대로 고르게 보간 (판정엔 안 씀)
     if (pre) { f.x = clamp(f.x, -60, 60); f.z = clamp(f.z, 8, 110); f.shift = [f.x, f.z]; }
   }
   onJump(id) {
@@ -1401,6 +1404,7 @@ export class Game {
     }
     const pt = k === 0 ? MOUND : BASES[k % 4];
     if (k >= 1 && k <= 4 && this.smartThrow(i, k, clamp(Number(m.p) || 0.4, 0, 1))) return;
+    if (dist2(f.x, f.z, pt[0], pt[1]) < 2.5) return; // [bugs] 이미 그 베이스 위인데 그 베이스로 송구 = 제자리에 공을 떨어뜨리던 것 → 무시(들고 있음)
     this.throwTo(i, pt[0], pt[1], clamp(Number(m.p) || 0.4, 0, 1));
   }
   // [11-23] 사람 송구 보조 — 빈 베이스로 던져 악송구 실점 나던 것 방지 (실제 야수처럼)
@@ -1429,14 +1433,21 @@ export class Game {
 
   onRunCmd(id, m) {
     const p = this.players.get(id);
-    if (this.phase !== 'live' || !p || p.team !== this.batTeam) return;
-    for (const r of this.alive()) {
+    if (this.phase !== 'live' || !p || p.team !== this.batTeam || (this.play && this.play.kind === 'pick')) return; // [bugs] 견제 중엔 진루 명령 무시 (견제 플레이 주루는 귀루만 → 목표만 바뀌어 플레이가 안 끝남)
+    // [bugs] 한 베이스로 두 주자가 가거나(진루: 앞 주자부터) 이미 주자가 있는 베이스로 되돌아가는(귀루: 뒤 주자부터) 것 막기,
+    //        타자주자는 홈으로 귀루 안 함 (전엔 1루 가다 '귀루' 누르면 홈플레이트로 돌아가 홈 위에 주자로 남음)
+    const al = this.alive().filter((r) => !r.trot).sort((a, c) => (m.go ? c.b - a.b : a.b - c.b));
+    const taken = (k, r) => al.some((o) => o !== r && (o.target === k || (o.b === k && o.target === k)));
+    for (const r of al) {
       if (m.go) {
         if (r.mustReturn || r.target >= 4) continue;
-        if (r.b === r.target) { r.target++; r.manual = this.now + 1.5; }
-        else if (r.target < r.b) { r.target = Math.ceil(r.b); r.manual = this.now + 1.5; } // 귀루 중이어도 다시 앞으로
+        const k = r.b === r.target ? r.target + 1 : r.target < r.b ? Math.ceil(r.b) : -1;
+        if (k < 0 || (k < 4 && taken(k, r)) || al.some((o) => o !== r && o.b > r.b && o.b < k && o.target <= o.b)) continue; // 앞 주자 추월 금지
+        r.target = k; r.manual = this.now + 1.5;
       } else if (!r.forced && r.b < r.target && r.b > Math.floor(r.b)) {
-        r.target = Math.floor(r.b); r.manual = this.now + 1.5;
+        const k = Math.floor(r.b);
+        if ((k < 1 && r.batter) || (k >= 1 && taken(k, r))) continue;
+        r.target = k; r.manual = this.now + 1.5;
       }
     }
   }
@@ -1577,6 +1588,7 @@ export class Game {
       this.say(robbed ? '홈런 강탈!!' : diving ? '다이빙 캐치!' : `${POS_KO[f.pos]} ${b.vy > -8 && Math.hypot(b.x, b.z) < 40 && b.ev > 120 ? '직선타' : '플라이'} 아웃`);
       this.play.result = 'fly';
       b.fair = true;
+      if (this.outs >= 3) this.voidRuns(); // [bugs] 2아웃 뜬공: 주자가 포구 전에 홈을 밟아도 득점 아님 (타자 아웃 = 1루 도달 전 아웃)
       for (const rr of this.alive()) {
         if (rr.b !== rr.start || rr.target !== rr.start) { rr.target = rr.start; rr.mustReturn = rr.b !== rr.start; rr.forced = false; }
       }
@@ -1585,11 +1597,14 @@ export class Game {
   }
 
   foulBall() {
+    // [bugs] 파울 확정 전에 홈을 밟은 주자 득점은 취소 (전엔 페어/파울 판정 전 뜬공에 3루 주자가 들어오면 파울이 돼도 점수가 남음)
+    if (this.play && this.play.runs > 0) { this.score[this.half] -= this.play.runs; this.halfRuns -= this.play.runs; this.walkoff = false; this.woExtra = 0; this.ev('scoreVoid', { half: this.half, runs: this.play.runs, sc: [...this.score], foul: 1 }); this.play.runs = 0; }
+    if (this.mode === 'game') this.stat().pa--; // [bugs] 파울은 타석이 안 끝남 — startPlay 가 올린 타석 수를 되돌림 (전엔 파울 타구마다 타석 +1 → 타율이 낮게 나옴)
     this.ev('foul', { pid: this.pitch ? this.pitch.id : 0, kind: this.ball && this.ball.bunt ? 'bunt' : 'ball', s: Math.min(2, this.strikes + 1), x: this.ball ? r2(this.ball.x) : 0, z: this.ball ? r2(this.ball.z) : 0 });
     this.say(this.ball && this.ball.bunt ? '번트 파울' : '파울', false);
     this.runners = this.runnersBefore.map((r) => ({ ...r, steal: false, b: r.start ?? r.b, target: r.start ?? r.target }));
     if (this.strikes < 2) this.strikes++;
-    else if (this.ball && this.ball.bunt) { this.ball.ghost = true; this.play = null; this.strikes = 3; this.outs++; this.ev('out', { kind: 'k', call: 'out', k: 0, x: 0, z: 0, bunt: 1, outs: this.outs, bid: this.batter.id || null, name: this.batter.name }); const bs = this.stat(); bs.k++; this.say('스리번트 파울 · 삼진'); return this.endPA(1.8); }
+    else if (this.ball && this.ball.bunt) { this.ball.ghost = true; this.play = null; this.strikes = 3; this.outs++; this.ev('strikeCall', { pid: this.pitch ? this.pitch.id : 0, swinging: 1, looking: 0, b: this.balls, s: 3, k: 1, bunt: 1 }); this.ev('out', { kind: 'k', call: 'out', k: 0, x: 0, z: 0, bunt: 1, outs: this.outs, bid: this.batter.id || null, name: this.batter.name }); const bs = this.stat(); bs.k++; bs.pa++; this.stamina().k++; this.say('스리번트 파울 · 삼진'); return this.endPA(1.8); }
     this.ball.ghost = true;
     this.play = null;
     this.pause(1.4, 'pitch');
@@ -1620,6 +1635,8 @@ export class Game {
     r.out = true;
     this.outs++;
     this.play.outs = (this.play.outs || 0) + 1;
+    // [bugs] 뒤 주자(타자주자 포함)가 아웃되면 앞 주자들의 포스 상태가 풀림 → 그 뒤로는 태그해야 아웃 (전엔 1루 밟아 타자 아웃 후 2루 베이스만 밟아도 포스아웃)
+    if (this.play.kind === 'bip' && !r.mustReturn) { const s0 = r.batter ? 0 : (r.start ?? Math.floor(r.b)); for (const o of this.runners) if (o !== r && !o.out && !o.scored && o.forced && !o.batter && (o.start ?? 0) > s0) o.forced = false; }
     { const h = this.ball ? this.ball.holder : -1, hf = this.fielders[h], base = kind === 'force' ? r.target : Math.round(r.b);
       const k2 = this.play.kind === 'pick' ? 'pick' : this.play.kind === 'steal' ? 'cs' : kind;
       if (kind === 'tag') this.ev('tag', { i: h, pos: hf ? hf.pos : '', rid: r.rid, base });
@@ -1631,15 +1648,22 @@ export class Game {
     if (this.play.outs === 2) this.say('병살!');
     if (this.play.outs === 3) this.say('삼중살!!');
     if (this.outs >= 3) {
-      if ((kind === 'force' || r.batter) && this.play.runs > 0) {
-        this.score[this.half] -= this.play.runs; this.halfRuns -= this.play.runs; this.walkoff = false;
-        this.ev('scoreVoid', { half: this.half, runs: this.play.runs, sc: [...this.score] });
-        this.say('쓰리아웃 · 득점 무효');
-      }
+      // [bugs] 타자주자는 1루 밟기 전에 아웃될 때만 득점 무효 (1루 지나 2루에서 태그아웃이면 그 전에 들어온 득점은 인정)
+      if (kind === 'force' || (r.batter && r.b < 1)) this.voidRuns();
       this.endPlay();
     }
   }
 
+  // [bugs] 3아웃이 포스아웃·타자주자 아웃·뜬공 포구면 그 플레이 득점 무효 (타점도 없음)
+  voidRuns() {
+    const P = this.play; if (!P || !(P.runs > 0)) return;
+    this.score[this.half] -= P.runs; this.halfRuns -= P.runs; this.walkoff = false;
+    this.ev('scoreVoid', { half: this.half, runs: P.runs, sc: [...this.score] });
+    P.runs = 0;
+    this.say('쓰리아웃 · 득점 무효');
+  }
+  // [bugs] 견제사·도루사로 3아웃이면 그 타자 타석은 안 끝남 → 다음 이닝(그 팀 공격) 첫 타자로 다시 (전엔 타순 하나가 통째로 건너뛰어짐)
+  keepBatter() { if (this.mode === 'game' && this.lineIdx) { this.lineIdx[this.batTeam] = Math.max(0, this.lineIdx[this.batTeam] - 1); if (this.pa0) this.pa0.noBF = true; } }
   endPlay() {
     if (!this.play) return;
     const P = this.play;
@@ -1648,6 +1672,7 @@ export class Game {
       if (!/견제사/.test(this.msg)) { this.say('세이프! 귀루 성공', false); const b0 = BASES[P.pickBase % 4]; this.ev('safe', { call: 'safe', k: P.pickBase, base: P.pickBase, pick: 1, x: r2(b0[0]), z: r2(b0[1]) }); }
       this.play = null;
       if (this.ball && this.ball.state !== 'held') this.ball.ghost = true;
+      if (this.outs >= 3) this.keepBatter(); // [bugs]
       return this.pause(1.3, this.outs >= 3 ? 'half' : 'pitch');
     }
     if (P.kind === 'steal') {
@@ -1659,6 +1684,7 @@ export class Game {
       }
       this.play = null;
       if (this.ball && this.ball.state !== 'held') this.ball.ghost = true;
+      if (this.outs >= 3 && P.after !== 'next') this.keepBatter(); // [bugs] (삼진+도루사 3아웃이면 타석은 끝난 것)
       return this.pause(1.8, this.outs >= 3 ? 'half' : P.after);
     }
     const br = this.runners.find((r) => r.batter);
@@ -1676,7 +1702,8 @@ export class Game {
     } else if (br && br.out && this.ball.bunt && P.runs === 0 && this.alive().some((r) => r.target > r.start)) this.say('희생번트 성공');
     this.stat().rbi += P.err ? 0 : Math.max(0, P.runs);
     for (const r of this.runners) delete r.batter;
-    for (const r of this.alive()) { if (r.b !== Math.floor(r.b)) r.target = Math.floor(r.b); r.b = r.target; }
+    // [bugs] 3아웃이면 남은 주자는 그 자리에 멈춤 (전엔 1루로 뛰던 타자주자가 결과 화면 동안 홈플레이트로 순간이동)
+    for (const r of this.alive()) { if (this.outs >= 3) { r.target = Math.min(4, Math.max(1, Math.ceil(r.b))); continue; } /* target 은 항상 정수(클라가 BASES[target] 로 씀) */ if (r.b !== Math.floor(r.b)) r.target = Math.floor(r.b); r.b = r.target; }
     this.play = null;
     if (this.ball && this.ball.state !== 'held') this.ball.ghost = true;
     this.ev('playEnd', { runs: P.runs, outs: this.outs, hl: P.highlight ? 1 : 0 });
@@ -1869,6 +1896,7 @@ export class Game {
       return;
     }
     const [aw, hm] = this.score;
+    if (this.line && this.line[this.half] && this.line[this.half][this.inning - 1] == null) this.line[this.half][this.inning - 1] = this.halfRuns; // [bugs] 끝내기는 endHalf 를 안 거쳐서 마지막 이닝 라인스코어가 비어 있었음
     this.winner = aw > hm ? 'away' : hm > aw ? 'home' : null;
     this.ev('gameEnd', { sc: [aw, hm], win: this.winner, walkoff: this.walkoff ? 1 : 0, mercy: this.mercy ? 1 : 0, inning: this.inning, rules: this.set.rules });
     this.say(this.winner ? `경기 종료 · ${this.set.teams[this.winner === 'away' ? 0 : 1]} 승리` : '경기 종료 · 무승부');
@@ -1894,7 +1922,7 @@ export class Game {
     // 예약된 사람 송구 실행
     if (P.queuedThrow && this.now >= P.queuedThrow.at) {
       const q = P.queuedThrow; P.queuedThrow = null;
-      if (b.holder === q.i) { const pt = q.k === 0 ? MOUND : BASES[q.k % 4]; this.throwTo(q.i, pt[0], pt[1], q.p); }
+      if (b.holder === q.i) { const pt = q.k === 0 ? MOUND : BASES[q.k % 4], qf = this.fielders[q.i]; if (dist2(qf.x, qf.z, pt[0], pt[1]) >= 2.5) this.throwTo(q.i, pt[0], pt[1], q.p); } // [bugs] 예약 송구도 서 있는 베이스면 무시
     }
     // 견제구: 커버 들어간 야수가 베이스 근처에 오면(또는 시간 다 되면) 투수가 던짐
     if (P.kind === 'pick' && P.pickAt && b.holder === P.pickFrom) {
@@ -1997,6 +2025,8 @@ export class Game {
         }
       }
     }
+    // [bugs] 끝내기: 결승점이 들어오고 타자가 1루를 밟으면 바로 경기 끝 (그 뒤 주루사로 득점이 무효되거나 플레이가 길게 이어지던 것)
+    if (this.walkoff && !this.runners.some((r) => r.batter && !r.out && !r.scored && r.b < 1)) return this.endPlay();
     // 종료 판정
     const settled = b.holder >= 0 && this.alive().every((r) => r.b === r.target && !r.mustReturn);
     if (settled) {
@@ -2008,6 +2038,11 @@ export class Game {
 
   groundRule(text) {
     this.say(text);
+    if (!this.ball.batted) { // [bugs] 송구가 관중석으로 = 악송구 실책 (전엔 실책 기록 없이 진루만)
+      const ti = this.ball.thrower, tf = this.fielders[ti];
+      this.errs[this.half === 0 ? 1 : 0]++; this.play.err = true;
+      this.ev('error', { i: ti, pos: tf ? tf.pos : '', kind: 'throw' });
+    }
     for (const r of this.alive()) {
       const t = Math.min(4, (r.batter ? 0 : r.start) + 2);
       r.target = t; r.b = t;
@@ -2305,7 +2340,8 @@ export class Game {
     for (const r of alive) {
       if (r.batter && this.now - P.t0 < (this.ball.bunt ? 0.2 : 0.38)) continue; // 스윙 후 출발
       if (P.kind === 'pick') { // 견제: 반응 후 몸 돌려 귀루(약 5.5m/s) + 다이빙
-        if (this.now < (r.pickWait || 0) || r.b <= r.target) continue;
+        if (r.b <= r.target) { r.mustReturn = false; continue; } // [bugs] 귀루 끝나면 해제 (안 하면 공을 계속 돌릴 때 플레이가 안 끝남)
+        if (this.now < (r.pickWait || 0)) continue;
         const v = 6.4 / BASE_D * Math.min(1, (this.now - r.pickWait) / 0.3 + 0.4);
         r.b = Math.max(r.target, r.b - v * dt);
         if ((r.b - r.target) * BASE_D < 2.4 && !r.slide) this.slide(r, r.target);
@@ -2370,7 +2406,9 @@ export class Game {
         const remain = (r.target - r.b) * BASE_D / RUN_SPEED;
         const back = (r.b - Math.floor(r.b)) * BASE_D / RUN_SPEED;
         const tDef = this.defTime(r.target);
-        if (tDef < remain - 0.6 && back < remain && !(behind && behind.target >= Math.floor(r.b))) r.target = Math.floor(r.b);
+        // [bugs] 아직 밟지 않은 중간 베이스가 있으면 거기서 멈춤 (전엔 floor 로 돌아가 1루 가던 타자주자가 홈으로 되돌아가 홈 위에 '주자'로 남음)
+        const stop = Math.ceil(r.b) < r.target ? Math.ceil(r.b) : Math.floor(r.b);
+        if (tDef < remain - 0.6 && back < remain && !(behind && behind.target >= stop) && !(stop < 1 && r.batter)) r.target = stop;
       }
     }
   }
@@ -2407,7 +2445,7 @@ export class Game {
     if (this.now - (this.pgAt || -9) > 2) { this.pgAt = this.now; s.pg = [...this.players.values()].filter((p) => p.conn && p.team !== 'spec').map((p) => [p.name, p.ping | 0]); }
     s.bat = this.batter; s.bt = this.batTeam;
     s.msg = [this.msgId, this.msg, this.msgBig ? 1 : 0];
-    s.fl = this.fielders.map((f) => [f.pos, r2(f.x), r2(f.z), r2(f.ry), f.ctrl, f.mv, age(f.jt), age(f.dv), age(f.fum)]);
+    s.fl = this.fielders.map((f) => { const a = [f.pos, r2(f.x), r2(f.z), r2(f.ry), f.ctrl, f.mv, age(f.jt), age(f.dv), age(f.fum)]; if (f.mc && this.now - f.lastMvT < 0.1) a.push(f.mc); return a; }); // [net] [9] = 사람 조작 위치를 보낸 시각(ms, 그 사람 시계) — 최근 0.1초 안에 받은 mv 일 때만
     s.rn = this.alive().map((r) => { const [x, z] = runnerXZ(r.b); return [r2(x), r2(z), r.name, r2(r.b), r.pid, (r.steal ? 1 : 0) | (r.trot ? 2 : 0) | (r.slide ? 4 : 0), r.target, r.rid || 0]; });
     const occ = [false, false, false];
     for (const r of this.alive()) { const k = r.steal ? r.start : r.target; if ((r.b === r.target || r.steal) && k >= 1 && k <= 3) occ[k - 1] = true; }

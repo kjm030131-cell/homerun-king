@@ -21,15 +21,17 @@ import { createUI, cfg, store, TOUCH, banner, feedback, toast, castLine, addChat
 import { bus } from './core/bus.js'; // [gameplay] 게임 이벤트 → bus
 import { createPCI, judgeSwing } from './game/batting.js'; // [gameplay] PCI 타격
 import { createBallLook } from './game/ball.js'; // [pitch] 실밥·구종별 회전축
+import { createCamRig, fcam } from './game/camera.js'; // [cam] 역할별 카메라
 import { createNetInterp, mergeBall, stepBall, rkey } from './net/interp.js'; // [net] 서버 시계·보간 버퍼·외삽·공 합류 (tools/qa/netbench.mjs 로 측정)
 import { createSnapMerger } from './net/snap.js'; // [net] 서버가 바뀐 키만 보냄 → 합치기
+import { pitchPred, windupTau, throwOk, jumpOk, diveOk, diveStep } from './net/predict.js'; // [net] 내 조작 즉시 반응(화면 연출만, 판정은 서버)
 
 const $ = (id) => document.getElementById(id);
 const clamp = (v, a, b) => Math.max(a, Math.min(b, v));
 const lerp = (a, b, t) => a + (b - a) * t;
 const nowP = () => performance.now() / 1000;
 // [ui] 설정·localStorage·TOUCH 는 client/ui/settings.js 로 옮김 (cfg/store 는 위 import)
-const fcam = { yawOff: 0, pitchOff: 0, dragT: 0, yaw: null };
+// [cam] fcam(수비 3인칭 드래그 상태)는 client/game/camera.js
 setVolume(cfg.vol / 100);
 initAudio(); // [audio]
 
@@ -52,6 +54,7 @@ const renderer = new THREE.WebGLRenderer({ canvas, antialias: true, powerPrefere
 const scene = new THREE.Scene();
 const camera = new THREE.PerspectiveCamera(55, 1, 0.15, 7500);
 window.__camera = camera;
+window.__bus = bus; // [bugs] QA 훅: 이벤트·사운드 신호 중복/누락 확인용 (tools/qa/flows.mjs)
 camera.position.set(0, 60, -100);
 // [stadium] 톤매핑·조명(해/조명탑)·그림자·안개·블룸·환경광·낮밤은 client/stadium/look.js
 const look = createLook(renderer, scene, camera);
@@ -195,6 +198,7 @@ function clearActors() {
   runners.clear();
   for (const A of coaches) scene.remove(A.p.root); coaches.length = 0;
 }
+window.__actors = () => ({ fielders, batter, runners: [...runners.values()], umps, coaches, celeb: celeb ? celeb.actors : [] }); // [bugs] QA 훅: 장비(헬멧·모자) 상태 확인용 (tools/qa/flows.mjs)
 // 심판 (홈, 1루, 3루)
 for (const [x, z, ry] of [[0, -2.35, 0], [-22.5, 27, Math.PI * 0.75], [22.5, 27, -Math.PI * 0.75]]) {
   const U = mkActor({ team: 'ump', role: 'ump', seed: x + 3 });
@@ -248,7 +252,7 @@ function startLocal(name, o) {
   };
   const iv = setInterval(tickFn, 1000 / 60);
   net = { send: (m) => game.handle('me', m), close: () => clearInterval(iv), local: true, game };
-  window.__hr = { game, getRole: () => getRole(), cam: () => camMode, S: () => S, net: () => net, rp: replay, lct: () => lastContactT, scene, tick: tickFn, renderer, simNow, camera };
+  window.__hr = { game, getRole: () => getRole(), cam: () => camMode, S: () => S, net: () => net, rp: replay, lct: () => lastContactT, scene, tick: tickFn, renderer, simNow, camera, ball: ballMesh /* [cam] qa */ };
   roomCode = null;
   game.start();
   lobby = game.lobbyState();
@@ -277,7 +281,7 @@ function connectWS(code, name, pw = '') {
     if (wsRetry < 30) { wsRetry++; setTimeout(() => { if (net && net.ws === ws) connectWS(code, name); }, Math.min(4000, 400 * wsRetry)); }
   };
   net = { ws, send: (m) => ws.readyState === 1 && ws.send(JSON.stringify(m)), close: () => { net = null; ws.close(); } };
-  window.__hr = { game: null, getRole: () => getRole(), cam: () => camMode, S: () => S, net: () => net, rp: replay, lct: () => lastContactT, scene, tick: () => { }, renderer, simNow, camera, ni: () => NI }; // [qa] 멀티에서도 테스트 훅 (tools/qa) · [net] ni: 보간 상태
+  window.__hr = { game: null, getRole: () => getRole(), cam: () => camMode, S: () => S, net: () => net, rp: replay, lct: () => lastContactT, scene, tick: () => { }, renderer, simNow, camera, ball: ballMesh /* [cam] qa */, ni: () => NI }; // [qa] 멀티에서도 테스트 훅 (tools/qa) · [net] ni: 보간 상태
   roomCode = code;
   clearInterval(pingIv);
   lastMsgAt = performance.now();
@@ -350,8 +354,17 @@ let rpInfo = null;
 function allPlayers() { const a = fielders.map((A) => A.p); if (batter) a.push(batter.p); for (const A of runners.values()) a.push(A.p); for (const U of umps) a.push(U.p); for (const C of coaches) a.push(C.p); return a; }
 // ── [net] 보간 버퍼·외삽·서버 시계는 client/net/interp.js (NI) — 지연은 스냅샷 '늦음'의 90% 분위에 맞춰 자동, 바닥나면 최대 0.18초 외삽
 const lerpAng = (a, b, u) => { let d = b - a; d = Math.atan2(Math.sin(d), Math.cos(d)); return a + d * u; };
+// [net] 새 경기(혼자하기 새로 시작·방 새로 만들어짐)는 서버 id(투구·메시지·이벤트 seq)가 1부터 다시 시작 → 지난 경기에서 본 id 와 겹치면
+//       배너·투구 초기화가 빠지고, swungLocal[같은 id] 가 남아 있으면 그 투구에 스윙이 아예 안 됐음. 시각이 뒤로 가거나 처음 받는 스냅샷이면 전부 비움
+function resetSeen() {
+  for (const k in seen) seen[k] = -1;
+  for (const k in swungLocal) delete swungLocal[k];
+  for (const k in swingInfo) delete swingInfo[k];
+  tracerId = null; contactFreeze = null; pred.pitch = null; pred.throwT = 0; pred.jt = pred.dv = -9;
+}
 function onSnap(s) {
   const p = nowP();
+  if (!S || s.now < S.now - 0.5) resetSeen(); // [net]
   NI.clock(s, p); if (!net?.local && s.fl) NI.push(s, p); // [net]
   if (s.pg) pgList = s.pg;
   if (s.ph === 'lobby') { S = s; if ((screen === 'game' || screen === 'over') && !net?.local) setScreen('room'); return; }
@@ -385,7 +398,7 @@ function onSnap(s) {
     if (cfg.replay && lastContactT && nowP() - lastContactT < 8) replay.schedule(nowP() + 2.6, { tEvent: lastContactT, pre: 0.8, post: 1.6, speed: 0.42, cam: 'hr', scene });
   }
   // 송구/포구/펜스 이벤트
-  if (s.te && s.te.id !== seen.te) { if (fielders[s.te.i]) { fielders[s.te.i].throwT = nowP(); fielders[s.te.i].throwDur = s.te.w ? s.te.w / 0.55 : THROW_DUR; } seen.te = s.te.id; } // [11-23] 송구 동작 시작 = 클립 시작, 릴리스(55%) = 서버 릴리스
+  if (s.te && s.te.id !== seen.te) { if (fielders[s.te.i]) { if (!(pred.throwI === s.te.i && p - pred.throwT < 0.8)) fielders[s.te.i].throwT = nowP(); fielders[s.te.i].throwDur = s.te.w ? s.te.w / 0.55 : THROW_DUR; } if (pred.throwI === s.te.i) pred.throwT = 0; seen.te = s.te.id; } // [net] 내가 미리 시작한 송구 동작은 그대로 · [11-23] 클립 길이 = 서버 송구 동작(릴리스 55%)
   if (s.ce && s.ce.id !== seen.ce) { if (fielders[s.ce.i]) { fielders[s.ce.i].catchT = nowP(); if (s.ce.i === getRole().fi && getRole().defense) { feedback(s.ce.dive ? '다이빙 캐치!! 나이스!' : s.ce.jump ? '점프 캐치!! 나이스!' : '나이스 캐치!', '#4fd18b'); if (s.ce.dive || s.ce.jump) bus.emit('ui:perfect'); }
     if ((s.ce.dive || s.ce.jump) && cfg.replay !== 0) replay.schedule(nowP() + 1.0, { tEvent: nowP(), pre: 1.2, post: 0.5, speed: 0.45, cam: 'catch', focus: fielders[s.ce.i].p, scene }); if (s.ce.dive) { fx.dustPuff(fielders[s.ce.i].p.root.position.x, fielders[s.ce.i].p.root.position.z, 2, 2); } } seen.ce = s.ce.id; }
   if (s.ce2 && s.ce2.id !== seen.ce2) {
@@ -516,6 +529,7 @@ let pitchType = 'FB';
 let gauge = null; // {t0, aim:[x,y]}
 let buntOn = false;
 const swungLocal = {};
+const pred = { pitch: null, throwT: 0, throwI: -1, jt: -9, dv: -9, dvx: 0, dvz: 1 }; // [net] 내 조작 예측 (client/net/predict.js)
 // 한글 입력 상태(ㅈㅁㄴㅇ)에서도 WASD 등이 먹도록 물리 키 기준으로
 function keyOf(e) {
   const c = e.code || '';
@@ -535,8 +549,7 @@ addEventListener('keydown', (e) => {
   if (ui.handleKey(e, k)) return; // [ui] Esc 메뉴/창 닫기, Enter 채팅, Tab 기록, H 조작법, T 빠른 채팅
   if (screen !== 'game' && screen !== 'over') return;
   if (ui.modalOpen()) return; // 창이 떠 있으면 경기 입력 막음 (혼자하기 일시정지 중 스윙 방지)
-  if (k === 'v' && S && getRole().fi >= 0 && !getRole().pitcher && getRole().pos !== 'C') { cfg.fieldCam = cfg.fieldCam === 'tps' ? 'tv' : 'tps'; store.set('fieldCam', cfg.fieldCam); fcam.yawOff = 0; toast(cfg.fieldCam === 'tps' ? '수비 시점: 내 선수 뒤 (드래그로 회전)' : '수비 시점: 중계 화면'); return; }
-  if (k === 'v') { cfg.batCam = cfg.batCam === 1 ? 0 : 1; store.set('batCam', cfg.batCam); toast(cfg.batCam === 1 ? '타격 시점: 타자 어깨 뒤' : '타격 시점: 포수 뒤 (중계)'); return; }
+  if ((k === 'v' || k === 'z' || k === 'x') && !e.repeat && camRig.key(k, getRole(), S)) return; // [cam] V 시점 전환 · Z 시점 거리 · X(누르는 동안) 주자 보기
   keys[k] = true;
   if (e.code === 'Space') e.preventDefault();
   if (!S || screen !== 'game' || e.repeat) return;
@@ -550,22 +563,22 @@ addEventListener('keydown', (e) => {
   // 투수
   if (role.pitcher && S.ph === 'pitch' && /^[1-6]$/.test(k)) setPitchType(PITCH_KEYS[+k - 1]);
   if (role.batter && S.dy && S.dy.pr && /^[0-6]$/.test(k)) net.send({ t: 'ppick', type: k === '0' ? 'MIX' : PITCH_KEYS[+k - 1] }); // 타격 연습: 구종 고정
-  if (role.pitcher && e.code === 'Space') pitchClick();
+  if (role.pitcher && e.code === 'Space' && !camRig.peek) pitchClick(); // [cam] 주자 보기(X) 중엔 조준 안 함
   if (role.pitcher && S.ph === 'pitch' && k === 'q') { net.send({ t: 'pick' }); gauge = null; }
   // 수비
   if (S.ph === 'live' && role.fi >= 0) {
     const tmap = { '1': 1, '2': 2, '3': 3, '4': 4, 'f': 0, 'r': 5 };
     if (!role.holding && k in tmap) pendThrow = { base: tmap[k], t: nowP() }; // 잡기 직전에 눌러도 잡자마자 송구
-    if (role.holding && e.code === 'Space') { const rb = recBase(); const relay = useRelay(rb, role); net.send({ t: 'throw', base: relay ? 5 : rb, p: 0.55 }); feedback(relay ? `중계 송구 → 커트맨 (${rb === 4 ? '홈' : rb + '루'})` : `추천 송구 → ${rb === 4 ? '홈' : rb + '루'}`, '#ffd23a'); return; }
+    if (role.holding && e.code === 'Space') { const rb = recBase(); const relay = useRelay(rb, role); sendThrow(relay ? 5 : rb, 0.55); feedback(relay ? `중계 송구 → 커트맨 (${rb === 4 ? '홈' : rb + '루'})` : `추천 송구 → ${rb === 4 ? '홈' : rb + '루'}`, '#ffd23a'); return; }
     if (role.holding) {
       const map = tmap;
       // 꾹 누르면 세게(빠르지만 부정확), 톡 치면 정확하게. 터치는 바로 던짐
-      if (k in map) { if (!e.isTrusted) { net.send({ t: 'throw', base: map[k], p: 0.5 }); } else if (!throwCharge) throwCharge = { k, base: map[k], t0: nowP() }; }
+      if (k in map) { if (!e.isTrusted) { sendThrow(map[k], 0.5); } else if (!throwCharge) throwCharge = { k, base: map[k], t0: nowP() }; }
     }
     else {
       if (k === 'q') { net.send({ t: 'sw' }); }
-      if (e.code === 'Space') { net.send({ t: 'jump' }); ctl.lastIn = nowP(); }
-      if (k === 'c') { const d = moveDir(); net.send({ t: 'dive', dx: d[0], dz: d[1] }); }
+      if (e.code === 'Space') { net.send({ t: 'jump' }); ctl.lastIn = nowP(); if (!net.local && jumpOk(S, role.fi, pred.jt, nowP())) pred.jt = nowP(); } // [net] 누른 순간 점프 동작
+      if (k === 'c') { const d = moveDir(); net.send({ t: 'dive', dx: d[0], dz: d[1] }); predDive(role, d); }
     }
   }
   // 공격
@@ -578,9 +591,23 @@ addEventListener('keydown', (e) => {
 });
 let throwCharge = null, pendThrow = null;
 const throwPow = () => (throwCharge ? clamp((nowP() - throwCharge.t0) / 0.7, 0, 1) : 0);
-addEventListener('keyup', (e) => { const k = keyOf(e); keys[k] = false; keys[e.key.toLowerCase()] = false;
-  if (throwCharge && throwCharge.k === k) { const p = 0.25 + throwPow() * 0.75; if (net && getRole().holding) { net.send({ t: 'throw', base: throwCharge.base, p }); if (p > 0.85) feedback('강송구!', '#ff9f43'); } else pendThrow = { base: throwCharge.base, t: nowP() }; throwCharge = null; } ui.handleKeyUp(e); });
-addEventListener('blur', () => { for (const k in keys) keys[k] = false; ui.onBlur(); });
+// [net] 송구: 서버가 받아들일 조건이면 누른 순간 팔 동작 시작(전엔 왕복 뒤 시작 — 그동안 공이 먼저 날아가기도). 공은 서버가 놓는 순간 그대로
+function sendThrow(base, p) {
+  net.send({ t: 'throw', base, p });
+  const fi = getRole().fi;
+  if (!net.local && throwOk(S, fi, base) && fielders[fi]) { fielders[fi].throwT = nowP(); pred.throwT = nowP(); pred.throwI = fi; }
+}
+// [net] 다이빙: 누른 순간 동작 + 몸 이동(서버와 같은 0.05~0.5초 5.5m/s). 그동안 mv 안 보냄 → 서버도 같은 자리에서 다이빙 시작
+function predDive(role, d) {
+  if (net.local || !diveOk(S, role.fi, pred.dv, nowP())) return;
+  const A = fielders[role.fi];
+  if (!ctl.active && A) { ctl.x = A.p.root.position.x; ctl.z = A.p.root.position.z; }
+  ctl.active = true; ctl.idx = role.fi;
+  pred.dv = nowP(); pred.dvx = d[0]; pred.dvz = d[1]; ctl.ry = Math.atan2(d[0], d[1]);
+}
+addEventListener('keyup', (e) => { const k = keyOf(e); keys[k] = false; keys[e.key.toLowerCase()] = false; camRig.keyUp(k); /* [cam] */
+  if (throwCharge && throwCharge.k === k) { const p = 0.25 + throwPow() * 0.75; if (net && getRole().holding) { sendThrow(throwCharge.base, p); if (p > 0.85) feedback('강송구!', '#ff9f43'); } else pendThrow = { base: throwCharge.base, t: nowP() }; throwCharge = null; } ui.handleKeyUp(e); });
+addEventListener('blur', () => { for (const k in keys) keys[k] = false; ui.onBlur(); camRig.blur(); /* [cam] */ });
 addEventListener('contextmenu', (e) => { if (screen === 'game') e.preventDefault(); });
 canvas.addEventListener('pointermove', (e) => {
   mouseRaw.set(e.clientX / innerWidth * 2 - 1, -(e.clientY / innerHeight) * 2 + 1);
@@ -595,7 +622,7 @@ canvas.addEventListener('pointerdown', (e) => {
   if (intro && !getRole().pitcher) { endIntro(); return; }
   const role = getRole();
   if (role.batter) doSwing(e.button === 2 ? 'power' : 'contact');
-  else if (role.pitcher) pitchClick();
+  else if (role.pitcher && !camRig.peek) pitchClick(); // [cam]
 });
 const raycaster = new THREE.Raycaster();
 const zonePlane = new THREE.Plane(new THREE.Vector3(0, 0, 1), 0);
@@ -667,6 +694,7 @@ function pitchClick() {
 }
 function sendPitch(lv) {
   net.send({ t: 'pitch', type: gauge.type, tx: gauge.aim[0], ty: gauge.aim[1], power: lv });
+  if (!net.local) pred.pitch = pitchPred(S, simNow(), rtt / 1000); // [net] 클릭 순간 와인드업 시작 → 서버 투구가 오면 릴리스 전까지 서버 시간표로 합류
   const [pb0, pb1] = pBand(), pf = lv >= pb0 && lv <= pb1; // [gameplay] 모드별 퍼펙트 구간
   const txt = lv > 1.0 ? '과투구! 제구 흔들림' : pf ? '퍼펙트 투구! 공 끝 살아있다' : lv < 0.6 ? '힘 빠진 공' : '좋아';
   feedback(`${txt} (${Math.round(lv * 100)}%)`, pf ? '#4fd18b' : lv > 1 ? '#ff8a80' : '#ffcf3f');
@@ -702,8 +730,9 @@ function updateControl(dt) {
     // [qa 11-19] 조작 선수가 바뀌면 누르고 있던 방향키는 무시(한 번 떼야 움직임): 송구 후 받는 선수로 넘어갔을 때 W 를 계속 누르고 있어서 베이스에서 벗어나 공을 놓치던 것
     ctl.block = ctl.idx >= 0; ctl.idx = role.fi; ctl.active = false;
   }
-  const diveAge = f[7];
-  const FA = fielders[role.fi], throwing = FA && FA.throwT && nowP() - FA.throwT < (FA.throwDur || THROW_DUR) * 0.6; // 송구 동작 중엔 제자리
+  const tp0 = nowP(), pdv = tp0 - pred.dv, localDive = pdv < 1.2; // [net] 내가 누른 다이빙(예측) 중
+  const diveAge = localDive ? pdv : f[7];
+  const FA = fielders[role.fi], throwing = FA && FA.throwT && tp0 - FA.throwT < (FA.throwDur || THROW_DUR) * 0.6; // [11-23] 송구 동작 중엔 제자리
   if (throwing || S.ar === role.fi) { ctl.active = false; ctl.moving = false; if (S.ar === role.fi) ctl.block = true; return; } // 송구 동작·베이스 직접 밟기 중엔 조작 잠금
   let fw = (keys.w || keys.arrowup ? 1 : 0) - (keys.s || keys.arrowdown ? 1 : 0) + touchMove.y;
   let rt = (keys.d || keys.arrowright ? 1 : 0) - (keys.a || keys.arrowleft ? 1 : 0) + touchMove.x;
@@ -719,10 +748,14 @@ function updateControl(dt) {
     ctl.ry = Math.atan2(mx, mz);
     ctl.moving = true;
   } else ctl.moving = false;
-  if (diveAge >= 0 && diveAge < 1.2) { ctl.x = f[1]; ctl.z = f[2]; }
+  if (localDive) { // [net]
+    const st = diveStep(pdv - dt, pdv, pred.dvx, pred.dvz); if (st) { ctl.x += st[0]; ctl.z += st[1]; }
+    ctl.ry = Math.atan2(pred.dvx, pred.dvz); ctl.lastIn = t; ctl.active = true; ctl.diving = true;
+  } else if (ctl.diving) { ctl.diving = false; if (!ctl.moving) ctl.active = false; } // 끝: 방향키 안 누르면 서버 위치(같은 다이빙)로
+  else if (diveAge >= 0 && diveAge < 1.2) { ctl.x = f[1]; ctl.z = f[2]; }
   if (ctl.active && t - ctl.lastIn > 0.5) ctl.active = false;
   // [net] 20Hz → 30Hz(스냅샷 주기와 같게): 20Hz 면 다른 사람 화면에서 사람 수비수가 스냅샷 3개 중 1개는 제자리 → 계단처럼 끊겨 보였음. 숫자는 cm 까지
-  if (ctl.active && t - ctl.lastSend > 0.031) { ctl.lastSend = t; net.send({ t: 'mv', x: Math.round(ctl.x * 100) / 100, z: Math.round(ctl.z * 100) / 100, ry: Math.round(ctl.ry * 100) / 100, a: 1 }); }
+  if (ctl.active && !localDive && t - ctl.lastSend > 0.031) { ctl.lastSend = t; net.send({ t: 'mv', x: Math.round(ctl.x * 100) / 100, z: Math.round(ctl.z * 100) / 100, ry: Math.round(ctl.ry * 100) / 100, a: 1, c: Math.round(performance.now()) }); } // [net] c: 보낸 시각 → 다른 사람 화면이 고르게 보간
 }
 // 모바일 스틱/버튼
 if (TOUCH) {
@@ -762,10 +795,15 @@ function renderTouchButtons(role) {
 const _v = new THREE.Vector3(), _w = new THREE.Vector3(), _u = new THREE.Vector3();
 function place(A, x, z, ry, dt, k = 14) {
   const r = A.p.root;
-  if (!A.init) { r.position.set(x, groundY(x, z), z); r.rotation.y = ry; A.init = true; A.spd = 0; return 0; }
+  if (!A.init) { r.position.set(x, groundY(x, z), z); r.rotation.y = ry; A.init = true; A.spd = 0; A.tgx = x; A.tgz = z; return 0; } // [net] tgx: 지난 목표
   const a = 1 - Math.exp(-k * dt);
   const ox = r.position.x, oz = r.position.z;
-  let nx = lerp(ox, x, a), nz = lerp(oz, z, a);
+  // [net] 목표(보간 위치)가 이번 프레임 움직인 만큼은 그대로 따라가고(그럴듯한 속도일 때), 남은 차이만 부드럽게 줄임.
+  //       전엔 목표 쪽으로 지수 감쇠만 해서 일정 속도로 뛰는 선수가 늘 v/k 만큼 뒤에 그려졌음(주자 k=16 → 8m/s 면 0.5m, 출발·정지 1/k 초 늦음)
+  const fx_ = A.tgx === undefined ? 0 : x - A.tgx, fz_ = A.tgz === undefined ? 0 : z - A.tgz;
+  A.tgx = x; A.tgz = z;
+  const ff = Math.hypot(fx_, fz_) < 12 * dt + 0.02 ? 1 : 0;
+  let nx = lerp(ox + fx_ * ff, x, a), nz = lerp(oz + fz_ * ff, z, a);
   // [qa 11-19] 화면 이동 속도 상한(사람 최고 속도 근처): 서버 위치가 크게 튀어도 미끄러지듯 날아가지 않고 뛰어감. 50m 넘게 튀면(교대·리셋) 바로 옮김
   const jump = Math.hypot(x - ox, z - oz), vmax = 10.5 * dt, mv = Math.hypot(nx - ox, nz - oz);
   if (jump < 50 && mv > vmax) { nx = ox + (nx - ox) * vmax / mv; nz = oz + (nz - oz) * vmax / mv; }
@@ -816,7 +854,10 @@ function updateWorld(dt) {
     setTag(A, nm ? (ctrlId === myId ? `${nm} ★` : nm) : '', ctrlId === myId ? '#ffcf3f' : '#ffffff', ctrlId === myId && (camMode !== 'field' || cfg.fieldCam === 'tps'));
     if (pos === 'P' && (pitchPhase || (s.p && t - s.p.t0 < 1.2 && s.ph !== 'live'))) {
       let k = -1;
-      if (s.p && (s.ph === 'pitching' || s.ph === 'result')) k = pitchK(t - (s.p.t0 - WINDUP));
+      const tau = role.pitcher && pred.pitch ? windupTau(pred.pitch, s, t) : null; // [net] 내 투구 예측
+      if (tau == null || s.ph === 'result') pred.pitch = null;
+      if (tau != null) k = tau >= 0 ? pitchK(tau) : -1;
+      else if (s.p && (s.ph === 'pitching' || s.ph === 'result')) k = pitchK(t - (s.p.t0 - WINDUP));
       if (k > 1.15) k = -1;
       if (window.__pk != null) k = window.__pk;
       A.a.pitcher(dt, { k, speed: sp, lookW: tossBall.visible ? tossBall.position : _v.set(0, 1.2, 0), catchW: tossing && tk > TOSS.start + TOSS.dur - 0.35 ? _u.set(-0.25, 1.45, 17.75) : null });
@@ -841,6 +882,8 @@ function updateWorld(dt) {
     const splitK = s.ph === 'pitching' && s.p ? (t - s.p.t0) / 0.35 : -1;
     let throwK = -1;
     { const TD = A.throwDur || THROW_DUR; if (A.throwT && tp - A.throwT < TD) throwK = (tp - A.throwT) / TD; }
+    if (i === role.fi && tp - pred.jt < 1) jt = tp - pred.jt; // [net] 내가 누른 점프·다이빙은 누른 순간부터 (서버 나이로 다시 시작 안 함)
+    if (i === role.fi && tp - pred.dv < 3) dv = tp - pred.dv;
     const diveK = dv >= 0 ? dv / 0.55 : -1, jumpK = jt >= 0 && jt < 0.6 ? jt / 0.6 : -1;
     let reachW = null, ground = false;
     if (ballL && ballL.h < 0 && s.ph === 'live') {
@@ -1035,7 +1078,7 @@ function updateBaseTags(role) {
   relayRing.visible = !!(rl && (rl[0] === role.fi || (role.holding && ['LF', 'CF', 'RF'].includes(role.pos))));
   if (relayRing.visible) { relayRing.position.set(rl[1], 0.08, rl[2]); relayRing.scale.setScalar(1 + 0.12 * Math.sin(nowP() * 8)); }
   const on = role.holding && S && S.ph === 'live';
-  if (on && pendThrow && nowP() - pendThrow.t < 0.7 && !throwCharge) { net && net.send({ t: 'throw', base: pendThrow.base, p: 0.5 }); pendThrow = null; }
+  if (on && pendThrow && nowP() - pendThrow.t < 0.7 && !throwCharge) { net && sendThrow(pendThrow.base, 0.5); pendThrow = null; }
   if (pendThrow && nowP() - pendThrow.t >= 0.7) pendThrow = null;
   const targets = new Set();
   if (on) targets.add(recBase());
@@ -1193,207 +1236,20 @@ function updateBall(dt, t, role, pitchPhase) {
   if (!vis) fx.trailClear();
 }
 
-// ═════════════ 카메라 연출 ═════════════
-const camPos = new THREE.Vector3(0, 60, -100), camLook = new THREE.Vector3(0, 0, 60);
-const tPos = new THREE.Vector3(), tLook = new THREE.Vector3();
-let camYaw = null, camMode = '', camFov = 55;
-let lastCamMode = '', camBlendT = 0;
-const camVel = new THREE.Vector3(), lookVel = new THREE.Vector3();
-// Unity SmoothDamp 방식 (임계감쇠 스프링)
-function smoothDamp(cur, target, vel, smoothTime, dt) {
-  const omega = 2 / Math.max(1e-4, smoothTime), x = omega * dt;
-  const exp = 1 / (1 + x + 0.48 * x * x + 0.235 * x * x * x);
-  for (const c of ['x', 'y', 'z']) {
-    const change = cur[c] - target[c];
-    const temp = (vel[c] + omega * change) * dt;
-    vel[c] = (vel[c] - omega * temp) * exp;
-    cur[c] = target[c] + (change + temp) * exp;
-  }
-}
-// 3인칭 수비 카메라: 선수 → 목표 방향을 기본으로, 드래그 회전(잠시 뒤 서서히 복귀)
-function tpsCam(me, tx, ty, tz, dt) {
-  let yaw = Math.atan2(tx - me.x, tz - me.z);
-  const dd = Math.hypot(tx - me.x, tz - me.z);
-  // [gameplay 11-19] 목표가 가까우면(뜬공이 내 머리 위 등) 홈→나 방향으로 고정: 화면 위쪽 = 외야로 항상 같고 빙글빙글 안 돎
-  if (dd < 4) yaw = Math.hypot(me.x, me.z) > 3 ? Math.atan2(me.x, me.z) : (fcam.yaw ?? yaw);
-  if (fcam.yaw == null) fcam.yaw = yaw;
-  let d = yaw - fcam.yaw; d = Math.atan2(Math.sin(d), Math.cos(d));
-  fcam.yaw += d * Math.min(1, dt * 2.2);
-  if (nowP() - fcam.dragT > 2.5) { fcam.yawOff *= Math.exp(-dt * 1.2); fcam.pitchOff *= Math.exp(-dt * 1.2); }
-  const Y = fcam.yaw + fcam.yawOff;
-  // 공이 높이 뜰수록 뒤로·위로 빠져서 '내 선수 + 공'이 같이 보이게 (전엔 고개만 들어서 선수가 화면 밖으로 사라지고 관중석만 보였음)
-  const hb = clamp(ty, 0, 14);
-  const back = 6.2 + hb * 0.35, up = 2.6 + hb * 0.28 + fcam.pitchOff * 5;
-  tPos.set(me.x - Math.sin(Y) * back, up, me.z - Math.cos(Y) * back);
-  const lookD = clamp(dd, 5, 30);
-  tLook.set(me.x + Math.sin(Y) * lookD, 0.9 + hb * 0.32, me.z + Math.cos(Y) * lookD);
-}
-// [gameplay] 타구 직후 중계 카메라: 홈 뒤 높은 곳에 고정, 시선은 공이 화면 데드존(가로 ±50%, 위·아래 60%)을 벗어날 때만 따라감.
-// 데드존 안에선 배경이 멈춰 있어 공이 실제 속도로 보인다. 화각 고정 54°(줌으로 공 움직임이 상쇄되지 않게)
-const DZ = { id: -1, yaw: 0, pitch: 0, pos: new THREE.Vector3(0, 8.5, -15), fov: 54 };
-function deadzoneCam(dt) {
-  const P = DZ.pos;
-  if (DZ.id !== lastContactT) { DZ.id = lastContactT; DZ.yaw = 0; DZ.pitch = Math.atan2(1.5 - P.y, 24 - P.z); }
-  const dx = ballPos.x - P.x, dy = ballPos.y - P.y, dz = ballPos.z - P.z;
-  const by = Math.atan2(dx, dz), bp = Math.atan2(dy, Math.hypot(dx, dz));
-  const th = Math.tan(DZ.fov * Math.PI / 360), ax = Math.atan(0.5 * th * camera.aspect), au = Math.atan(0.62 * th), ad = Math.atan(0.6 * th);
-  let ty = DZ.yaw, tq = DZ.pitch;
-  if (by - DZ.yaw > ax) ty = by - ax; else if (DZ.yaw - by > ax) ty = by + ax;
-  if (bp - DZ.pitch > au) tq = bp - au; else if (DZ.pitch - bp > ad) tq = bp + ad;
-  const kk = 1 - Math.exp(-9 * dt);
-  DZ.yaw += (ty - DZ.yaw) * kk; DZ.pitch += (clamp(tq, -0.6, 1.0) - DZ.pitch) * kk;
-  tPos.copy(P);
-  tLook.set(P.x + Math.sin(DZ.yaw) * Math.cos(DZ.pitch) * 30, P.y + Math.sin(DZ.pitch) * 30, P.z + Math.cos(DZ.yaw) * Math.cos(DZ.pitch) * 30);
-  return DZ.fov;
-}
-let camDirect = false, titleCamSeen = false;
-function updateCamera(dt, time) {
-  let k = 4, fov = 55;
-  camDirect = false;
-  const tp = nowP();
-  if (screen === 'title' || screen === 'room' || screen === 'browser' || !S || !S.fl) {
-    // [ui] 메뉴 배경: 경기장 안쪽을 낮게 도는 중계 드론 컷 (예전엔 관중석 지붕 뒤로 지나가 검은 판이 화면을 덮었음)
-    const a = time * 0.045 + 0.9;
-    tPos.set(Math.sin(a) * 52, 21 + Math.sin(time * 0.11) * 4, 50 - Math.cos(a) * 56);
-    tLook.set(Math.sin(a + 1.2) * 8, 3, 50); k = 1.5;
-    if (camMode !== 'title' && !titleCamSeen) { camDirect = true; titleCamSeen = true; } // 첫 화면은 바로 그 자리에서 시작
-    camMode = 'title';
-  } else {
-    const role = getRole();
-    const ph = S.ph;
-    const pitchPhase = ph === 'pitch' || ph === 'pitching' || (ph === 'result' && !S.b && !(S.p && S.p.res === 'hit'));
-    const hr = hrCine && tp - hrCineStart < 5.5;
-    const IN = rpInfo ? null : introStep();
-    if (IN) {
-      // ── 등장 컷씬 카메라 ──
-      if (IN.kind === 'b') { const B = batter ? batter.p.root.position : _v.set(0.95, 0, 0.05); tPos.set(B.x - 2.5 + IN.e * 0.12, 1.5, B.z + 1.7 - IN.e * 0.1); tLook.set(B.x, 1.38, B.z); fov = 30; }
-      else { tPos.set(0.9 - IN.e * 0.1, 1.75, 14.4 + IN.e * 0.15); tLook.set(0, 1.5, 18.44); fov = 28; }
-      k = 30; camMode = 'intro';
-    } else if (rpInfo) {
-      // ── 리플레이 카메라 ──
-      const I = rpInfo; fov = 42; k = 7;
-      if (I.cam === 'hr' && I.rel < 0.32) {
-        // 타자 정면 비스듬히: 스윙과 임팩트
-        const a = I.rel * 0.25;
-        tPos.set(-2.4 + a, 1.15, 2.7 - a); tLook.set(0.75, 1.05, 0.15); fov = 36; k = 9;
-      } else if (I.cam === 'hr') {
-        // 공 뒤를 쫓는 추적 카메라
-        const b = ballMesh.position, d = Math.hypot(b.x, b.z) || 1, ux = b.x / d, uz = b.z / d;
-        tPos.set(b.x - ux * 11 - uz * 3, Math.max(2.5, b.y * 0.7 + 3), b.z - uz * 11 + ux * 3); tLook.copy(b); fov = 48; k = 5;
-      } else {
-        // 호수비: 야수 옆 낮은 시점, 천천히 회전
-        const F = I.focus ? I.focus.root.position : ballMesh.position;
-        const base = Math.atan2(-F.x, -F.z) + 0.9 + I.rel * 0.35;
-        tPos.set(F.x + Math.sin(base) * 5.2, 1.25, F.z + Math.cos(base) * 5.2); tLook.set(F.x, 0.8, F.z); fov = 44; k = 6;
-      }
-      camMode = 'replay';
-    } else if (hr) {
-      const e = tp - hrCineStart;
-      if (e < 2.4 && ballMesh.visible) {
-        // 공 따라가기
-        tPos.set(ballPos.x * 0.35, 6 + ballPos.y * 0.55, ballPos.z * 0.5 - 12);
-        tLook.copy(ballPos); k = 4; fov = 50;
-      } else {
-        // 외야 관중석 + 불꽃 와이드
-        const a = (e - 2.4) * 0.08;
-        tPos.set(Math.sin(a) * 30, 9, -18 + e * 2);
-        tLook.set(0, 40, 140); k = 1.6; fov = 58;
-      }
-      camMode = 'hr';
-    } else if (pitchPhase && role.batter) {
-      // 기본: 포수 뒤 중계 시점(투수 폼·스트라이크존이 한눈에). V로 타자 어깨 시점 전환
-      // 기본: 포수 뒤 망원(투수가 크게, 존은 화면 아래 중앙, 타자는 왼쪽 가장자리)
-      if (cfg.batCam === 1) { tPos.set(-0.55, 1.66, -3.6); tLook.set(-0.05, 1.0, 14); fov = 38; }
-      else { tPos.set(-0.32, 1.72, -6.6); tLook.set(-0.08, 0.42, 12); fov = 25; }
-      k = 8; camMode = 'bat';
-    }
-    else if (pitchPhase && role.pitcher) {
-      // 투수 어깨 너머(3루 쪽 뒤): 와인드업·팔 스윙이 보이고 포수 미트까지 보이게
-      // 조준할 땐 존이 크게 보이게, 던지는 순간부터는 뒤로 빠져서 투구 폼 + 공 궤적이 보이게
-      // 투수 뒤 높은 곳: 투수 전신이 화면 아래, 홈플레이트·타자가 화면 가운데 (조준 ↔ 투구 동안 시점 고정)
-      // [gameplay 11-19] 조준 중: 존이 화면 높이의 ~15%(전엔 ~5%)로 보이게 투수 머리 위로 가깝게 + 망원. 시선은 투수 머리 위로 지나가서 존을 안 가림
-      if (ph === 'pitch') { tPos.set(0.5, 3.2, 24.6); tLook.set(0.02, 0.8, 0); fov = 9.5; k = 6; }
-      else { tPos.set(0.95, 4.4, 30.8); tLook.set(0.1, 0.58, 6); fov = 25; k = 4; }
-      camMode = 'pitch';
-    }
-    else if (pitchPhase && role.pos === 'C') { tPos.set(0.25, 1.85, -4.6); tLook.set(0, 1.1, 18); k = 6; camMode = 'catch'; fov = 50; }
-    else if (pitchPhase && role.fi >= 0 && fielders[role.fi] && cfg.fieldCam === 'tps') {
-      // 내 포지션 뒤에서 홈플레이트 쪽을 봄 (드래그로 회전)
-      tpsCam(fielders[role.fi].p.root.position, 0, 1.0, 0, dt); k = 5; camMode = 'fwait'; fov = 50;
-    }
-    else if (pitchPhase && role.fi >= 0 && fielders[role.fi]) {
-      // 투구 대기: 수비 중 카메라와 같은 방향(홈 뒤 높은 곳) → 타구 나와도 시점이 뒤집히지 않음
-      const P = fielders[role.fi].p.root.position;
-      const cz = (P.z + 18) / 2, cx = P.x / 2;
-      tPos.set(cx * 0.3, 8 + Math.max(P.z, 10) * 0.12, -14 + cz * 0.2);
-      tLook.set(cx, 0.8, cz); k = 4; camMode = 'fwait'; fov = 50;
-    } else if (pitchPhase) {
-      // 중계 카메라: 중견수 뒤 망원
-      tPos.set(3.2, 7.6, 118); tLook.set(0.0, 1.05, 0); k = 6; camMode = 'tv'; fov = 4.4;
-    } else if (role.pos === 'P' && (ph === 'live' || (ph === 'result' && S.b)) && !role.holding && !['chase', 'cover', 'hold', 'relay'].includes(myDuty(S, role)?.k)) {
-      // 투수가 할 일이 없을 땐 내 선수 따라 흔들리지 않게 '중계 카메라'로 고정 → 어지럽지 않음
-      const bz = ballPos.z, bx = ballPos.x;
-      if (!ballMesh.visible) { tPos.set(0, 9, -15); tLook.set(0, 1, 20); }
-      else if (tp - lastContactT < 2.4) { fov = deadzoneCam(dt); camDirect = true; } // [gameplay] 고정 중계 + 데드존 (공이 화면 가운데 영역을 실제 속도로 지나감)
-      else { const far = clamp(bz, 0, 120); tPos.set(bx * 0.2, 8 + far * 0.08, -15 + far * 0.18); tLook.set(bx * 0.8, Math.max(0.6, Math.min(ballPos.y, 20) * 0.5), Math.max(8, bz * 0.85)); fov = 52; }
-      k = tp - lastContactT < 2.4 ? 6 : 2.2; camMode = 'pwatch';
-    } else if (role.fi >= 0 && fielders[role.fi] && (ph === 'live' || (ph === 'result' && S.b)) && cfg.fieldCam === 'tps') {
-      // 3인칭: 내 선수 뒤에서 공(또는 낙구 지점) 쪽을 봄
-      const me = fielders[role.fi].p.root.position;
-      const tgt = landRing.visible ? landRing.position : ballMesh.visible ? ballPos : null;
-      if (tgt) tpsCam(me, tgt.x, ballMesh.visible ? ballPos.y : 1, tgt.z, dt);
-      else tpsCam(me, 0, 1, 0, dt);
-      k = 4.5; camMode = 'field'; fov = 56;
-    } else if (role.fi >= 0 && fielders[role.fi] && (ph === 'live' || (ph === 'result' && S.b))) {
-      // 수비 카메라: 홈 뒤 높은 곳에서 '공 + 내 수비수'를 같이 잡는 중계 시점.
-      // 조작 선수가 바뀌어도 카메라가 휙 돌지 않고, W = 외야 쪽 / S = 홈 쪽 / A·D = 화면 좌우로 항상 같음
-      const me = fielders[role.fi].p.root.position;
-      const bx = ballMesh.visible || role.holding ? ballPos.x : me.x, bz = ballMesh.visible || role.holding ? ballPos.z : me.z;
-      const cx = (me.x + bx) / 2, cz = (me.z + bz) / 2;
-      const spread = Math.hypot(me.x - bx, me.z - bz);
-      const far = Math.max(cz, 10);
-      tPos.set(cx * 0.3, 7 + far * 0.13 + spread * 0.12 + clamp(ballPos.y * 0.15, 0, 6), -14 + cz * 0.3 - spread * 0.15);
-      tLook.set(cx, Math.max(0.5, ballMesh.visible ? Math.min(ballPos.y, 14) * 0.45 : 0.8), cz);
-      k = 3.2; camMode = 'field'; fov = clamp(46 + spread * 0.25, 46, 62);
-    } else {
-      // 타구 중계: 홈 뒤에서 공 추적, 멀리 가면 높이
-      // 중계 카메라: 맞은 직후엔 홈 뒤에 '고정'하고 고개만 돌려 공을 따라감 → 공이 실제 속도로 쭉 뻗어나가 보임
-      // (카메라가 공이랑 같이 날아가면 화면상 공이 느려 보임). 공이 멀리 가거나 떨어진 뒤에만 천천히 따라감
-      const bz = ballPos.z, bx = ballPos.x, tc = tp - lastContactT, fly = ballL && ballL.state === 'air';
-      if (!ballMesh.visible && !(S.b && S.b[6] >= 0)) { tPos.set(0, 30, -30); tLook.set(0, 0, 30); k = 3; fov = 52; }
-      else if (tc < 2.4 && (fly || bz < 40)) {
-        // [gameplay] 맞는 순간 중계 위치로 '컷'(쓸어가는 블렌드·줌아웃 없음) → 카메라 고정, 공이 화면 가운데 데드존을 벗어날 때만 고개를 돌림.
-        // 예전(고개가 공을 계속 따라가고 줌이 25°→54°로 풀림)은 화면상 공 속도가 고정 카메라의 51~68%였음 (docs/rebuild/gameplay.md)
-        fov = deadzoneCam(dt); camDirect = true; k = 6;
-      } else { tPos.set(bx * 0.35, 14 + bz * 0.1 + ballPos.y * 0.15, bz * 0.3 - 16); tLook.copy(ballPos).setY(Math.max(0.5, ballPos.y * 0.7)); k = 2; fov = 52; }
-      camMode = 'follow';
-    }
-  }
-  if (window.__cam) { const c = window.__cam; tPos.set(...c.pos); tLook.set(...c.look); fov = c.fov || 50; k = 1000; }
-  const a = 1 - Math.exp(-k * dt);
-  // 스프링(임계감쇠)으로 따라감: 시작·끝이 부드럽고 튀지 않음. 시점이 바뀐 직후엔 잠깐 더 천천히 블렌드
-  if (camMode !== lastCamMode) { camBlendT = nowP(); lastCamMode = camMode; }
-  const blend = clamp((nowP() - camBlendT) / 0.7, 0, 1);
-  const smooth = (window.__cam || window.__fastCam ? 0.0001 : (1 / Math.max(0.5, k)) * (1.6 - 0.6 * blend));
-  if (camDirect) { camPos.copy(tPos); camLook.copy(tLook); camVel.set(0, 0, 0); lookVel.set(0, 0, 0); camFov = fov; } // [gameplay] 데드존 카메라는 직접 (스프링 지연 없음)
-  else { smoothDamp(camPos, tPos, camVel, smooth, dt); smoothDamp(camLook, tLook, lookVel, smooth * 0.85, dt); }
-  void a;
-  camera.position.copy(camPos);
-  if (shake > 0 && cfg.shake) {
-    camera.position.x += (Math.random() - 0.5) * shake; camera.position.y += (Math.random() - 0.5) * shake;
-    shake = Math.max(0, shake - dt * 0.9);
-  } else shake = 0;
-  camera.lookAt(camLook);
-  if (!camDirect) camFov = window.__cam || window.__fastCam ? fov : lerp(camFov, fov, camMode === 'tv' || fov < 30 ? Math.min(1, a * 1.5) : a);
+// ═════════════ 카메라 연출 ═════════════ [cam] → client/game/camera.js (역할별 시점·감쇠·데드존 타구 카메라)
+let camMode = ''; // [cam] 이번 프레임 카메라 모드 (HUD·입력이 읽음)
+const camRig = createCamRig(camera, { // [cam]
+  get S() { return S; }, get screen() { return screen; }, get fielders() { return fielders; }, get batter() { return batter; }, umps,
+  ballPos, ballMesh, landRing, get ballL() { return ballL; }, get lastContactT() { return lastContactT; },
+  get hrCine() { return hrCine; }, get hrCineStart() { return hrCineStart; }, get rpInfo() { return rpInfo; }, get myId() { return myId; },
+  introStep, getRole, recBase, nowP,
+});
+window.__camRig = camRig; // [cam] qa: 데드존 여부(direct)·모드
+function updateCamera(dt, time) { // [cam]
+  camRig.update(dt, time, shake, camPunch);
+  camMode = camRig.mode;
+  if (shake > 0 && cfg.shake) shake = Math.max(0, shake - dt * 0.9); else shake = 0;
   camPunch = Math.max(0, camPunch - dt * 18);
-  const fovNow = camFov - camPunch;
-  if (Math.abs(camera.fov - fovNow) > 0.01) { camera.fov = fovNow; camera.updateProjectionMatrix(); }
-  // 타자 시점에선 포수·주심 숨김
-  const hideC = camMode === 'bat';
-  umps[0].p.root.visible = !hideC;
-  const ci = S && S.fl ? S.fl.findIndex((f) => f[0] === 'C') : -1;
-  if (ci >= 0 && fielders[ci]) fielders[ci].p.root.visible = !hideC;
-  if (batter) batter.p.root.traverse((o) => { if (o.isMesh) o.material.transparent = false; });
 }
 
 // ═════════════ HUD: 3D 조준 표시 + ui 연결 ═════════════

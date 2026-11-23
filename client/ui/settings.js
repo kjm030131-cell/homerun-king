@@ -11,6 +11,7 @@ export const cfg = {
   vol: store.get('vol', 80), gq: store.get('gq', TOUCH ? 'low' : 'mid'), shake: store.get('shake', 1), sens: store.get('sens', 100),
   assist: store.get('assist2', 1), batCam: store.get('batCam', 0), replay: store.get('replay', 1), cast: store.get('cast', 1),
   fieldCam: store.get('fieldCam', 'tps'), fps: store.get('fps', 1),
+  camDist: store.get('camDist', 1), batH: store.get('batH', 1), // [cam] 시점 거리(0 가까이·1 기본·2 멀리, Z 키) · 타자 시점 높이(0 낮게·1 기본·2 높게)
   volSfx: store.get('volSfx', 100), volCrowd: store.get('volCrowd', 100), volCast: store.get('volCast', 100), // [ui] 사운드 파트 요청: 효과음/관중/캐스터 음량 (0~100)
   rules: store.get('rules', 'real') === 'casual' ? 'casual' : 'real', // [ui] 마지막으로 고른 모드
 };
@@ -26,11 +27,13 @@ export function bindSettings(hooks) {
   $('castS').addEventListener('change', (e) => { cfg.cast = +e.detail; store.set('cast', cfg.cast); if (cfg.cast < 2) hooks.stopSpeech(); });
   $('assist').addEventListener('change', (e) => { cfg.assist = +e.detail; store.set('assist2', cfg.assist); });
   $('fpsS').addEventListener('change', (e) => { cfg.fps = +e.detail; store.set('fps', cfg.fps); });
+  $('camDistS').addEventListener('change', (e) => { cfg.camDist = +e.detail; store.set('camDist', cfg.camDist); }); // [cam]
+  $('batHS').addEventListener('change', (e) => { cfg.batH = +e.detail; store.set('batH', cfg.batH); }); // [cam]
 }
 const VOLS = ['vol', 'volSfx', 'volCrowd', 'volCast'];
 export function emitVolume() { bus.emit('ui:volume', { master: cfg.vol / 100, sfx: cfg.volSfx / 100, crowd: cfg.volCrowd / 100, cast: cfg.volCast / 100 }); }
 function paintRange(id) { const e = $(id), o = $(id + 'V'); if (o) o.textContent = id === 'sens' ? (e.value / 100).toFixed(2) + '×' : e.value; }
 export function fillSettings() {
   for (const id of [...VOLS, 'sens']) { $(id).value = cfg[id]; paintRange(id); }
-  setSeg('gq', cfg.gq); setSeg('shake', cfg.shake); setSeg('replayS', cfg.replay); setSeg('castS', cfg.cast); setSeg('assist', cfg.assist); setSeg('fpsS', cfg.fps);
+  setSeg('gq', cfg.gq); setSeg('shake', cfg.shake); setSeg('replayS', cfg.replay); setSeg('castS', cfg.cast); setSeg('assist', cfg.assist); setSeg('fpsS', cfg.fps); setSeg('camDistS', cfg.camDist); setSeg('batHS', cfg.batH); // [cam]
 }

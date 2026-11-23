@@ -78,7 +78,7 @@ export function hudFrame(c, role, f) {
   // 큰 볼카운트 (타석/투구 중)
   const bigOn = (role.batter || role.pitcher) && pitchPhase && s.cnt && !derby;
   show('bigcount', bigOn);
-  if (bigOn) setDots('bigcount', s.cnt);
+  if (bigOn) { setDots('bigcount', s.cnt); cls('bigcount', 'pit', !!role.pitcher); } // [bugs] 투수일 땐 왼쪽으로 — 오른쪽 구종 바와 겹쳐 S·O 가 가려졌음(창 높이 800 이하)
 
   // 구종 표시: 쉬움은 던지자마자, 그 외엔 공이 지나간 뒤 (학습용)
   let pt = '';
