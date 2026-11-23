@@ -131,16 +131,16 @@ const m_UP = new THREE.Vector3(0, 1, 0), m_Y = new THREE.Vector3(0, 1, 0);
 const m_qa = new THREE.Quaternion(), m_qb = new THREE.Quaternion(), m_qd = new THREE.Quaternion(), m_q0w = new THREE.Quaternion();
 const m_d = new THREE.Vector3(), m_d0 = new THREE.Vector3(), m_ax = new THREE.Vector3(), m_p0 = new THREE.Vector3(), m_p1 = new THREE.Vector3(), m_cur = new THREE.Vector3(), m_tgt = new THREE.Vector3();
 // 뼈를 월드 축 기준으로 돌림 (부모 기준으로 바꿔서 로컬 회전 앞에 곱함)
-function rotWorld(bone, axisW, ang) { bone.parent.updateWorldMatrix(true, false); bone.parent.getWorldQuaternion(m_qa); m_ax.copy(axisW).applyQuaternion(m_qa.invert()).normalize(); bone.quaternion.premultiply(m_qb.setFromAxisAngle(m_ax, ang)); bone.updateWorldMatrix(false, true); }
+function rotWorld(bone, axisW, ang) { bone.parent.updateWorldMatrix(true, false); bone.parent.getWorldQuaternion(m_qa); m_ax.copy(axisW).applyQuaternion(m_qa.invert()).normalize(); bone.quaternion.premultiply(m_qb.setFromAxisAngle(m_ax, ang)); bone.updateWorldMatrix(false, false); }
 // 뼈 → 끝점(tip) 방향을 월드 방향 dir 로 맞춤 (w: 섞는 정도)
 function aimBone(bone, tip, dir, w = 1) {
   if (!bone || !tip || w <= 0.01) return;
-  bone.updateWorldMatrix(true, true); bone.getWorldPosition(m_p0); tip.getWorldPosition(m_p1);
+  tip.updateWorldMatrix(true, false); bone.getWorldPosition(m_p0); tip.getWorldPosition(m_p1); // [perf] 부모 사슬만
   m_cur.subVectors(m_p1, m_p0); if (m_cur.lengthSq() < 1e-8 || dir.lengthSq() < 1e-8) return;
   m_cur.normalize(); m_tgt.copy(dir).normalize();
   m_qd.setFromUnitVectors(m_cur, m_tgt); if (w < 1) m_qd.slerp(m_qb.identity(), 1 - w);
   bone.parent.getWorldQuaternion(m_qa); bone.getWorldQuaternion(m_q0w);
-  m_q0w.premultiply(m_qd); bone.quaternion.copy(m_qa.invert().multiply(m_q0w)); bone.updateWorldMatrix(false, true);
+  m_q0w.premultiply(m_qd); bone.quaternion.copy(m_qa.invert().multiply(m_q0w)); bone.updateWorldMatrix(false, false);
 }
 // MediaPipe 관절 → 월드 방향: 카메라 = 투수 쪽(+z), 위 = +y, 사람 왼쪽 = 이미지 오른쪽(+x)
 const _P = Array.from({ length: 33 }, () => new THREE.Vector3());
@@ -327,9 +327,9 @@ export class Character {
   reach(side, worldPos, w = 1) { if (!worldPos) return; this.ikReq[side] = w; this.ikT[side].copy(worldPos); }
   // [model 11-23] 두 손 그립: 배트(bat, +y 축)를 쥔 손(top) 바로 아래(손잡이 쪽 gap m)로 다른 손(side)을 IK — 클립이 한 손만 배트에 붙어 있어 다른 손이 떠 있던 것
   // [motion] 핸드폰 배트 방향 → 상체 전체: 배트 방향 바뀐 만큼 척추를 비틀고, 손이 따라가고, 배트는 핸드폰 방향 그대로
-  body(bat, top, w = 1) { if (bat && w > 0.01) this.bodyReq = { bat, top, w }; }
+  motionBody(bat, top, w = 1) { if (bat && w > 0.01) this.bodyReq = { bat, top, w }; }
   // [motion] 웹캠 전신: MediaPipe worldLandmarks(33개, m) → 몸통·팔·다리·머리 뼈 방향 맞춤
-  pose(lm, w = 1, mir = false) { if (lm && lm.length >= 33 && w > 0.01) this.poseReq = { lm, w, mir }; }
+  motionPose(lm, w = 1, mir = false) { if (lm && lm.length >= 33 && w > 0.01) this.poseReq = { lm, w, mir }; }
   grip(bat, side, top, w = 1, gap = 0.085) { if (!bat || w <= 0.01) return; this.gripReq = { bat, side, top, w, gap }; }
   look(worldPos, w = 1) { if (!worldPos) return; this.lookReq = w; this.lookT.copy(worldPos); }
 
@@ -433,7 +433,7 @@ export class Character {
     const mid = (a, b) => new THREE.Vector3().addVectors(_P[a], _P[b]).multiplyScalar(0.5);
     // 엉덩이 방향: 골반 좌우선(오른쪽→왼쪽)을 수평으로 맞춤
     if (B.Hips && B.LeftUpLeg && B.RightUpLeg) {
-      B.Hips.updateWorldMatrix(true, true); B.RightUpLeg.getWorldPosition(m_p0); B.LeftUpLeg.getWorldPosition(m_p1);
+      B.RightUpLeg.updateWorldMatrix(true, false); B.LeftUpLeg.updateWorldMatrix(true, false); B.RightUpLeg.getWorldPosition(m_p0); B.LeftUpLeg.getWorldPosition(m_p1);
       const cur = m_cur.subVectors(m_p1, m_p0).setY(0), tg = v(24, 23).setY(0);
       if (cur.lengthSq() > 1e-6 && tg.lengthSq() > 1e-6) { let a = Math.atan2(tg.x, tg.z) - Math.atan2(cur.x, cur.z); a = Math.atan2(Math.sin(a), Math.cos(a)); rotWorld(B.Hips, m_UP, a * w); }
     }

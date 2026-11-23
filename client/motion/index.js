@@ -174,10 +174,12 @@ export function createMotion(api) {
     show('motionBadge', on && api.screen() === 'game');
     if (on) setText('motionBadgeT', [(M.pad && M.pad.pads) ? '📱 핸드폰' : '', (M.cam && M.cam.on) ? '📷 웹캠' : ''].filter(Boolean).join(' · ') + (S && S.mo === 2 ? ' · 스크린야구' : ' · 수비 자동'));
     const camOn = !!(M.cam && M.cam.on);
+    if (M.cam) M.cam.paused = !!(M.pose && M.pose.ready);
+    const pn = performance.now(), paintNow = pn - (M.paintT || 0) > 66; if (paintNow) M.paintT = pn; // [perf] 미리보기 15fps
     show('motionCam', camOn && api.screen() === 'game' && api.mg());
     if (camOn) {
-      if (api.screen() === 'game') M.cam.paint($('motionCamC'));
-      if (!$('motionM').classList.contains('hide')) M.cam.paint(camCanvas);
+      if (paintNow && api.screen() === 'game' && api.mg()) M.cam.paint($('motionCamC'));
+      if (paintNow && !$('motionM').classList.contains('hide')) M.cam.paint(camCanvas);
       style('motionCamBar', 'width', Math.min(100, M.cam.e * 400).toFixed(0) + '%');
     }
   };
