@@ -273,6 +273,7 @@ input,select{font:inherit;color:inherit;user-select:text;-webkit-user-select:tex
 #ptype small{font-family:var(--num);color:var(--steel);font-size:13px}
 /* 큰 볼카운트 (오른쪽) */
 #bigcount{position:absolute;right:max(14px,env(safe-area-inset-right));top:36vh;display:flex;flex-direction:column;gap:6px;background:var(--panel);padding:12px 16px;border-right:4px solid var(--bulb)}
+#bigcount.pit{right:auto;left:var(--side);top:calc(var(--top) + 182px);border-right:0;border-left:4px solid var(--bulb)} /* [bugs] 바람 줄(#muW) 생겨 매치업이 길어져 150→182px. 투수: 구종 바(오른쪽)와 안 겹치게 왼쪽 */
 #bigcount span{display:flex;align-items:center;gap:7px}
 #bigcount b{width:16px;font-family:var(--num);font-weight:800;font-size:19px;color:var(--steel)}
 #bigcount i{width:17px;height:17px;border-radius:50%;background:rgba(255,255,255,.12);border:1px solid rgba(255,255,255,.2)}
@@ -280,7 +281,7 @@ input,select{font:inherit;color:inherit;user-select:text;-webkit-user-select:tex
 #bigcount .bc-s i.on{background:var(--bulb);border-color:var(--bulb)}
 #bigcount .bc-o i.on{background:var(--seam);border-color:var(--seam)}
 /* 가운데 배너 (결과 발표) */
-#banner{position:absolute;left:0;right:0;top:22%;display:flex;justify-content:center;opacity:0;pointer-events:none}
+#banner{position:absolute;left:0;right:0;top:22%;display:flex;justify-content:center;opacity:0;pointer-events:none;z-index:3} /* [bugs] 긴 배너가 오른쪽 안내(#coach)·볼카운트 패널 밑에 깔려 글자가 잘리던 것 */
 #banner span{display:block;font-family:var(--disp);font-size:clamp(42px,7vw,92px);line-height:1;letter-spacing:-.02em;padding:.18em .9em .2em;background:var(--ink);color:#fff;clip-path:polygon(.45em 0,100% 0,calc(100% - .45em) 100%,0 100%);max-width:calc(100vw - 24px);text-align:center}
 #banner.small span{font-size:clamp(22px,3.2vw,38px)}
 #banner.good span{background:var(--turf)}
@@ -382,7 +383,7 @@ input,select{font:inherit;color:inherit;user-select:text;-webkit-user-select:tex
 #gaugeLbl{position:absolute;left:calc(50% + 244px);top:calc(50% + 138px);width:62px;text-align:center;font-family:var(--num);font-weight:800;font-size:16px}
 /* 미니맵 · 채팅 */
 #minimap{position:absolute;right:max(14px,env(safe-area-inset-right));bottom:max(12px,env(safe-area-inset-bottom));width:156px;height:156px;background:rgba(12,23,54,.72);border:1px solid var(--line)}
-#chat{position:absolute;left:var(--side);bottom:max(12px,env(safe-area-inset-bottom));width:min(320px,48vw)}
+#chat{position:absolute;left:var(--side);bottom:max(12px,env(safe-area-inset-bottom));width:min(320px,48vw,max(180px,calc(50vw - 345px)))} /* [bugs] 아래 가운데 조작 안내(최대 640px)와 겹치지 않게 */
 #chatlog{font-size:13px;line-height:1.5;max-height:150px;overflow:hidden;display:flex;flex-direction:column;justify-content:flex-end}
 #chatlog div{background:rgba(12,23,54,.72);padding:2px 8px;margin-top:3px;width:fit-content;max-width:100%;animation:fade 10s forwards}
 #chatlog div b{margin-right:6px}
@@ -423,6 +424,7 @@ table.ls tr.sep th{padding-top:18px;border-top:2px solid var(--line2)}
 
 /* ═══ 경기 결과 ═══ */
 #over{position:fixed;inset:0;display:flex;align-items:center;justify-content:center;background:linear-gradient(0deg,rgba(5,10,26,.9),rgba(5,10,26,.6));pointer-events:auto;padding:16px;z-index:10;--tone:var(--chalk)}
+body[data-screen=over] :is(#banner,#coach,#swa,#fb,#hitinfo,#duty,#pcue){visibility:hidden} /* [bugs] 결과 화면 뒤로 '경기 종료' 큰 배너·안내 패널이 비쳐 제목과 겹치던 것 */
 #over[data-tone=win]{--tone:var(--bulb)} #over[data-tone=lose]{--tone:var(--steel)} #over[data-tone=derby]{--tone:var(--bulb)}
 #over .ov{width:min(860px,100%);max-height:94vh;overflow:auto;display:flex;flex-direction:column;align-items:center;gap:16px;padding:10px 0}
 #overT{font-family:var(--disp);font-weight:400;font-size:clamp(64px,11vw,128px);line-height:.9;letter-spacing:-.04em;color:var(--tone)}
@@ -752,6 +754,8 @@ table.ls tr.sep th{padding-top:18px;border-top:2px solid var(--line2)}
     <div><label class="lbl">그래픽</label><div class="seg" id="gq"><button data-v="low">빠르게</button><button data-v="mid">보통</button><button data-v="high">고품질</button></div><p class="note" style="margin-top:6px">노트북이 버벅이면 '빠르게'. 그림자·빛 번짐·해상도가 낮아져. 4초 평균 38fps 밑이면 자동으로 한 단계 낮춰.</p></div>
     <div><label class="lbl">화면 흔들림</label><div class="seg" id="shake"><button data-v="1">켜기</button><button data-v="0">끄기</button></div></div>
     <div><label class="lbl">하이라이트 리플레이 (홈런·호수비)</label><div class="seg" id="replayS"><button data-v="1">켜기</button><button data-v="0">끄기</button></div></div>
+    <div><label class="lbl">시점 거리 (경기 중 Z)</label><div class="seg" id="camDistS"><button data-v="0">가까이</button><button data-v="1">기본</button><button data-v="2">멀리</button></div><p class="note" style="margin-top:6px">가까이 = 존·투수가 크게, 수비 3인칭은 내 선수에 붙어서. 멀리 = 넓게.</p></div>
+    <div><label class="lbl">타자 시점 높이</label><div class="seg" id="batHS"><button data-v="0">낮게</button><button data-v="1">기본</button><button data-v="2">높게</button></div></div>
     <div><label class="lbl">fps 표시 (오른쪽 위)</label><div class="seg" id="fpsS"><button data-v="1">켜기</button><button data-v="0">끄기</button></div></div>
     <div class="setgrp">소리</div>
     <div><label class="lbl" for="vol">전체 음량</label><div class="range"><input id="vol" type="range" min="0" max="100" value="80"><output id="volV">80</output></div></div>
@@ -783,7 +787,7 @@ table.ls tr.sep th{padding-top:18px;border-top:2px solid var(--line2)}
       <dt>마우스</dt><dd>사각 커서(PCI)를 공이 올 길목에 맞추기</dd>
       <dt><span class="kbd">좌클릭</span> <span class="kbd">Space</span></dt><dd>정타 스윙 (커서 크고 타이밍 여유)</dd>
       <dt><span class="kbd">우클릭</span> <span class="kbd">F</span></dt><dd>강타 (커서 작고 타이밍 빡빡, 대신 멀리 감) · F를 누르고 있으면 커서가 강타 크기로</dd>
-      <dt><span class="kbd">V</span></dt><dd>타격 시점 전환 (포수 뒤 중계 / 타자 어깨 뒤)</dd>
+      <dt><span class="kbd">V</span></dt><dd>타격 시점 전환 (포수 뒤 중계 / 가까이 — 존 크게)</dd>
     </dl>
     <p><b>타이밍이 먼저</b>: 타이밍이 정확할수록 커서 판정이 넓어져서(최대 1.6배) 대충 맞춰도 맞아. 타이밍이 빗나가면 커서가 정확해도 헛스윙.</p>
     <p>공이 커서의 <b>아래쪽</b>에 맞으면 땅볼, <b>가운데</b>면 라인드라이브, <b>위쪽</b>이면 뜬공 (커서 안의 가로 눈금 두 줄이 경계). 빠르면 당겨치기(좌측), 늦으면 밀어치기(우측).</p>
@@ -798,6 +802,7 @@ table.ls tr.sep th{padding-top:18px;border-top:2px solid var(--line2)}
       <dt>마우스 + <span class="kbd">클릭</span></dt><dd>코스 찍고 게이지 시작</dd>
       <dt><span class="kbd">클릭</span></dt><dd>게이지가 차오르면 한 번 더. 초록 구간에서 멈추면 최고 구속·정확한 제구, 빨강까지 넘기면 더 빠르지만 공이 흔들려</dd>
       <dt><span class="kbd">Q</span></dt><dd>주자 있을 때 견제 (타석당 3번)</dd>
+      <dt><span class="kbd">X</span> (누르고 있기)</dt><dd>주자 보기 — 앞선 주자 쪽으로 고개, 떼면 조준 화면</dd>
     </dl><p>많이 던지면 체력이 떨어져 구속·제구가 나빠져.</p></section>
     <section><h4>수비</h4><dl>
       <dt><span class="kbd">W</span><span class="kbd">A</span><span class="kbd">S</span><span class="kbd">D</span></dt><dd>이동 (투구 전에는 수비 위치 시프트)</dd>
@@ -820,6 +825,7 @@ table.ls tr.sep th{padding-top:18px;border-top:2px solid var(--line2)}
       <dt><span class="kbd">T</span> → <span class="kbd">1</span>~<span class="kbd">8</span></dt><dd>빠른 채팅</dd>
       <dt><span class="kbd">Tab</span></dt><dd>기록판 (누르고 있는 동안)</dd>
       <dt><span class="kbd">H</span></dt><dd>이 조작법</dd>
+      <dt><span class="kbd">Z</span></dt><dd>시점 거리 바꾸기 (가까이 · 기본 · 멀리) — 설정에서도, 타자 시점 높이도 설정에서</dd>
       <dt><span class="kbd">Esc</span></dt><dd>메뉴 (혼자 하기는 일시정지)</dd>
     </dl></section>
   </div>
