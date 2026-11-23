@@ -172,7 +172,7 @@ h1{font-size:26px;font-weight:900;line-height:1.2}
   }
   const ARC = 276.5;
   function paintMeter(r) { const k = Math.min(1, r / 2000); $('arc').style.strokeDashoffset = String(ARC * (1 - k)); $('arc').style.stroke = r >= SENS[sens][1] ? '#ff6b6b' : r >= SENS[sens][0] ? '#ffcf3f' : '#56657a'; $('spd').textContent = Math.round(r); }
-  setInterval(() => { if (st === 'bat' && performance.now() - meterT > 900) { meterPk = 0; paintMeter(0); } if (hasMotion === false && st === 'bat') $('tapSwing').classList.remove('hide'); }, 300);
+  setInterval(() => { if (st === 'bat' && performance.now() - meterT > 900) { meterPk = 0; paintMeter(0); } $('tapSwing').classList.toggle('hide', hasMotion || st !== 'bat'); }, 300);
   function onOri(e) { if (e.beta == null) return; ori = { b: e.beta, g: e.gamma || 0 }; }
 
   // ── 투구: 누르고 기울여 조준 → 휘둘러 던지기 (손 떼고 0.6초 안에 휘둘러도 됨) ──
