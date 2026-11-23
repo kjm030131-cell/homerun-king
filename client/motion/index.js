@@ -33,12 +33,13 @@ export function createMotion(api) {
   };
   store.set('padCode', M.code);
   const padURL = () => `${location.origin}/pad.html#${M.code}`;
-  M.active = () => !!((M.pad && M.pad.pads > 0) || (M.cam && M.cam.on));
+  M.connected = () => !!((M.pad && M.pad.pads > 0) || (M.cam && M.cam.on));
+  M.active = () => M.connected() && api.mg(); // 모션 플레이 경기에서만 입력을 받음
 
   // ── 타격 ──
   function swing(atLocalMs, strong, src) {
     const S = api.S(), role = api.role();
-    if (!S || !role.batter || S.ph !== 'pitching' || !S.p) return 'skip';
+    if (!S || !S.mo || !role.batter || S.ph !== 'pitching' || !S.p) return S && !S.mo ? 'nomo' : 'skip';
     const lagMs = performance.now() - atLocalMs - M.calib + (src === 'cam' ? M.camLag : 0); // 보정 +면 더 늦게 친 걸로
     const t = api.simNow() - lagMs / 1000;
     if (t < S.p.t0 - 0.05) return 'early'; // 공 놓기 전 동작(준비 동작)은 무시
@@ -53,7 +54,7 @@ export function createMotion(api) {
   const zoneAim = (x, y) => { const S = api.S(), zn = (S && S.zn) || [-0.236, 0.236, 0.46, 1.06]; const cx = (zn[0] + zn[1]) / 2, cy = (zn[2] + zn[3]) / 2; return [clamp(cx + x * 0.42, -0.8, 0.8), clamp(cy + y * 0.48, 0.15, 1.7)]; };
   function pitch(aim, lv, type) {
     const S = api.S(), role = api.role();
-    if (!S || !role.pitcher || S.ph !== 'pitch') return false;
+    if (!S || !S.mo || !role.pitcher || S.ph !== 'pitch') return false;
     if (type) api.setType(type);
     api.pitch(aim, lv);
     return true;
@@ -63,7 +64,7 @@ export function createMotion(api) {
   function onPad(m) {
     if (m.t === 'sws') { // 휘두르기 시작: 정점(=임팩트)은 보통 시작 뒤 ~60ms → 그 시각으로 화면 스윙만 먼저
       const S = api.S(), role = api.role();
-      if (S && role.batter && S.ph === 'pitching' && S.p) { const lag = performance.now() - M.pad.toLocal(m.at) - M.calib; const t = api.simNow() - lag / 1000 + 0.06; if (t >= S.p.t0) api.preSwing(t); }
+      if (S && S.mo && role.batter && S.ph === 'pitching' && S.p) { const lag = performance.now() - M.pad.toLocal(m.at) - M.calib; const t = api.simNow() - lag / 1000 + 0.06; if (t >= S.p.t0) api.preSwing(t); }
     } else if (m.t === 'swing') { const r = swing(M.pad.toLocal(m.at), m.mode === 'power', 'pad'); M.pad.send({ t: 'ack', k: 'swing', r, lag: r === 'ok' ? M.lastLag : null }); }
     else if (m.t === 'grip') { M.grip = !!m.on; if (!m.on) { M.aim = null; api.setAim(null); } }
     else if (m.t === 'aim') { M.aim = [clamp(+m.x || 0, -1.6, 1.6), clamp(+m.y || 0, -1.6, 1.6)]; }
@@ -99,8 +100,8 @@ export function createMotion(api) {
     paint(); syncAuto();
   };
 
-  // 모션 쓰는 동안 수비는 CPU (서버에 알림). 끄면 원래대로
-  function syncAuto() { const on = M.active(); if (M.autoSent !== on && api.net()) { M.autoSent = on; api.net().send({ t: 'autoD', on }); } }
+  // 연결 상태를 서버에 알림 → 방 대기실에 '📱 연결됨' 표시 (수비 자동은 모션 플레이 방 설정이 정함)
+  function syncAuto() { const on = M.connected(); if (M.autoSent !== on && api.net()) { M.autoSent = on; api.net().send({ t: 'pad', on }); } }
   M.resetNet = () => { M.autoSent = null; };
 
   function paint() {
@@ -110,7 +111,7 @@ export function createMotion(api) {
     if (M.cam) { setText('mCamSt', M.cam.on ? '웹캠 켜짐 · 옆으로 서서 휘둘러봐' : M.cam.err || '꺼짐'); setText('mCamBtn', M.cam.on ? '웹캠 끄기' : '웹캠 켜기'); cls('mCamSt', 'ok', M.cam.on); }
     show('mCamView', !!(M.cam && M.cam.on));
     setText('mCalV', (M.calib > 0 ? '+' : '') + M.calib + 'ms');
-    const on = M.active(); setText('mPlaySt', on ? '준비 끝 · 플레이 볼을 눌러!' : '핸드폰을 연결하거나 웹캠을 켜면 시작할 수 있어'); cls('mPlaySt', 'ok', on);
+    const on = M.connected(); setText('mPlaySt', on ? '준비 끝 · 플레이 볼을 눌러!' : '핸드폰을 연결하거나 웹캠을 켜면 시작할 수 있어'); cls('mPlaySt', 'ok', on);
   }
 
   // 모달 바인딩
@@ -126,19 +127,19 @@ export function createMotion(api) {
     const S = api.S(), role = api.role();
     if (M.pad) {
       M.pad.tick();
-      const st = !S || api.screen() !== 'game' ? 'wait' : role.batter && (S.ph === 'pitch' || S.ph === 'pitching') ? 'bat' : role.pitcher && S.ph === 'pitch' ? 'pitch' : 'wait';
+      const st = !S || api.screen() !== 'game' ? 'wait' : !S.mo ? 'nomo' : role.batter && (S.ph === 'pitch' || S.ph === 'pitching') ? 'bat' : role.pitcher && S.ph === 'pitch' ? 'pitch' : 'wait';
       const hs = st + '|' + api.type() + '|' + (S && S.bs ? 1 : 0) + '|' + (api.canChal() ? 1 : 0);
       const n = performance.now();
-      if (M.pad.pads && (hs !== M.lastHS || n - M.hsT > 1500)) { M.lastHS = hs; M.hsT = n; M.pad.send({ t: 'hs', st, type: api.type(), types: api.types(), bunt: !!(S && S.bs), chal: !!api.canChal() }); }
+      if (M.pad.pads && (hs !== M.lastHS || n - M.hsT > 1500)) { M.lastHS = hs; M.hsT = n; M.pad.send({ t: 'hs', st, ph: !!(S && api.screen() === 'game'), type: api.type(), types: api.types(), bunt: !!(S && S.bs), chal: !!api.canChal() }); }
       if (st !== 'pitch' && M.grip) { M.grip = false; M.aim = null; api.setAim(null); }
       if (M.grip && M.aim) api.setAim(zoneAim(M.aim[0], M.aim[1]));
     }
     syncAuto();
     const on = M.active();
     show('motionBadge', on && api.screen() === 'game');
-    if (on) setText('motionBadgeT', [(M.pad && M.pad.pads) ? '📱 핸드폰' : '', (M.cam && M.cam.on) ? '📷 웹캠' : ''].filter(Boolean).join(' · ') + ' · 수비 자동');
+    if (on) setText('motionBadgeT', [(M.pad && M.pad.pads) ? '📱 핸드폰' : '', (M.cam && M.cam.on) ? '📷 웹캠' : ''].filter(Boolean).join(' · ') + (S && S.mo === 2 ? ' · 스크린야구' : ' · 수비 자동'));
     const camOn = !!(M.cam && M.cam.on);
-    show('motionCam', camOn && api.screen() === 'game');
+    show('motionCam', camOn && api.screen() === 'game' && api.mg());
     if (camOn) {
       if (api.screen() === 'game') M.cam.paint($('motionCamC'));
       if (!$('motionM').classList.contains('hide')) M.cam.paint(camCanvas);

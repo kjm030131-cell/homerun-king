@@ -49,3 +49,25 @@ test('QR: 주소 길이에 맞춰 버전 선택 · 세 귀퉁이 위치 표시',
   }
   assert.throws(() => qrMatrix('x'.repeat(200)));
 });
+
+test('모션 플레이 방(mo=1): 모두 수비 자동 · 스크린야구(mo=2): 투수도 CPU, 사람은 타격만', () => {
+  for (const mo of [1, 2]) {
+    const g = new Game({ emit: () => {}, sendTo: () => {} });
+    g.addPlayer('a', 'A'); g.addPlayer('b', 'B');
+    g.players.get('a').team = 'away'; g.players.get('b').team = 'home';
+    g.applySettings({ mode: 'game', innings: 2, mo, pitRot: 'inning' });
+    assert.equal(g.set.fieldCtl, 'auto'); if (mo === 2) assert.equal(g.set.pitRot, 'cpu');
+    g.start();
+    let stolen = 0, humanPitch = 0, bats = 0;
+    for (let i = 0; i < 60 * 60 * 5; i++) {
+      const pc = g.pitcherCtrl();
+      if (g.phase === 'pitch' && (pc === 'a' || pc === 'b')) { humanPitch++; g.handle(pc, { t: 'pitch', type: 'FB', tx: 0, ty: 0.8, power: 0.9 }); }
+      if (g.phase === 'pitching' && g.pitch && !g.pitch.swung && g.batter.id && g.now > g.pitch.arrive - 0.01) { bats++; g.handle(g.batter.id, { t: 'swing', pid: g.pitch.id, dt: 0, ax: 0, ay: 0, mode: 'contact' }); }
+      g.tick(1 / 60);
+      if (g.phase === 'live') for (const f of g.fielders) if ((f.ctrl === 'a' || f.ctrl === 'b') && f.pos !== 'P') { const ci = g.ctrlFielder(f.ctrl); if (g.isHum(f.ctrl)) stolen++; }
+    }
+    assert.equal(stolen, 0, `mo=${mo} 사람에게 수비 조작`);
+    assert.ok(bats > 5, `mo=${mo} 사람 타석 ${bats}`);
+    if (mo === 2) assert.equal(humanPitch, 0, '스크린야구인데 사람이 투구'); else assert.ok(humanPitch > 3, `모션 플레이 사람 투구 ${humanPitch}`);
+  }
+});

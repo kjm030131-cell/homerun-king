@@ -440,6 +440,7 @@ export const DEFAULT_SETTINGS = {
   name: '', mode: 'game', innings: 3, derbyOuts: 10, diff: 1, max: 12, pub: true, teams: ['서울 나이츠', '부산 하버스'],
   size: 0, // 팀당 인원 제한 (0=자유, 1·2·3 = 1:1·2:2·3:3)
   lineup: 'humans', // humans: 사람만 돌아가며 타격 · nine: 9인 타순(빈 타순은 CPU)
+  mo: 0, // [motion] 0 일반(키보드·마우스) · 1 모션 플레이(핸드폰·웹캠으로 투구+타격) · 2 스크린야구(타격만, 투구·수비 CPU)
   pitRot: 'inning', // inning: 이닝마다 투수 교대 · batter: 타자마다 교대 · fixed: 고정 · cpu: CPU 투수
   fieldCtl: 'auto', // auto: 공 가까운 수비수로 자동 전환(기본, 11-19: 'pos' 기본이면 혼자하기 수비 때 투수만 잡혀 아무것도 못 함) · pos: 내 포지션만
   clubs: [0, 1],
@@ -531,12 +532,12 @@ export class Game {
   teamCount(team, except) { let n = 0; for (const p of this.players.values()) if (p.team === team && p.id !== except) n++; return n; }
   isLive(id) { const p = id && this.players.get(id); return !!(p && p.conn); }
   // [motion] 수비 조작하는 사람인지 — 모션 모드(autoD)인 사람은 수비·송구를 CPU가 대신 (투구·타격만 직접)
-  isHum(id) { const p = id && this.players.get(id); return !!(p && p.conn && !p.autoD); }
+  isHum(id) { const p = id && this.players.get(id); return !!(p && p.conn && !p.autoD && !this.set.mo); } // 모션 플레이 방은 모두 수비 자동
   lobbyState() {
     return {
       t: 'lobby', host: this.hostId, phase: this.phase, set: this.set, locked: !!this.password,
       players: [...this.players.values()].sort((a, b) => a.order - b.order)
-        .map((p) => ({ id: p.id, name: p.name, team: p.team, ready: p.ready, pos: p.pos, bo: p.bo, ping: p.ping, conn: p.conn })),
+        .map((p) => ({ id: p.id, name: p.name, team: p.team, ready: p.ready, pos: p.pos, bo: p.bo, ping: p.ping, conn: p.conn, pad: p.pad ? 1 : 0 })),
     };
   }
   emitLobby() { this.emit(this.lobbyState()); this.onChange(); }
@@ -603,6 +604,7 @@ export class Game {
       case 'pitch': this.onPitch(id, m); break;
       case 'swing': this.onSwing(id, m); break;
       case 'autoD': { const pl = this.players.get(id); if (pl) pl.autoD = !!m.on; break; } // [motion]
+      case 'pad': { const pl = this.players.get(id); if (pl && !!m.on !== !!pl.pad) { pl.pad = !!m.on; if (this.phase === 'lobby' || this.phase === 'over') this.emitLobby(); } break; } // [motion] 대기실에 '연결됨' 표시
       case 'bunt': if (this.batter && this.batter.id === id && (this.phase === 'pitch' || (this.phase === 'pitching' && this.now < this.pitch.t0))) this.buntStance = !!m.on; break;
       case 'steal': this.onSteal(id); break;
       case 'pick': this.onPick(id, m); break;
@@ -646,6 +648,9 @@ export class Game {
       this.ev('modeChange', { rules: s.rules, innings: s.innings });
     }
     if (m.timeLim != null) s.timeLim = clamp(m.timeLim | 0, 0, 60);
+    if (m.mo != null) s.mo = clamp(m.mo | 0, 0, 2);
+    if (s.mo === 2) s.pitRot = 'cpu'; // 스크린야구: 투수는 CPU
+    if (s.mo) s.fieldCtl = 'auto';
     if (this.R.forceAutoField) s.fieldCtl = 'auto';
   }
   // 인원 제한이 줄면 넘치는 사람은 반대팀/관전으로
@@ -861,7 +866,7 @@ export class Game {
     const tf = this.fielders[target];
     if (tf.ctrl && this.isHum(tf.ctrl)) return;
     // 공을 던진 사람이 받는 사람으로 따라감, 아니면 가장 오래 안 움직인 팀원
-    const hs = this.humans(this.fieldTeam).filter((h) => h.conn && !h.autoD).map((h) => h.id);
+    const hs = this.set.mo ? [] : this.humans(this.fieldTeam).filter((h) => h.conn && !h.autoD).map((h) => h.id);
     if (!hs.length) return;
     let pick = null;
     if (b.state === 'thrown' && b.thrower >= 0) { const tc = this.fielders[b.thrower].ctrl; if (tc && hs.includes(tc)) pick = tc; }
@@ -2550,7 +2555,7 @@ export class Game {
     const age = (t) => (this.now - t < 3 ? r2(this.now - t) : -1);
     s.mode = this.mode;
     s.inn = this.inning; s.half = this.half; s.sc = this.score; s.ls = this.line; s.hits = this.hits; s.errs = this.errs;
-    s.tn = this.set.teams; s.cl = this.set.clubs; s.tod = this.set.tod; s.wd = this.wind || [0, 0]; s.he = this.set.hitEase; s.fc = this.set.fieldCtl;
+    s.tn = this.set.teams; s.cl = this.set.clubs; s.tod = this.set.tod; s.wd = this.wind || [0, 0]; s.he = this.set.hitEase; s.fc = this.set.fieldCtl; if (this.set.mo) s.mo = this.set.mo;
     s.cnt = [this.balls, this.strikes, this.outs];
     if (this.play && this.phase === 'live') { if (this.play.rl) s.rl = [this.play.rl.ci, r2(this.play.rl.x), r2(this.play.rl.z), this.play.rl.k]; s.ch = this.play.chaser ?? -1; const c = this.play.cov; s.cv = c ? [c[1] ?? -1, c[2] ?? -1, c[3] ?? -1, c[4] ?? -1] : null; }
     if (this.now - (this.pgAt || -9) > 2) { this.pgAt = this.now; s.pg = [...this.players.values()].filter((p) => p.conn && p.team !== 'spec').map((p) => [p.name, p.ping | 0]); }

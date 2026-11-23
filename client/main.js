@@ -266,7 +266,7 @@ function startLocal(name, o) {
   myId = 'me'; myName = name; bus.emit('ui:me', { id: myId }); // [audio] 내 타석 오르간(batterUp)용
   game.addPlayer('me', name);
   const me = game.players.get('me'); me.team = o.team; me.pos = o.pos; me.bats = cfg.bats || 'R'; // [lefty]
-  game.applySettings({ mode: o.mode, innings: o.inn, derbyOuts: o.mode === 'derby' ? Math.max(5, o.inn * 3) : 10, diff: o.diff, clubs: o.clubs || [0, 1], pitRot: 'fixed', fieldCtl: o.fld || 'auto', tod: o.tod || 'night', hitEase: o.hitEase ?? 1, rules: o.rules }); // [gameplay] rules: 'real' | 'casual' (ui가 메뉴에서 넘겨줄 것)
+  game.applySettings({ mode: o.mode, innings: o.inn, derbyOuts: o.mode === 'derby' ? Math.max(5, o.inn * 3) : 10, diff: o.diff, clubs: o.clubs || [0, 1], pitRot: 'fixed', fieldCtl: o.fld || 'auto', mo: o.mo || 0, tod: o.tod || 'night', hitEase: o.hitEase ?? 1, rules: o.rules }); // [gameplay] rules: 'real' | 'casual' (ui가 메뉴에서 넘겨줄 것)
   applyClubs(game.set.clubs);
   let last = performance.now();
   const tickFn = () => {
@@ -551,7 +551,7 @@ function getRole() {
   if (r.fi >= 0) { r.pos = S.fl[r.fi][0]; r.pitcher = r.pos === 'P'; }
   r.holding = r.fi >= 0 && !!S.b && S.b[6] === r.fi;
   // [motion] 모션 모드: 수비는 CPU → 투구 단계의 투수 말고는 수비 조작 없음(카메라도 중계 화면)
-  if (r.fi >= 0 && motion && motion.active() && !(r.pitcher && S.ph !== 'live')) { r.fi = -1; r.pos = null; r.pitcher = false; r.holding = false; }
+  if (r.fi >= 0 && S.mo && !(r.pitcher && S.ph !== 'live')) { r.fi = -1; r.pos = null; r.pitcher = false; r.holding = false; }
   return r;
 }
 
@@ -593,8 +593,8 @@ addEventListener('keydown', (e) => {
   // 타자
   if (role.batter) {
     if (k === 'b') toggleBunt();
-    if (e.code === 'Space' && !(motion && motion.active())) doSwing('contact');
-    if (k === 'f' && !(motion && motion.active())) doSwing('power');
+    if (e.code === 'Space' && !S.mo) doSwing('contact');
+    if (k === 'f' && !S.mo) doSwing('power');
   }
   // 투수
   if (role.pitcher && S.ph === 'pitch' && /^[1-6]$/.test(k)) setPitchType(PITCH_KEYS[+k - 1]);
@@ -659,7 +659,7 @@ canvas.addEventListener('pointerdown', (e) => {
   if (replay.active) { replay.stop(); return; }
   if (intro && !getRole().pitcher) { endIntro(); return; }
   const role = getRole();
-  if (motion && motion.active()) return; // [motion] 모션 모드: 클릭으로 스윙·투구 안 함(실수 방지) — 핸드폰·웹캠 동작으로만
+  if (S.mo) return; // [motion] 모션 플레이 경기: 클릭으로 스윙·투구 안 함 — 핸드폰·웹캠 동작으로만
   if (role.batter) doSwing(e.button === 2 ? 'power' : 'contact');
   else if (role.pitcher && !camRig.peek) pitchClick(); // [cam]
 });
@@ -714,7 +714,7 @@ let motion = null;
 function initMotion() {
   try {
     motion = createMotion({
-      store, S: () => S, role: () => getRole(), simNow: () => simNow(), net: () => net, screen: () => screen, offline: !!window.HR_OFFLINE,
+      store, S: () => S, mg: () => !!(S && S.mo) /* 모션 플레이 경기인지 (일반 경기에선 핸드폰·웹캠 입력 무시) */, role: () => getRole(), simNow: () => simNow(), net: () => net, screen: () => screen, offline: !!window.HR_OFFLINE,
       swing: (mode, opt) => doSwing(mode, opt),
       preSwing: (t) => { if (S && S.p && S.ph === 'pitching' && !swungLocal[S.p.id] && !swingPre[S.p.id]) swingPre[S.p.id] = t; },
       pitch: (aim, lv) => { if (!S || S.ph !== 'pitch') return; if (intro) endIntro(); gauge = { t0: nowP(), aim, type: pitchType }; sendPitch(lv); },

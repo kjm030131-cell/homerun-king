@@ -38,7 +38,7 @@ export function renderRoom(lobby, myId, send) {
   const isHost = lobby.host === myId;
   const st = lobby.set;
   const me = lobby.players.find((p) => p.id === myId);
-  const li = (p) => `<li class="pl ${p.id === myId ? 'me' : ''} ${p.ready ? 'rdy' : ''}"><span class="bo" title="타순">${p.bo ? p.bo : '-'}</span><span class="nm">${esc(p.name)}${p.conn ? '' : ' <em>끊김</em>'}</span>${p.pos !== 'any' ? `<span class="pos">${POS_KO[p.pos] || ''}</span>` : ''}${p.id === lobby.host ? '<span class="host">방장</span>' : ''}<span class="ping">${p.ping ? p.ping + 'ms' : ''}</span><span class="rd" title="${p.ready ? '준비 완료' : '대기'}">${p.ready ? '준비' : ''}</span>${isHost && p.id !== myId ? `<button class="x" data-kick="${p.id}" title="내보내기">강퇴</button>` : ''}</li>`;
+  const li = (p) => `<li class="pl ${p.id === myId ? 'me' : ''} ${p.ready ? 'rdy' : ''}"><span class="bo" title="타순">${p.bo ? p.bo : '-'}</span><span class="nm">${esc(p.name)}${p.conn ? '' : ' <em>끊김</em>'}</span>${p.pos !== 'any' ? `<span class="pos">${POS_KO[p.pos] || ''}</span>` : ''}${lobby.set.mo ? (p.pad ? '<span class="pad">📱 연결</span>' : '<span class="pad off">미연결</span>') : ''}${p.id === lobby.host ? '<span class="host">방장</span>' : ''}<span class="ping">${p.ping ? p.ping + 'ms' : ''}</span><span class="rd" title="${p.ready ? '준비 완료' : '대기'}">${p.ready ? '준비' : ''}</span>${isHost && p.id !== myId ? `<button class="x" data-kick="${p.id}" title="내보내기">강퇴</button>` : ''}</li>`;
   const a = lobby.players.filter((p) => p.team === 'away'), h = lobby.players.filter((p) => p.team === 'home'), sp = lobby.players.filter((p) => p.team === 'spec');
   const bySlot = (x, y) => (x.bo || 99) - (y.bo || 99);
   const cap = st.size || Math.ceil(st.max / 2);
