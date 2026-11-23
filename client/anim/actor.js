@@ -4,7 +4,7 @@
 // · 동작 시작 이벤트(사운드용, 화면에서 모션이 시작되는 순간): cue:swing {power, bunt} / cue:dive {x,z} / cue:slide {x,z}
 //   (서버 판정 이벤트 swing/dive/slide 는 gameplay 가 같은 이름으로 보내므로 겹치지 않게 'cue:' 접두사(총괄 지정))
 import * as THREE from 'three';
-const _bq = new THREE.Quaternion(), _be = new THREE.Euler(); // [motion] 핸드폰 배트 연동
+const _bq = new THREE.Quaternion(), _be = new THREE.Euler(), _bq2 = new THREE.Quaternion(), _bqI = new THREE.Quaternion(); // [motion] 핸드폰 배트 연동
 import { Player, UNIFORMS } from '../player.js';
 import { attachSkin } from '../skinned.js';
 import { Animator } from '../anim.js';
@@ -330,8 +330,9 @@ export class ClipAnimator {
       this.gripW = (this.gripW ?? w) + (w - (this.gripW ?? w)) * Math.min(1, dt * 14);
       // [motion] 핸드폰 기울기 → 배트 각도 (손목 기준으로 배트를 돌리고 다른 손은 그립 IK가 따라감). 스윙 중엔 스윙 면 기울기만 약하게
       if (P.bat) { const b = P.bat; if (!b.userData.q0) b.userData.q0 = b.quaternion.clone();
-        const o = c.batOff, k = swinging ? 0.45 : 1;
-        if (o) { _be.set(clamp(o[0], -0.95, 0.95) * k, 0, clamp(o[1], -0.8, 0.8) * k); b.quaternion.copy(b.userData.q0).multiply(_bq.setFromEuler(_be)); } else b.quaternion.copy(b.userData.q0); }
+        const o = c.batOff, k = swinging ? 0.45 : 1, Q = c.batQ;
+        if (Q) { _bq2.set(Q[0], Q[1], Q[2], Q[3]); if (k < 1) _bq2.slerp(_bqI, 1 - k); b.quaternion.copy(b.userData.q0).multiply(_bq2); } // [위 방식] 핸드폰 3D 방향 그대로
+        else if (o) { _be.set(clamp(o[0], -0.95, 0.95) * k, 0, clamp(o[1], -0.8, 0.8) * k); b.quaternion.copy(b.userData.q0).multiply(_bq.setFromEuler(_be)); } else b.quaternion.copy(b.userData.q0); }
       if (P.bat && P.bat.visible && this.gripW > 0.01) C.grip(P.bat, side, top, this.gripW); }
     C.update(dt);
   }

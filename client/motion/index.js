@@ -78,7 +78,7 @@ export function createMotion(api) {
 
   // ── 핸드폰 ──
   function onPad(m) {
-    if (m.t === 'ori') { M.ori = [+m.b || 0, +m.g || 0]; M.oriT = performance.now(); }
+    if (m.t === 'ori') { M.ori = [+m.b || 0, +m.g || 0]; M.oriQ = Array.isArray(m.q) && m.q.length === 4 ? m.q.map(Number) : null; M.oriT = performance.now(); }
     else if (m.t === 'chk') { const S = api.S(), role = api.role(); if (S && S.mo && role.batter && S.ph === 'pitching' && S.p && api.simNow() > S.p.t0 && api.net()) { api.net().send({ t: 'chk' }); api.toast('체크스윙'); } }
     else if (m.t === 'sws') { // 휘두르기 시작: 정점(=임팩트)은 보통 시작 뒤 ~60ms → 그 시각으로 화면 스윙만 먼저
       const S = api.S(), role = api.role();
@@ -177,6 +177,15 @@ export function createMotion(api) {
   });
   // 실시간 배트: 핸드폰 기울기(타석 자세 기준, °) → 배트 각도(rad). 0.25초 넘게 안 오면 끔
   const bo = [0, 0];
+  // [위 방식] 3D 회전이 오면 쿼터니언 그대로 [x,y,z,w] (프레임마다 부드럽게 따라감)
+  const bq = [0, 0, 0, 1];
+  M.batQ = () => {
+    const q = M.oriQ; if (!q || performance.now() - M.oriT > 250) return null;
+    let d = bq[0] * q[0] + bq[1] * q[1] + bq[2] * q[2] + bq[3] * q[3]; const sg = d < 0 ? -1 : 1;
+    for (let i = 0; i < 4; i++) bq[i] += (q[i] * sg - bq[i]) * 0.55;
+    const n = Math.hypot(bq[0], bq[1], bq[2], bq[3]) || 1; for (let i = 0; i < 4; i++) bq[i] /= n;
+    return bq;
+  };
   M.batOff = () => {
     if (!M.ori || performance.now() - M.oriT > 250) return null;
     bo[0] += (M.ori[0] * Math.PI / 180 - bo[0]) * 0.5; // 핸드폰 윗부분 들면 배트도 세워짐(스크린샷으로 방향 확인) bo[1] += (M.ori[1] * Math.PI / 180 - bo[1]) * 0.5;
