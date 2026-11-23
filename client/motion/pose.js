@@ -30,8 +30,16 @@ export function createPose(video, onSwing) {
     lastTs = ts;
     let r; try { r = lander.detectForVideo(video, ts); } catch { return; }
     const w = r && r.worldLandmarks && r.worldLandmarks[0];
-    if (!w) { P.lm = null; return; }
-    P.lm = w.map((p) => [p.x, p.y, p.z]); P.t = ts;
+    if (!w) { P.lm = null; P.sm = null; return; }
+    // [11-24] 떨림 보정: 빠르게 움직이면 바로 따라가고 가만히 있으면 흔들림을 걸러냄(One-Euro 비슷하게), 4번째 값 = 보이는 정도
+    const dtS = P.t ? Math.min(0.2, (ts - P.t) / 1000) : 0.05;
+    if (!P.sm) P.sm = w.map((p) => [p.x, p.y, p.z, p.visibility ?? 1]);
+    else for (let i = 0; i < 33; i++) {
+      const a = P.sm[i], p = w[i], sp = Math.hypot(p.x - a[0], p.y - a[1], p.z - a[2]) / Math.max(dtS, 1e-3);
+      const k = Math.min(1, 0.25 + sp * 0.18) ; // 0.25(정지) ~ 1(빠름)
+      a[0] += (p.x - a[0]) * k; a[1] += (p.y - a[1]) * k; a[2] += (p.z - a[2]) * k * 0.7; a[3] += ((p.visibility ?? 1) - a[3]) * 0.3; // 깊이(z)는 더 흔들려서 덜 따라감
+    }
+    P.lm = P.sm; P.t = ts;
     // 스윙 감지: 손목 가운데 속도(m/s)
     const hx = (w[15].x + w[16].x) / 2, hy = (w[15].y + w[16].y) / 2, hz = (w[15].z + w[16].z) / 2;
     if (prev) {

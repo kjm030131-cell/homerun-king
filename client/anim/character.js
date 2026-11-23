@@ -429,6 +429,14 @@ export class Character {
   _pose(R) {
     const B = this.bones, L = R.lm, w = R.w;
     for (let i = 0; i < 33; i++) mpv(_P[i], L[i], R.mir);
+    const vis = (i) => (L[i].length > 3 ? L[i][3] : 1);
+    // [11-24] 몸 방향 맞춤: 내가 평소 서 있는 방향(골반선, 천천히 따라가는 평균)을 선수 타격 자세 방향에 맞추고, 스윙처럼 빠르게 도는 것만 반영 → 카메라 위치가 달라도 선수가 통째로 돌아가지 않음
+    {
+      const hx = _P[23].x - _P[24].x, hz = _P[23].z - _P[24].z, uy = Math.atan2(hx, hz);
+      if (this._pyU == null) this._pyU = uy; else { let d = uy - this._pyU; d = Math.atan2(Math.sin(d), Math.cos(d)); this._pyU += d * 0.02; }
+      if (B.LeftUpLeg && B.RightUpLeg) { /* 매 프레임 클립 자세의 골반선 (좌/우타 바뀌어도 맞음) */ B.LeftUpLeg.updateWorldMatrix(true, false); B.RightUpLeg.updateWorldMatrix(true, false); B.LeftUpLeg.getWorldPosition(m_p1); B.RightUpLeg.getWorldPosition(m_p0); this._pyC = Math.atan2(m_p1.x - m_p0.x, m_p1.z - m_p0.z); }
+      if (this._pyC != null) { const rot = this._pyC - this._pyU; m_qa.setFromAxisAngle(m_UP, rot); for (let i = 0; i < 33; i++) _P[i].applyQuaternion(m_qa); }
+    }
     const v = (a, b) => new THREE.Vector3().subVectors(_P[b], _P[a]);
     const mid = (a, b) => new THREE.Vector3().addVectors(_P[a], _P[b]).multiplyScalar(0.5);
     // 엉덩이 방향: 골반 좌우선(오른쪽→왼쪽)을 수평으로 맞춤
@@ -446,10 +454,10 @@ export class Character {
       const cur = m_cur.subVectors(m_p1, m_p0).setY(0), tg = v(12, 11).setY(0);
       if (cur.lengthSq() > 1e-6 && tg.lengthSq() > 1e-6) { let a = Math.atan2(tg.x, tg.z) - Math.atan2(cur.x, cur.z); a = Math.atan2(Math.sin(a), Math.cos(a)); rotWorld(B.Spine2, m_UP, a * w); }
     }
-    aimBone(B.Neck, B.Head, new THREE.Vector3().subVectors(_P[0], mid(11, 12)), w * 0.6);
+    if (vis(0) > 0.5) aimBone(B.Neck, B.Head, new THREE.Vector3().subVectors(_P[0], mid(11, 12)), w * 0.6);
     // 팔·다리
     for (const [bn, tn, a, b] of [['LeftArm', 'LeftForeArm', 11, 13], ['LeftForeArm', 'LeftHand', 13, 15], ['RightArm', 'RightForeArm', 12, 14], ['RightForeArm', 'RightHand', 14, 16],
-      ['LeftUpLeg', 'LeftLeg', 23, 25], ['LeftLeg', 'LeftFoot', 25, 27], ['RightUpLeg', 'RightLeg', 24, 26], ['RightLeg', 'RightFoot', 26, 28]]) aimBone(B[bn], B[tn], v(a, b), w);
+      ['LeftUpLeg', 'LeftLeg', 23, 25], ['LeftLeg', 'LeftFoot', 25, 27], ['RightUpLeg', 'RightLeg', 24, 26], ['RightLeg', 'RightFoot', 26, 28]]) { const vv = Math.min(vis(a), vis(b)); if (vv > 0.45) aimBone(B[bn], B[tn], v(a, b), w * Math.min(1, (vv - 0.45) / 0.25)); } // 안 보이는 관절(화면 밖 다리 등)은 원래 동작
   }
   _blob() {
     const h = this.bones.Hips; if (!h || !this.blob) return;

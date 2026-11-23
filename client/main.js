@@ -681,7 +681,9 @@ function doSwing(mode, opt) {
   const p = S.p, t = opt && isFinite(opt.t) ? opt.t : simNow(); // [motion] 핸드폰·웹캠: 실제로 휘두른 순간(지연 뺀 시각)
   if (swungLocal[p.id] || t < p.t0) return;
   if (buntOn || S.bs) mode = 'bunt';
-  swungLocal[p.id] = t;
+  // [11-24] 모션: 판정은 실제 휘두른 시각(t), 화면 배트는 vis(미리 돌던 배트의 임팩트) — 공은 그때까지 배트 앞에서 기다림
+  const visDelay = opt && isFinite(opt.vis) ? clamp(opt.vis - simNow(), 0, 0.25) : 0;
+  swungLocal[p.id] = opt && isFinite(opt.vis) ? opt.vis : t;
   let a = (opt && opt.aim) || aimPoint() || [0, 0.8];
   const dt = t - p.arrive;
   if (mode === 'bunt') {
@@ -704,8 +706,9 @@ function doSwing(mode, opt) {
   swingReport(dt, a, p, R.J, R.J.contact);
   bus.emit('localSwing', { pid: p.id, mode, contact: R.J.contact, dt: Math.round(dt * 1000), q: R.q }); // [gameplay] 내 스윙 즉시 피드백(서버 contact/miss는 핑만큼 늦게 옴)
   if (R.J.contact) {
-    contactFreeze = { pid: p.id, until: nowP() + 0.35, pos: [p.tx, p.ty] };
-    onContact(p, R.q, false);
+    contactFreeze = { pid: p.id, until: nowP() + 0.35 + visDelay, pos: [p.tx, p.ty] };
+    if (visDelay > 0.005) { hitStopUntil = nowP() + visDelay + 0.02; setTimeout(() => onContact(p, R.q, false), visDelay * 1000); } // 배트가 화면에서 공에 닿을 때 터지게
+    else onContact(p, R.q, false);
     if (R.perfect) { bus.emit('ui:perfect'); perfectHit = nowP(); }
   }
   feedback(R.text, R.col);
@@ -718,6 +721,7 @@ function initMotion() {
     motion = createMotion({
       store, S: () => S, mg: () => !!(S && S.mo) /* 모션 플레이 경기인지 (일반 경기에선 핸드폰·웹캠 입력 무시) */, role: () => getRole(), simNow: () => simNow(), net: () => net, screen: () => screen, offline: !!window.HR_OFFLINE,
       swing: (mode, opt) => doSwing(mode, opt),
+      preT: () => (S && S.p ? swingPre[S.p.id] : undefined),
       preSwing: (t) => { if (S && S.p && S.ph === 'pitching' && !swungLocal[S.p.id] && !swingPre[S.p.id]) swingPre[S.p.id] = t; },
       pitch: (aim, lv) => { if (!S || S.ph !== 'pitch') return; if (intro) endIntro(); gauge = { t0: nowP(), aim, type: pitchType }; sendPitch(lv); },
       setAim: (a) => { if (!a) return; tmpV.set(a[0], a[1], 0).project(camera); const k = cfg.sens / 100 || 1; mouseRaw.set(clamp(tmpV.x / k, -1, 1), clamp(tmpV.y / k, -1, 1)); },
@@ -1013,7 +1017,7 @@ function updateWorld(dt) {
       if (contactL && batter.tr && swingInfo[s.p.id]) batter.tr = swingTrack(contactL);
       const bunt = !!s.bs || (role.batter && buntOn);
       const aimY = s.p && s.ph === 'pitching' && t > s.p.t0 ? s.p.ty - 0.8 : role.batter ? (aimPoint() || [0, 0.8])[1] - 0.8 : 0;
-      batter.a.batter(dt, { swingK, loadK, bunt, track: batter.tr, aimY, lookW: _v.set(0, 1.6, 18), intro: !!(intro && camMode === 'intro'), who: s.bat && (s.bat.id || s.bat.name), batOff: role.batter && motion && motion.active() ? motion.batOff() : null, batQ: role.batter && motion && motion.active() ? motion.batQ() : null, pose: role.batter && motion && motion.active() ? motion.poseNow() : null });
+      batter.a.batter(dt, { swingK, loadK, bunt, track: batter.tr, aimY, lookW: _v.set(0, 1.6, 18), intro: !!(intro && camMode === 'intro'), who: s.bat && (s.bat.id || s.bat.name), batOff: role.batter && motion && motion.active() ? motion.batOff() : null, batQ: role.batter && motion && motion.active() ? motion.batQ() : null, pose: role.batter && motion && motion.active() ? motion.poseNow() : null, poseMir: !!(motion && motion.mirror) });
       batter.p.bat.visible = true;
       // 스윙 잔상 + 바람 가르는 소리
       if (!bunt && swingK >= 0.3 && swingK <= 0.78) {
@@ -1484,7 +1488,7 @@ function updateHUD() {
   }
   const a = (role.batter || role.pitcher) && pitchPhase ? aimPoint() : null;
   const mode = mode2();
-  if (S.mo && role.batter) pci.visible = false; // [motion] 모션 경기엔 마우스 커서 없음
+  if (S.mo && role.batter) { const mc = motion && motion.active() ? motion.updateCursor() : null; if (mc && camMode !== 'intro') PCIv.update(mc, mode, hitEase(), false, camera, SWING.bunt.R); else pci.visible = false; } // [motion] 모션 경기: 핸드폰 기울기 커서(없으면 숨김)
   else if (a && role.batter && camMode !== 'intro') PCIv.update(a, mode, hitEase(), pciHot, camera, SWING.bunt.R); // [gameplay] 정타/강타 크기 다름, 그려진 크기 = 판정 크기
   if (camMode === 'intro') { pci.visible = false; aimMark.visible = false; }
   if (role.pitcher && s.ph === 'pitch' && camMode !== 'intro') {
