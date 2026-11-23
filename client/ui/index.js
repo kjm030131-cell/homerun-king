@@ -1,5 +1,7 @@
 // [ui] 화면 흐름: 타이틀 → 모드 선택(리얼/캐주얼) → 로비(혼자·방 만들기·방 목록·코드 참가) → 대기실 → 경기(HUD) → 결과
 // main.js는 createUI(ctx) 하나만 부르고, 게임 상태는 ctx 게터로만 읽는다. UI는 게임 상태를 바꾸지 않고 서버/Game에 메시지만 보낸다.
+// [11-24] 빈 방 목록 그림 (야구공)
+const EMPTY_ART = '<div class="empty"><svg class="eart" viewBox="0 0 64 64"><circle cx="32" cy="32" r="26" fill="none" stroke="currentColor" stroke-width="2.5"/><path d="M14 14 Q26 32 14 50 M50 14 Q38 32 50 50" fill="none" stroke="#ff6b6b" stroke-width="2.5" stroke-dasharray="3 3"/></svg>';
 import { $, esc, show, isShown, segVal, setSeg, bindSegs, replay, setText } from './dom.js';
 import { cfg, store, bindSettings, fillSettings, emitVolume, TOUCH } from './settings.js';
 import { banner, feedback, toast, castLine, stopSpeech, clearBanner, gradeFeedback } from './announce.js';
@@ -245,7 +247,7 @@ export function createUI(ctx) {
       if (screen !== 'lobby') return;
       const rooms = j.rooms || [];
       $('rcount').textContent = rooms.length ? `${rooms.length}개` : '';
-      if (!rooms.length) { $('rlist').innerHTML = '<div class="empty"><b>열린 방이 없어</b>왼쪽에서 방을 만들고 친구한테 코드를 보내봐</div>'; return; }
+      if (!rooms.length) { $('rlist').innerHTML = EMPTY_ART + '<b>열린 방이 없어</b>먼저 방을 열고 친구한테 코드를 보내봐<br><button class="ecta" data-ecta>방 만들기</button></div>'; const b = $('rlist').querySelector('[data-ecta]'); if (b) b.onclick = () => $('bCreate').click(); return; }
       // 지금 고른 모드의 방을 위로
       rooms.sort((a, b) => (rulesOf(b) === cfg.rules) - (rulesOf(a) === cfg.rules) || (a.phase === 'lobby' ? -1 : 1) - (b.phase === 'lobby' ? -1 : 1));
       $('rlist').innerHTML = rooms.map((x) => {
@@ -253,7 +255,7 @@ export function createUI(ctx) {
         return `<button class="ritem ${wait ? '' : 'live'}" data-code="${esc(x.code)}" data-locked="${x.locked ? 1 : 0}"><span class="rr ${ru}">${RULES_KO[ru]}</span><b>${esc(x.name)}${x.locked ? ' <i class="lock">비밀번호</i>' : ''}</b><span class="tag">${x.mode === 'derby' ? '홈런 더비' : '정규 경기'}</span><span class="tag st">${wait ? '대기 중' : x.mode === 'game' ? `${x.inn}회 진행 중` : '진행 중'}</span><span class="cnt"><b>${x.players}</b>/${x.max}</span></button>`;
       }).join('');
       $('rlist').querySelectorAll('.ritem').forEach((b) => (b.onclick = () => { if (!getName()) return; b.dataset.locked === '1' ? openPw(b.dataset.code) : enterRoom(b.dataset.code); }));
-    } catch { if (!quiet) $('rlist').innerHTML = '<div class="empty"><b>방 목록을 불러오지 못했어</b>새로고침을 눌러 다시 해봐</div>'; }
+    } catch { if (!quiet) $('rlist').innerHTML = EMPTY_ART + '<b>방 목록을 불러오지 못했어</b>인터넷 연결을 확인하고 새로고침을 눌러줘</div>'; }
     finally { roomsBusy = false; }
   }
   $('bRefresh').onclick = () => loadRooms();
