@@ -88,7 +88,7 @@ h1{font-size:26px;font-weight:900;line-height:1.2}
     <div class="grip" id="grip">
       <div class="zone"><div class="dot" id="dot"></div></div>
       <div class="big" id="gTxt" style="font-size:20px">여기를 누른 채로 기울여 조준</div>
-      <div class="hint" id="gHint">손가락을 대고 좌우·앞뒤로 기울이면 PC 커서가 따라가. 그대로 팔을 휘두르면 공이 나가 (세게 = 빠른 공).</div>
+      <div class="hint" id="gHint">누른 채 좌우·앞뒤로 기울여 조준 → 손 떼면 고정 → 팔을 휘두르면 공이 나가 (세게 = 빠른 공).</div>
     </div>
     <div class="fb" id="pFb"></div>
   </main>
@@ -158,9 +158,9 @@ h1{font-size:26px;font-weight:900;line-height:1.2}
         fb('bFb', mode === 'power' ? '풀스윙!' : '스윙!', '#ffcf3f', mode === 'power' ? [30, 20, 60] : 30);
       });
       if (burst && !burst.sws && r > SENS[sens][0] * 1.3) { burst.sws = 1; send({ t: 'sws', at: now }); } // 휘두르기 시작(정점 ~50ms 전) → PC가 배트를 미리 돌림
-    } else if (st === 'pitch' && (grip || now < gripUntil)) {
+    } else if (st === 'pitch' && !grip && now < gripUntil) { // [11-23] 손 떼서 조준 고정된 뒤에만 던지기 감지
       detect(r, now, 520, 380, (b) => {
-        const a = aimBefore(b.t0 - 120);
+        const a = locked || cur;
         send({ t: 'pitch', at: b.at, pk: Math.round(b.pk), x: +a[0].toFixed(3), y: +a[1].toFixed(3), type: hs.type });
         endGrip(false);
       });
@@ -180,14 +180,14 @@ h1{font-size:26px;font-weight:900;line-height:1.2}
   setInterval(() => { if (st === 'bat' && performance.now() - meterT > 900) { meterPk = 0; paintMeter(0); } $('tapSwing').classList.toggle('hide', hasMotion || st !== 'bat'); }, 300);
   function onOri(e) { if (e.beta == null) return; ori = { b: e.beta, g: e.gamma || 0 }; }
 
-  // ── 투구: 누르고 기울여 조준 → 휘둘러 던지기 (손 떼고 0.6초 안에 휘둘러도 됨) ──
-  let grip = false, gripUntil = 0, ref = null, aimHist = [], aimT = 0, cur = [0, 0];
+  // ── 투구: 누르고 기울여 조준 → 손 떼면 조준 고정 → 휘둘러 던지기 ──
+  let grip = false, gripUntil = 0, ref = null, aimHist = [], aimT = 0, cur = [0, 0], locked = null;
   function aimNow() { if (!ref) return [0, 0]; const x = (ori.g - ref.g) / 22, y = (ori.b - ref.b) / 22; return [Math.max(-1.5, Math.min(1.5, x)), Math.max(-1.5, Math.min(1.5, y))]; }
   function aimBefore(t) { let a = cur; for (const h of aimHist) if (h.t <= t) a = h.a; return a; }
-  function startGrip() { if (st !== 'pitch') return; grip = true; gripUntil = 0; ref = { ...ori }; aimHist = []; $('grip').classList.add('on'); $('gTxt').textContent = '기울여 조준 → 휘둘러!'; send({ t: 'grip', on: 1 }); vib(15); }
+  function startGrip() { if (st !== 'pitch') return; grip = true; gripUntil = 0; locked = null; cur = [0, 0]; ref = { ...ori }; aimHist = []; $('grip').classList.add('on'); $('gTxt').textContent = '기울여 조준 → 손 떼면 고정'; send({ t: 'grip', on: 1 }); vib(15); }
   function endGrip(cancel) {
     if (!grip && !gripUntil) return;
-    grip = false; gripUntil = 0; $('grip').classList.remove('on'); $('gTxt').textContent = '여기를 누른 채로 기울여 조준'; $('dot').style.transform = '';
+    grip = false; gripUntil = 0; locked = null; $('grip').classList.remove('on'); $('gTxt').textContent = '여기를 누른 채로 기울여 조준'; $('gHint').textContent = '누른 채 좌우·앞뒤로 기울여 조준 → 손 떼면 고정 → 팔을 휘두르면 공이 나가 (세게 = 빠른 공).'; $('dot').style.transform = '';
     if (cancel) send({ t: 'grip', on: 0 });
   }
   function aimLoop() {
@@ -195,14 +195,16 @@ h1{font-size:26px;font-weight:900;line-height:1.2}
     if (!(grip || gripUntil)) return;
     const now = performance.now();
     if (!grip && now > gripUntil) { endGrip(true); return; }
-    if (grip && !burst) { cur = aimNow(); aimHist.push({ t: now, a: cur }); if (aimHist.length > 40) aimHist.shift(); $('dot').style.transform = `translate(${cur[0] * 48}px,${-cur[1] * 60}px)`; }
+    if (grip) { const a = aimNow(); cur = [cur[0] * 0.75 + a[0] * 0.25, cur[1] * 0.75 + a[1] * 0.25]; aimHist.push({ t: now, a: cur }); if (aimHist.length > 40) aimHist.shift(); $('dot').style.transform = `translate(${cur[0] * 48}px,${-cur[1] * 60}px)`; }
     if (grip && now - aimT > 33) { aimT = now; send({ t: 'aim', x: +cur[0].toFixed(3), y: +cur[1].toFixed(3) }); }
   }
   const G = $('grip');
   G.addEventListener('touchstart', (e) => { e.preventDefault(); startGrip(); }, { passive: false });
-  G.addEventListener('touchend', (e) => { e.preventDefault(); if (grip) { grip = false; gripUntil = performance.now() + 600; } }, { passive: false });
+  G.addEventListener('touchend', (e) => { e && e.preventDefault && e.preventDefault(); if (grip) lockAim(); }, { passive: false });
   G.addEventListener('mousedown', startGrip);
-  G.addEventListener('mouseup', () => { if (grip) { grip = false; gripUntil = performance.now() + 600; } });
+  G.addEventListener('mouseup', (e) => { e && e.preventDefault && e.preventDefault(); if (grip) lockAim(); });
+  // 손 떼면 조준 고정 → 2.5초 안에 팔을 휘두르면 던짐 (다시 누르면 다시 조준)
+  function lockAim() { grip = false; locked = cur.slice(); gripUntil = performance.now() + 2500; burst = null; send({ t: 'aim', x: +locked[0].toFixed(3), y: +locked[1].toFixed(3) }); $('gTxt').textContent = '조준 고정! 이제 팔을 휘둘러'; $('gHint').textContent = '2.5초 안에 던지기 · 다시 누르면 다시 조준'; vib(25); }
   // 센서가 없는 기기(PC 브라우저 등): 조준판을 두 번 빠르게 누르면 가운데로 보통 세기 투구
   let lastTap = 0;
   G.addEventListener('click', () => { const n = performance.now(); if (!hasMotion && n - lastTap < 350) send({ t: 'pitch', at: n, pk: 1200, x: 0, y: 0, type: hs.type }); lastTap = n; });
