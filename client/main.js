@@ -548,7 +548,7 @@ addEventListener('keydown', (e) => {
   // 투수
   if (role.pitcher && S.ph === 'pitch' && /^[1-6]$/.test(k)) setPitchType(PITCH_KEYS[+k - 1]);
   if (role.batter && S.dy && S.dy.pr && /^[0-6]$/.test(k)) net.send({ t: 'ppick', type: k === '0' ? 'MIX' : PITCH_KEYS[+k - 1] }); // 타격 연습: 구종 고정
-  if (role.pitcher && e.code === 'Space') pitchClick();
+  if (role.pitcher && e.code === 'Space' && !camRig.peek) pitchClick(); // [cam] 주자 보기(X) 중엔 조준 안 함
   if (role.pitcher && S.ph === 'pitch' && k === 'q') { net.send({ t: 'pick' }); gauge = null; }
   // 수비
   if (S.ph === 'live' && role.fi >= 0) {
@@ -593,7 +593,7 @@ canvas.addEventListener('pointerdown', (e) => {
   if (intro && !getRole().pitcher) { endIntro(); return; }
   const role = getRole();
   if (role.batter) doSwing(e.button === 2 ? 'power' : 'contact');
-  else if (role.pitcher) pitchClick();
+  else if (role.pitcher && !camRig.peek) pitchClick(); // [cam]
 });
 const raycaster = new THREE.Raycaster();
 const zonePlane = new THREE.Plane(new THREE.Vector3(0, 0, 1), 0);
