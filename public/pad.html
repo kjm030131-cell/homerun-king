@@ -72,7 +72,7 @@ h1{font-size:26px;font-weight:900;line-height:1.2}
     <div class="big" id="wTxt">PC에서 경기를 시작해줘</div>
     <p class="lead" id="wSub">타석에 서거나 마운드에 오르면 이 화면이 바뀌어. 수비는 CPU가 해.</p>
     <button class="btn chalbig hide" id="wChal">ABS 챌린지 신청</button>
-    <div class="sens">스윙 감도 <button class="btn" data-s="0">둔하게</button><button class="btn" data-s="1">보통</button><button class="btn" data-s="2">민감</button></div>
+    <div class="sens">스윙 감도 <button class="btn" data-s="3">자동</button><button class="btn" data-s="0">둔하게</button><button class="btn" data-s="1">보통</button><button class="btn" data-s="2">민감</button></div>
   </main>
 
   <main id="vBat" class="hide">
@@ -108,7 +108,9 @@ h1{font-size:26px;font-weight:900;line-height:1.2}
   const LSset = (k, v) => { try { localStorage.setItem('hrpad_' + k, JSON.stringify(v)); } catch (e) { } };
   const KO = { FB: '포심', TS: '투심', SL: '슬라이더', CB: '커브', CH: '체인지업', SP: '스플리터' };
   const SENS = [[720, 1500], [500, 1200], [340, 950]]; // [스윙 시작 °/s, 강타 °/s]
-  let sens = LS('sens', 1);
+  let sens = LS('sens', 3); // 3 = 자동 (내 평소 스윙 세기에 맞춤)
+  let avgPk = LS('avgPk', 1200);
+  const thr = () => (sens === 3 ? [Math.max(300, Math.min(800, avgPk * 0.4)), Math.max(800, Math.min(1700, avgPk * 1.12))] : SENS[sens]);
   const code0 = (location.hash.slice(1) || LS('code', '')).toUpperCase().replace(/[^A-Z0-9]/g, '').slice(0, 6);
   $('code').value = code0;
 
@@ -181,13 +183,14 @@ h1{font-size:26px;font-weight:900;line-height:1.2}
     if (r > 0) { hasMotion = true; lastMotionT = now; }
     if (st === 'bat') {
       if (r > meterPk || now - meterT > 900) { meterPk = r; meterT = now; paintMeter(r); }
-      detect(r, now, SENS[sens][0] * 0.6, 300, (b) => {
-        if (b.pk < SENS[sens][0]) { if (b.pk > SENS[sens][0] * 0.75) { send({ t: 'chk' }); fb('bFb', '체크스윙', '#8ea3bf', 12); } return; } // 휘두르다 멈춤
-        const mode = b.pk >= SENS[sens][1] ? 'power' : 'contact';
+      detect(r, now, thr()[0] * 0.6, 300, (b) => {
+        if (b.pk < thr()[0]) { if (b.pk > thr()[0] * 0.75) { send({ t: 'chk' }); fb('bFb', '체크스윙', '#8ea3bf', 12); } return; } // 휘두르다 멈춤
+        avgPk += (b.pk - avgPk) * 0.15; LSset('avgPk', Math.round(avgPk)); // 자동 감도 학습
+        const mode = b.pk >= thr()[1] ? 'power' : 'contact';
         send({ t: 'swing', at: b.at, pk: Math.round(b.pk), mode, el: +b.el.toFixed(1) });
         fb('bFb', mode === 'power' ? '풀스윙!' : '스윙!', '#ffcf3f', mode === 'power' ? [30, 20, 60] : 30);
       });
-      if (burst && !burst.sws && r > SENS[sens][0] * 1.3) { burst.sws = 1; send({ t: 'sws', at: now }); } // 휘두르기 시작(정점 ~50ms 전) → PC가 배트를 미리 돌림
+      if (burst && !burst.sws && r > thr()[0] * 1.3) { burst.sws = 1; send({ t: 'sws', at: now }); } // 휘두르기 시작(정점 ~50ms 전) → PC가 배트를 미리 돌림
     } else if (st === 'pitch' && !grip && now < gripUntil) { // [11-23] 손 떼서 조준 고정된 뒤에만 던지기 감지
       detect(r, now, 520, 380, (b) => {
         const a = locked || cur;
@@ -206,7 +209,7 @@ h1{font-size:26px;font-weight:900;line-height:1.2}
     if (burst.down >= 2 || now - burst.t0 > maxMs) { const b = burst; burst = null; if (b.pk > th * 1.2) { cool = now + 750; done(b); } } // 약한 흔들림이면 쿨다운 없이 다음 스윙 바로 받음
   }
   const ARC = 276.5;
-  function paintMeter(r) { const k = Math.min(1, r / 2000); $('arc').style.strokeDashoffset = String(ARC * (1 - k)); $('arc').style.stroke = r >= SENS[sens][1] ? '#ff6b6b' : r >= SENS[sens][0] ? '#ffcf3f' : '#56657a'; $('spd').textContent = Math.round(r); }
+  function paintMeter(r) { const k = Math.min(1, r / 2000); $('arc').style.strokeDashoffset = String(ARC * (1 - k)); $('arc').style.stroke = r >= thr()[1] ? '#ff6b6b' : r >= thr()[0] ? '#ffcf3f' : '#56657a'; $('spd').textContent = Math.round(r); }
   // 기울기 센서가 안 들어오면 높낮이·실시간 배트가 안 됨 → 알려줌
   setInterval(() => { if (st === 'bat' && hasMotion && !hasOri) fb('bFb', '기울기 센서가 꺼져 있어 높낮이가 안 돼 (설정에서 동작·방향 허용 후 새로고침)', '#ff8a80'); }, 4000);
   setInterval(() => { if (st === 'bat' && performance.now() - meterT > 900) { meterPk = 0; paintMeter(0); } $('tapSwing').classList.toggle('hide', hasMotion || st !== 'bat'); }, 300);

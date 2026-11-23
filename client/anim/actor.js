@@ -261,7 +261,8 @@ export class ClipAnimator {
       if (c.catchW && sp < 0.5 && !this.shot) C.reach('L', c.catchW, 1);
       if (c.lookW && !this.shot) C.look(c.lookW, 0.6);
     }
-    C.update(dt);
+    if (c.pose) C.motionPose(c.pose, 1, !!c.poseMir); // [motion] 웹캠 전신: 투수도 내 몸 그대로
+     C.update(dt);
   }
   // 스윙 고르기(스윙이 시작되는 프레임에 한 번): 강타 = Hit_1, 정타(good·perfect) = Hit(끝까지 크게), 늦거나 빗맞음 = Hit_2(짧게 밀어침)
   //  CPU·상대 타자는 스윙 시각에 판정 이벤트가 같이 오고, 내 스윙은 localSwing(누른 즉시, 맞았는지 포함)이 먼저 와서 첫 프레임에 이미 앎
