@@ -524,7 +524,14 @@ table.ls tr.sep th{padding-top:18px;border-top:2px solid var(--line2)}
 #hud:not(.hide) #bug{animation:slideL .6s var(--ease) .75s both}
 #hud:not(.hide) #matchup{animation:slideL .6s var(--ease) .85s both}
 #hud:not(.hide) #role{animation:slideR .6s var(--ease) .8s both}
-#over:not(.hide) > *{animation:popIn .5s var(--ease) both}
+
+/* 결과 화면: 경기 HUD(팁·스코어버그·배너)가 비쳐 지저분하던 것 → 숨기고 배경을 흐리게 */
+body[data-screen=over] #hud{opacity:0;transition:opacity .35s ease}
+#over{backdrop-filter:blur(6px) saturate(.8);background:radial-gradient(ellipse at 50% 30%,rgba(12,23,54,.72),rgba(5,10,26,.94) 70%)}
+#over .ov > *{animation:rise .55s var(--ease) both}
+#over .ov > :nth-child(2){animation-delay:.08s} #over .ov > :nth-child(3){animation-delay:.16s} #over .ov > :nth-child(4){animation-delay:.24s} #over .ov > :nth-child(5){animation-delay:.32s} #over .ov > :nth-child(n+6){animation-delay:.4s}
+#over #overT{animation:overT .8s var(--ease) both}
+@keyframes overT{0%{opacity:0;transform:scale(1.4);letter-spacing:.06em}100%{opacity:1;transform:none}}
 @media (prefers-reduced-motion:reduce){*{transition:none!important;animation:none!important}}
 
 /* ═══ [ui] 모션 레이어 — 중계 그래픽 전환·등장·버튼 반응 ═══
@@ -639,7 +646,7 @@ table.ls tr.sep th{padding-top:18px;border-top:2px solid var(--line2)}
     <div class="err" id="err" role="alert"></div>
     <div class="tlinks"><button id="bSettings" class="tlink">설정</button><button id="bHelp" class="tlink">조작법</button></div>
   </div>
-  <div class="ver">재개발판 · rebuild</div>
+  <div class="ver">HOMERUN KING · SEASON 1</div>
 </section>
 
 <!-- ═══ 모드 선택 ═══ -->

@@ -87,3 +87,12 @@ ui가 내는 것(전부 `ui:` 접두사, 게임 이벤트 이름은 emit 안 함
 - **도구**: `tools/test/steps/common.mjs`의 `start`는 닉네임 없이 `#bSolo`를 누른다 → 닉네임 입력이 필요해서 헤드리스 장면 테스트가 막힐 수 있다. 장면 테스트 쓰는 파트가 `#nick` 값을 먼저 넣도록(`document.querySelector('#nick').value='테스트'`) 고쳐주면 된다.
 - 키아트(`public/assets/ui/keyart.jpg`)는 이제 안 쓴다(타이틀 뒤는 실시간 경기장). 새 구장이 들어오면 타이틀 카메라 궤도(`updateCamera`의 title)도 같이 봐 달라.
 - 다음에 할 만한 것: 모바일 터치 화면 다듬기, 처음 접속 튜토리얼, 랭킹 페이지.
+
+## 11-23 모션 레이어 · 설정 편의 (rb-anim)
+- 화면 전환 `#wipe`: setScreen 이 바뀔 때 남색·실밥 빨강·분필 띠 3장이 쓸고 지나감(0.76s). 경기 진입은 'PLAY BALL' 도장(1.3s). 상태는 즉시 바뀌고 연출만 덧씌움 → 로직 무관. over 로 갈 땐 없음
+- 등장: `.screen.enter` 가 붙으면 자식들이 차례로 rise. 타이틀 로고 슬라이드·실밥 그리기·빛 훑기, 모드 두 판 양쪽에서, 대기실 팀 카드 양쪽·VS 쾅, 모달 popIn, 경기 시작 때 스코어버그·매치업 slideL
+- 버튼: 눌림 scale, .go 빛 훑기, .act 호버 밀림. `prefers-reduced-motion` 이면 전부 끔
+- 혼자 하기(#soloM)·방 만들기(#createM): `.board.setup` — 빠른 설정 4개 + 2열 + 하단 고정 버튼. 혼자 하기는 `store 'solo'` 로 지난번 설정 기억
+- 대기실 `#sPresets`(방장만): 여러 값을 한 번에 set. 방 정보는 `<details class="roomdet">` 로 접기
+- 결과 화면: `body[data-screen=over] #hud` 숨김, 배경 블러, 요소 차례로 등장
+- 메뉴 배경 카메라: 경기장 안쪽 낮은 궤도(반지름 52~56, 높이 21±4), 첫 프레임 바로 그 자리
