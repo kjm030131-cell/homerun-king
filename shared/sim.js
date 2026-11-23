@@ -153,6 +153,7 @@ export function inZone(x, y) {
 //  공이 존에 조금이라도 걸치면 스트라이크(공 반지름만큼 넓게). 리얼 모드 판정, 캐주얼은 기존 넓은 존
 export const ABS = { top: 0.5575, bot: 0.2704, halfW: 0.2159 + 0.02 };
 export function absZone(h) { return { x0: -ABS.halfW, x1: ABS.halfW, y0: r2(ABS.bot * h), y1: r2(ABS.top * h) }; }
+export function edgeOf(z, x, y) { const ix = Math.min(x - (z.x0 - BALL_R), z.x1 + BALL_R - x), iy = Math.min(y - (z.y0 - BALL_R), z.y1 + BALL_R - y); return ix >= 0 && iy >= 0 ? Math.min(ix, iy) : Math.hypot(Math.max(0, -ix), Math.max(0, -iy)); } // 존 경계까지 거리(m, 안·밖 모두 양수)
 export function inZoneOf(z, x, y) { return x >= z.x0 - BALL_R && x <= z.x1 + BALL_R && y >= z.y0 - BALL_R && y <= z.y1 + BALL_R; }
 // CPU 타자 키: 이름·슬롯 해시로 172~192cm (같은 타자는 늘 같은 키)
 export function cpuHeight(key) { let h = 2166136261; for (const c of String(key)) { h ^= c.charCodeAt(0); h = Math.imul(h, 16777619); } return 1.72 + ((h >>> 0) % 2001) / 10000; }
@@ -605,6 +606,7 @@ export class Game {
       case 'jump': this.onJump(id); break;
       case 'dive': this.onDive(id, m); break;
       case 'throw': this.onThrow(id, m); break;
+      case 'challenge': this.onChallenge(id); break; // [ABS]
       case 'run': this.onRunCmd(id, m); break;
       case 'slide': this.onSlideCmd(id); break;
       case 'chat': {
@@ -659,6 +661,29 @@ export class Game {
   say(text, big = true) { this.msg = text; this.msgBig = big; this.msgId++; }
 
   // ───────── 경기 흐름 ─────────
+  // [ABS 챌린지] 주심 콜: 존 경계에서 멀면 정확, 경계 ±6cm 안은 거리에 따라 최대 30% 오심 (실제 주심 정확도 ~92%)
+  umpCall(zn, x, y, truth) {
+    if (this.R.abs === false) return truth;
+    const e = edgeOf(zn, x, y);
+    const pErr = e < 0.06 ? 0.3 * (1 - e / 0.06) : 0;
+    return Math.random() < pErr ? !truth : truth;
+  }
+  applyCall(strike, quiet = false) {
+    this.quietCall = quiet;
+    if (strike) this.countStrike(false); else this.countBall();
+    this.quietCall = false;
+  }
+  onChallenge(id) {
+    const c = this.chal, p = this.players.get(id);
+    if (!c || c.req || this.phase !== 'result' || this.after !== 'chal' || !p || p.team !== c.team) return;
+    c.req = id;
+    const over = c.call !== c.truth;
+    if (!over) this.chalLeft[c.team] = Math.max(0, (this.chalLeft[c.team] || 0) - 1); // 실패하면 1개 잃음 (성공하면 유지)
+    this.absEv = { id: ++this.seq, pid: c.pid, x: c.x, y: c.y, z: c.z, s: c.truth ? 1 : 0, c: c.call ? 1 : 0, abs: 1, rev: 1, over: over ? 1 : 0, by: p.name };
+    this.ev('absReview', { pid: c.pid, call: c.call ? 1 : 0, truth: c.truth ? 1 : 0, over: over ? 1 : 0, team: c.team, by: p.name, left: this.chalLeft[c.team], x: c.x, y: c.y, z: c.z });
+    this.say(`${p.name} ABS 챌린지!`, true);
+    this.pause(5.2, 'chalDone');
+  }
   // [ABS] 지금 타자의 존: 리얼 = KBO ABS(키 비례), 캐주얼(R.abs === false) = 기존 넓은 존
   zoneNow() { return this.R.abs === false || !this.batter ? ZONE : absZone(this.batter.ht || 1.8); }
   // [11-22] 바람: 무풍~6m/s, 방향 아무 쪽. 홈런더비·연습은 무풍(기록 비교가 공정하게)
@@ -685,6 +710,7 @@ export class Game {
     this.innLim = 0; this.startT = this.now; this.mercy = false;
     if (this.R.forceAutoField) this.set.fieldCtl = 'auto';
     this.wind = this.pickWind();
+    this.chalLeft = { away: 2, home: 2 }; this.chal = null; // [ABS 챌린지] 팀당 2개(성공하면 유지)
     for (const p of this.players.values()) p.ready = false;
     this.ev('modeChange', { rules: this.set.rules, mode: this.mode, innings: this.set.innings, start: 1 });
     this.emitLobby();
@@ -1109,7 +1135,7 @@ export class Game {
       if (!keepMsg && (!/번트/.test(this.msg) || !afterSwing)) this.say(swinging ? '헛스윙 삼진!' : '루킹 삼진!');
       return this.afterPitchCount(this.outs >= 3 ? 'half' : 'next', 1.9);
     }
-    if (!afterSwing || !/번트/.test(this.msg)) this.say(swinging ? '헛스윙' : '스트라이크', false);
+    if (!this.quietCall && (!afterSwing || !/번트/.test(this.msg))) this.say(swinging ? '헛스윙' : '스트라이크', false);
     this.afterPitchCount('pitch', 1.1);
   }
   countBall() {
@@ -1797,8 +1823,17 @@ export class Game {
           else {
             const wild = (p.ty < 0.22 || Math.abs(p.tx) > 0.62) && this.runners.some((r) => !r.out && !r.scored && !r.steal) && Math.random() < 0.14;
             const zn = this.zoneNow(), strike = inZoneOf(zn, p.tx, p.ty);
-            this.absEv = { id: ++this.seq, pid: p.id, x: r2(p.tx), y: r2(p.ty), z: [zn.x0, zn.x1, zn.y0, zn.y1], s: strike ? 1 : 0, abs: this.R.abs === false ? 0 : 1 }; // [ABS] 판정 그래픽
-            if (strike) this.countStrike(false); else this.countBall();
+            // [ABS 챌린지] 리얼: 주심이 콜(경계 근처는 가끔 틀림) → 3초 안에 손해 본 쪽 사람이 챌린지 → 슬로모션 ABS 판독
+            const call = this.umpCall(zn, p.tx, p.ty, strike);
+            const tm = call ? this.batTeam : this.batTeam === 'home' ? 'away' : 'home'; // 스트라이크 콜 → 타격팀, 볼 콜 → 수비팀이 신청
+            const can = this.R.abs !== false && this.mode === 'game' && !this.runners.some((r) => r.steal && !r.out) && (this.chalLeft[tm] ?? 0) > 0 && this.humans(tm).some((h) => this.isLive(h.id)) && edgeOf(zn, p.tx, p.ty) < 0.12;
+            this.absEv = { id: ++this.seq, pid: p.id, x: r2(p.tx), y: r2(p.ty), z: [zn.x0, zn.x1, zn.y0, zn.y1], s: strike ? 1 : 0, c: call ? 1 : 0, abs: 0 };
+            if (can) {
+              this.chal = { pid: p.id, call, truth: strike, team: tm, x: r2(p.tx), y: r2(p.ty), z: [zn.x0, zn.x1, zn.y0, zn.y1], until: this.now + 3.2, req: null };
+              this.say(call ? '스트라이크' : '볼', false);
+              this.ev('chalOpen', { pid: p.id, call: call ? 1 : 0, team: tm, left: this.chalLeft[tm], T: 3.2 });
+              this.pause(3.2, 'chal');
+            } else { this.applyCall(call); }
             if (wild && this.phase === 'result' && this.after === 'pitch') this.wildPitch();
           }
         }
@@ -1911,6 +1946,8 @@ export class Game {
     else if (a === 'next') { this.nextBatter(); this.enterPitch(); }
     else if (a === 'half') this.endHalf();
     else if (a === 'derbyNext') this.derbyNext();
+    else if (a === 'chal') { const c = this.chal; this.chal = null; if (c) this.applyCall(c.call, true); else this.enterPitch(); } // 챌린지 안 함 → 주심 콜대로
+    else if (a === 'chalDone') { const c = this.chal; this.chal = null; if (c) { this.say(c.call !== c.truth ? `판정 번복! ${c.truth ? '스트라이크' : '볼'}` : `원심 유지 · ${c.call ? '스트라이크' : '볼'}`, true); this.applyCall(c.truth, true); } else this.enterPitch(); }
   }
 
   endHalf() {
@@ -2517,6 +2554,8 @@ export class Game {
     if (this.hrEv) s.hr = this.hrEv;
     if (this.throwEv) s.te = this.throwEv;
     if (this.absEv) s.ab = this.absEv; // [ABS] 마지막 판정
+    if (this.chal && this.phase === 'result') s.ch2 = [this.chal.pid, this.chal.call ? 1 : 0, this.chal.team, r2(Math.max(0, this.phaseUntil - this.now)), this.chal.req ? 1 : 0, this.chalLeft[this.chal.team]]; // [ABS] 챌린지 창
+    if (this.chalLeft) s.cl2 = [this.chalLeft.away, this.chalLeft.home];
     if (this.batter && this.mode === 'game') { const z = this.zoneNow(); s.zn = [z.x0, z.x1, z.y0, z.y1]; } // [ABS] 지금 타자 존(그림)
     s.ar = this.play && this.play.autoRun && this.now < this.play.autoRun.until ? this.play.autoRun.i : -1; // 사람 야수 자동 베이스 밟기 중(클라 조작 잠금)
     if (this.catchEv) s.ce = this.catchEv;

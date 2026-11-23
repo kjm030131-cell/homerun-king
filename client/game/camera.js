@@ -139,7 +139,7 @@ export function createCamRig(camera, ctx) {
 
   // 키: V(시점 전환) · Z(거리 프리셋) · X(누르고 있는 동안 주자 보기). 처리하면 true
   rig.key = (k, role, S) => {
-    if (k === 'v' && S && role.fi >= 0 && !role.pitcher && role.pos !== 'C') { cfg.fieldCam = cfg.fieldCam === 'tps' ? 'tv' : 'tps'; store.set('fieldCam', cfg.fieldCam); fcam.yawOff = 0; toast(cfg.fieldCam === 'tps' ? '수비 시점: 내 선수 뒤 (드래그로 회전)' : '수비 시점: 중계 화면'); return true; }
+    if (k === 'v' && S && role.fi >= 0 && !role.pitcher && role.pos !== 'C') { cfg.fieldCam = cfg.fieldCam === 'tps' ? 'tv' : 'tps'; store.set('fieldCam2', cfg.fieldCam); fcam.yawOff = 0; toast(cfg.fieldCam === 'tps' ? '수비 시점: 내 선수 뒤 (드래그로 회전)' : '수비 시점: 중계 화면'); return true; }
     if (k === 'v') { cfg.batCam = cfg.batCam === 1 ? 0 : 1; store.set('batCam', cfg.batCam); toast(cfg.batCam === 1 ? '타격 시점: 가까이 (존 크게)' : '타격 시점: 포수 뒤 (중계)'); return true; }
     if (k === 'z') { cfg.camDist = (distI() + 1) % 3; store.set('camDist', cfg.camDist); toast(`시점 거리: ${DIST_NAME[cfg.camDist]} (설정에서도 바꿀 수 있어)`); return true; }
     if (k === 'x') { if (!peek && S && role.pitcher && leadBase(S)) { peek = true; } return !!peek; }

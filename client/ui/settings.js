@@ -10,7 +10,7 @@ export const store = {
 export const cfg = {
   vol: store.get('vol', 80), gq: store.get('gq', TOUCH ? 'low' : 'mid'), shake: store.get('shake', 1), sens: store.get('sens', 100),
   assist: store.get('assist2', 1), batCam: store.get('batCam', 0), replay: store.get('replay', 1), cast: store.get('castV', 2), // [sound] 새 키: 기본 자막+음성 (예전 'cast' 기본은 자막만이라 음성이 안 나왔음)
-  fieldCam: store.get('fieldCam', 'tps'), fps: store.get('fps', 1),
+  fieldCam: store.get('fieldCam2', 'tv'), fps: store.get('fps', 1), // [11-23] 수비 기본 = 중계 시점(화면 방향이 안 바뀜, 더쇼 방식). 예전 'fieldCam'(3인칭 기본) 값은 무시하고 한 번 초기화
   camDist: store.get('camDist', 1), batH: store.get('batH', 1), // [cam] 시점 거리(0 가까이·1 기본·2 멀리, Z 키) · 타자 시점 높이(0 낮게·1 기본·2 높게)
   volSfx: store.get('volSfx', 100), volCrowd: store.get('volCrowd', 100), volCast: store.get('volCast', 100), // [ui] 사운드 파트 요청: 효과음/관중/캐스터 음량 (0~100)
   rules: store.get('rules', 'real') === 'casual' ? 'casual' : 'real', // [ui] 마지막으로 고른 모드

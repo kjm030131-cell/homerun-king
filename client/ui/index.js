@@ -8,7 +8,7 @@ import { initChat, addChat, sysChat, openChat, closeChat, toggleQuick, sendQuick
 import { bindRoom, renderRoom, clubGrid, rulesOf, RULES_KO } from './room.js';
 import { fillOver, renderTab } from './results.js';
 import { refreshCareer, saveLocalCareer } from './career.js';
-import { initHUD, hudFrame, myDuty, paintClubs, swingReport, updateCoach, introCard, introHide, walkup, renderPitchBar, resetHUD, onBus, pulseCount, flashScore, inningCard, absCall } from './hud.js';
+import { initHUD, hudFrame, myDuty, paintClubs, swingReport, updateCoach, introCard, introHide, walkup, renderPitchBar, resetHUD, onBus, pulseCount, flashScore, inningCard, absCall, absReview } from './hud.js';
 import { CLUBS, clubOf, emblemURL } from '../emblem.js';
 import { bus } from '../core/bus.js';
 
@@ -330,7 +330,7 @@ export function createUI(ctx) {
   };
   ui.introCard = (kind, s) => introCard(kind, s, { nameOf: ctx.nameOf, myId: ctx.myId, sound: ctx.sound });
   ui.introHide = introHide;
-  ui.absCall = absCall; // [ABS] // [fix] main.js endIntro 가 부르는데 빠져 있어서 예외 → 프레임 루프가 멈추던(화면 정지) 버그
+  ui.absCall = absCall; ui.absReview = absReview; // [ABS] // [fix] main.js endIntro 가 부르는데 빠져 있어서 예외 → 프레임 루프가 멈추던(화면 정지) 버그
   ui.walkup = (s) => walkup(s, { nameOf: ctx.nameOf, myId: ctx.myId, sound: ctx.sound });
   ui.renderPitchBar = (pt) => renderPitchBar(pt, true, ctx.setPitchType);
 

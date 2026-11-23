@@ -422,7 +422,8 @@ function onSnap(s) {
     if (cfg.replay && lastContactT && nowP() - lastContactT < 8) replay.schedule(nowP() + 2.6, { tEvent: lastContactT, pre: 0.8, post: 1.6, speed: 0.42, cam: 'hr', scene });
   }
   // 송구/포구/펜스 이벤트
-  if (s.ab && s.ab.id !== seen.ab) { if (s.ab.abs) ui.absCall && ui.absCall(s.ab, s.bat); seen.ab = s.ab.id; } // [ABS] 판정 그래픽
+  if (s.p) pByPid[s.p.id] = s.p; // [ABS] 판독 때 다시 그릴 투구
+  if (s.ab && s.ab.id !== seen.ab) { seen.ab = s.ab.id; if (s.ab.rev) startAbsReview(s.ab); } // [ABS] 챌린지 → 슬로모션 판독
   if (s.te && s.te.id !== seen.te) { if (fielders[s.te.i]) { if (!(pred.throwI === s.te.i && p - pred.throwT < 0.8)) fielders[s.te.i].throwT = nowP(); fielders[s.te.i].throwDur = s.te.w ? s.te.w / 0.55 : THROW_DUR; } if (pred.throwI === s.te.i) pred.throwT = 0; seen.te = s.te.id; } // [net] 내가 미리 시작한 송구 동작은 그대로 · [11-23] 클립 길이 = 서버 송구 동작(릴리스 55%)
   if (s.ce && s.ce.id !== seen.ce) { if (fielders[s.ce.i]) { fielders[s.ce.i].catchT = nowP(); if (s.ce.i === getRole().fi && getRole().defense) { feedback(s.ce.dive ? '다이빙 캐치!! 나이스!' : s.ce.jump ? '점프 캐치!! 나이스!' : '나이스 캐치!', '#4fd18b'); if (s.ce.dive || s.ce.jump) bus.emit('ui:perfect'); }
     if ((s.ce.dive || s.ce.jump) && cfg.replay !== 0) replay.schedule(nowP() + 1.0, { tEvent: nowP(), pre: 1.6, post: 0.6, speed: 0.45, cam: 'catch', focus: fielders[s.ce.i].p, scene }); if (s.ce.dive) { fx.dustPuff(fielders[s.ce.i].p.root.position.x, fielders[s.ce.i].p.root.position.z, 2, 2); } } seen.ce = s.ce.id; }
@@ -532,6 +533,9 @@ function myTeam() { const p = lobby && lobby.players.find((x) => x.id === myId);
 function nameOf(id) { if (!id) return null; const p = lobby && lobby.players.find((x) => x.id === id); return p ? p.name : null; }
 
 // ═════════════ 역할 ═════════════
+// [ABS 챌린지] 내 팀이 지금 챌린지할 수 있나 (주심 콜 직후 3초 창)
+function canChallenge() { return !!(S && S.ch2 && !S.ch2[4] && S.ch2[5] > 0 && myTeam() === S.ch2[2] && S.ch2[3] > 0.05); }
+window.__absChallenge = () => { if (canChallenge()) { net && net.send({ t: 'challenge' }); feedback('ABS 챌린지 신청!', '#5ab8ff'); } };
 function getRole() {
   const r = { batter: false, pitcher: false, fi: -1, holding: false, offense: false, defense: false, pos: null, spec: false };
   if (!S || !S.fl) return r;
@@ -578,6 +582,7 @@ addEventListener('keydown', (e) => {
   keys[k] = true;
   if (e.code === 'Space') e.preventDefault();
   if (!S || screen !== 'game' || e.repeat) return;
+  if (k === 'c' && canChallenge()) { net && net.send({ t: 'challenge' }); feedback('ABS 챌린지 신청!', '#5ab8ff'); return; } // [ABS]
   const role = getRole();
   // 타자
   if (role.batter) {
@@ -735,11 +740,16 @@ function toggleBunt() {
 // ═════════════ 내 수비수 이동 ═════════════
 const ctl = { active: false, x: 0, z: 0, ry: 0, lastIn: 0, lastSend: 0, idx: -1, moving: false };
 const touchMove = { x: 0, y: 0 };
+// [11-23] 이동 기준 방향 고정: 키를 누르고 있는 동안은 '누르기 시작했을 때' 카메라 방향 기준 (3인칭 카메라가 돌아도 같은 키 = 같은 방향, 빙글빙글 헤매던 것)
+const moveBasis = { on: false, x: 0, z: 1, t: 0 };
 function moveDir() {
   let fw = (keys.w || keys.arrowup ? 1 : 0) - (keys.s || keys.arrowdown ? 1 : 0) + touchMove.y;
   let rt = (keys.d || keys.arrowright ? 1 : 0) - (keys.a || keys.arrowleft ? 1 : 0) + touchMove.x;
-  camera.getWorldDirection(tmpV); tmpV.y = 0; tmpV.normalize();
-  const fx_ = tmpV.x, fz = tmpV.z, rx = -fz, rz = fx_;
+  const pressing = Math.abs(fw) > 0.1 || Math.abs(rt) > 0.1;
+  if (!pressing) moveBasis.on = false;
+  else if (!moveBasis.on || nowP() - moveBasis.t > 2.5) { camera.getWorldDirection(tmpV); tmpV.y = 0; tmpV.normalize(); moveBasis.x = tmpV.x; moveBasis.z = tmpV.z; moveBasis.on = true; moveBasis.t = nowP(); }
+  else if (cfg.fieldCam !== 'tps') { camera.getWorldDirection(tmpV); tmpV.y = 0; tmpV.normalize(); moveBasis.x = tmpV.x; moveBasis.z = tmpV.z; } // 중계 시점은 화면 방향이 거의 안 변해서 그대로 따라감
+  const fx_ = moveBasis.x, fz = moveBasis.z, rx = -fz, rz = fx_;
   let mx = fx_ * fw + rx * rt, mz = fz * fw + rz * rt; // D = 화면 오른쪽
   const l = Math.hypot(mx, mz);
   if (l < 0.01) { const f = S && fielders[getRole().fi]; return f ? [Math.sin(f.p.root.rotation.y), Math.cos(f.p.root.rotation.y)] : [0, 1]; }
@@ -766,9 +776,17 @@ function updateControl(dt) {
   if ((Math.abs(fw) > 0.1 || Math.abs(rt) > 0.1) && !(diveAge >= 0 && diveAge < 1.2)) {
     if (!ctl.active) { ctl.x = f[1]; ctl.z = f[2]; ctl.active = true; }
     ctl.lastIn = t;
-    const [mx, mz] = (() => { const d = moveDir(); return d; })();
+    let [mx, mz] = moveDir();
     const mag = Math.min(1, Math.hypot(fw, rt));
-    const spd = (keys.shift ? SPRINT_SPEED : FIELD_SPEED) * mag;
+    let spd = (keys.shift ? SPRINT_SPEED : FIELD_SPEED) * mag;
+    // [11-23] 포구 보조: 공 낙구 지점(주황 원) 8m 안에서 대충 그쪽(±70°)으로 가면 방향을 끌어주고, 다 오면 지나치지 않게 멈춤
+    if (landRing.visible && cfg.assist !== 0) {
+      const tx = landRing.position.x - ctl.x, tz = landRing.position.z - ctl.z, d = Math.hypot(tx, tz);
+      if (d < 8 && d > 0.05) {
+        const ux = tx / d, uz = tz / d, dot = ux * mx + uz * mz;
+        if (dot > 0.35) { const w = 0.55 * clamp((8 - d) / 6, 0, 1); let nx = mx + (ux - mx) * w, nz = mz + (uz - mz) * w; const nl = Math.hypot(nx, nz) || 1; mx = nx / nl; mz = nz / nl; if (d < 1.2) spd *= clamp(d / 1.2, 0.15, 1); }
+      }
+    }
     ctl.x += mx * spd * dt; ctl.z += mz * spd * dt;
     ctl.ry = Math.atan2(mx, mz);
     ctl.moving = true;
@@ -1346,6 +1364,41 @@ const camRig = createCamRig(camera, { // [cam]
   introStep, getRole, recBase, nowP,
 });
 window.__camRig = camRig; // [cam] qa: 데드존 여부(direct)·모드
+// ═════════════ [ABS] 챌린지 판독: 포수 뒤 슬로모션으로 투구를 다시 그리고 존 통과 여부를 보여줌 ═════════════
+const pByPid = {};
+let absRv = null;
+const absTrail = new THREE.Line(new THREE.BufferGeometry().setAttribute('position', new THREE.BufferAttribute(new Float32Array(64 * 3), 3)), new THREE.LineBasicMaterial({ color: 0x5ab8ff, transparent: true, opacity: 0.95, depthTest: false }));
+absTrail.renderOrder = 31; absTrail.visible = false; absTrail.frustumCulled = false; scene.add(absTrail);
+const absBox = new THREE.LineSegments(new THREE.EdgesGeometry(new THREE.BoxGeometry(1, 1, 0.43)), new THREE.LineBasicMaterial({ color: 0xffffff, transparent: true, opacity: 0.9, depthTest: false }));
+absBox.renderOrder = 30; absBox.visible = false; scene.add(absBox);
+function startAbsReview(ab) {
+  const p = pByPid[ab.pid]; if (!p) return;
+  absRv = { ab, p, t0: nowP() };
+  const z = ab.z; absBox.scale.set(z[1] - z[0], z[3] - z[2], 1); absBox.position.set((z[0] + z[1]) / 2, (z[2] + z[3]) / 2, -0.215);
+  ui.absReview && ui.absReview(ab, 0);
+}
+const ABS_T = { intro: 0.7, fly: 2.6, hold: 1.7 };
+function updateAbsReview() {
+  if (!absRv) return false;
+  const e = nowP() - absRv.t0, total = ABS_T.intro + ABS_T.fly + ABS_T.hold;
+  if (e > total || !S || (S.ph !== 'result' && e > 1)) { absRv = null; absTrail.visible = absBox.visible = false; if (batter) batter.p.root.visible = true; ui.absReview && ui.absReview(null); return false; }
+  const p = absRv.p, ab = absRv.ab, u = clamp((e - ABS_T.intro) / ABS_T.fly, 0, 1), us = u < 1 ? 1 - Math.pow(1 - u, 1.6) : 1;
+  const q = pitchPos(p, us);
+  ballMesh.visible = true; ballMesh.position.set(q[0], q[1], Math.max(q[2], -0.25)); ballMesh.scale.setScalar(0.75);
+  const arr = absTrail.geometry.attributes.position.array, n = Math.max(2, Math.round(us * 63) + 1);
+  for (let i = 0; i < 64; i++) { const qq = pitchPos(p, Math.min(i, n - 1) / 63 * 1); arr[i * 3] = qq[0]; arr[i * 3 + 1] = qq[1]; arr[i * 3 + 2] = Math.max(qq[2], -0.25); }
+  absTrail.geometry.attributes.position.needsUpdate = true; absTrail.geometry.setDrawRange(0, n);
+  absTrail.visible = true; absBox.visible = true;
+  absBox.material.color.set(e > ABS_T.intro + ABS_T.fly ? (ab.s ? 0xffcf3f : 0x5be08f) : 0xffffff);
+  // 카메라: 포수 뒤 낮게 → 공이 다가올수록 존 쪽으로 다가감
+  const zc = (ab.z[2] + ab.z[3]) / 2, k = clamp((e - ABS_T.intro - ABS_T.fly * 0.5) / (ABS_T.fly * 0.6), 0, 1), kk = k * k * (3 - 2 * k);
+  camera.position.set(-0.15 * kk, 1.05 + (zc - 1.05) * 0.5 * kk, -3.6 + 0.9 * kk);
+  camera.lookAt(0, zc + 0.05 + (q[1] - zc) * 0.3 * (1 - kk), 6 - 6 * kk);
+  camera.fov = 40 - 6 * kk; camera.updateProjectionMatrix();
+  if (batter) batter.p.root.visible = false; // 판독 그래픽: 타자 없이 공·존만 (중계 ABS 화면처럼)
+  if (e > ABS_T.intro + ABS_T.fly && !absRv.shown) { absRv.shown = true; ui.absReview && ui.absReview(ab, 1); bus.emit('ui:perfect'); }
+  return true;
+}
 function updateCamera(dt, time) { // [cam]
   camRig.update(dt, time, shake, camPunch);
   camMode = camRig.mode;
@@ -1492,6 +1545,7 @@ function frameBody(now, manual) {
   updateTracer();
   if (S && S.fl) { const rr = getRole(); updateMyRing(rr); updateBaseTags(rr); }
   updateCamera(dt, time);
+  if (updateAbsReview()) zoneGroup.visible = false; // [ABS] 판독 중엔 카메라·공을 판독 화면으로 덮어씀
   updateHUD();
   if (frameN % 2 === 0) drawMinimap();
   excite = Math.max(0, excite - dt * 0.18);

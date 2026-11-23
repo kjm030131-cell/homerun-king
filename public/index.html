@@ -575,6 +575,31 @@ body[data-screen=over] #hud{opacity:0;transition:opacity .35s ease}
 #absCard .ab-call{text-align:center;font-family:var(--num);font-style:italic;font-weight:800;font-size:24px;padding:3px 0;letter-spacing:.04em}
 #absCard.abs-strike .ab-call{background:var(--bulb);color:var(--ink)} #absCard.abs-ball .ab-call{background:var(--turf);color:#062012}
 @media (max-width:760px){#absCard{right:var(--side);bottom:120px;width:120px}}
+
+/* [ABS 챌린지] 신청 막대 + 판독 오버레이 */
+#chalBar{position:absolute;left:50%;top:calc(var(--top) + 84px);transform:translateX(-50%);display:flex;align-items:center;gap:12px;background:var(--ink);border:1px solid rgba(90,184,255,.6);border-left:5px solid var(--sky);padding:10px 14px 14px;pointer-events:auto;animation:popIn .3s var(--ease) both;box-shadow:0 12px 30px rgba(0,0,0,.45)}
+#chalBar #chalTxt{font-size:14.5px;font-weight:700;white-space:nowrap}
+#chalBar #chalTxt b{color:var(--bulb)} #chalBar small{color:var(--steel);margin-left:6px;font-size:12px}
+#chalBar .chal-btn{background:var(--sky);color:var(--ink);font-weight:900;padding:6px 14px;clip-path:polygon(6px 0,100% 0,calc(100% - 6px) 100%,0 100%)}
+#chalBar .cb{position:absolute;left:0;right:0;bottom:0;height:4px;background:rgba(255,255,255,.1)}
+#chalBar .cb i{display:block;height:100%;background:var(--sky);transform-origin:left}
+#absRev{position:fixed;inset:0;pointer-events:none;display:none;z-index:5}
+#absRev.show{display:block}
+#absRev:before,#absRev:after{content:'';position:absolute;left:0;right:0;height:10vh;background:#000;animation:arBar .4s var(--ease) both}
+#absRev:before{top:0}#absRev:after{bottom:0}
+@keyframes arBar{from{transform:scaleY(0)}to{transform:none}}
+#absRev .ar-top{position:absolute;left:28px;top:calc(10vh + 18px);font-family:var(--num);font-style:italic;font-weight:800;font-size:30px;color:#fff;background:var(--ink);padding:4px 20px 4px 14px;border-left:6px solid var(--sky);letter-spacing:.04em;animation:slideL .5s var(--ease) both}
+#absRev .ar-top b{color:var(--sky)}
+#absRev .ar-sub{position:absolute;left:28px;top:calc(10vh + 66px);font-size:14px;font-weight:700;color:#cfd6e6;background:rgba(9,17,42,.85);padding:5px 12px;animation:slideL .5s var(--ease) .1s both}
+#absRev .ar-sub b{color:var(--bulb)}
+#absRev .ar-res{position:absolute;left:50%;bottom:calc(10vh + 34px);transform:translateX(-50%);display:flex;flex-direction:column;align-items:center;gap:2px}
+#absRev.done .ar-res{animation:arRes .6s var(--ease) both}
+@keyframes arRes{0%{opacity:0;transform:translate(-50%,20px) scale(1.3)}100%{opacity:1;transform:translate(-50%,0)}}
+#absRev .ar-res b{font-family:var(--disp);font-weight:400;font-size:54px;letter-spacing:-.02em;text-shadow:0 6px 24px rgba(0,0,0,.6)}
+#absRev .ar-res span{font-family:var(--num);font-style:italic;font-weight:800;font-size:26px;padding:2px 18px;clip-path:polygon(8px 0,100% 0,calc(100% - 8px) 100%,0 100%)}
+#absRev.over .ar-res b{color:var(--sky)} #absRev.keep .ar-res b{color:var(--chalk)}
+#absRev.done .ar-res span{background:var(--chalk);color:var(--ink)}
+#absCard.rv{right:28px;bottom:calc(10vh + 20px);z-index:6;width:170px}
 @media (prefers-reduced-motion:reduce){*{transition:none!important;animation:none!important}}
 
 /* ═══ [ui] 모션 레이어 — 중계 그래픽 전환·등장·버튼 반응 ═══
@@ -822,6 +847,7 @@ body[data-screen=over] #hud{opacity:0;transition:opacity .35s ease}
   <div id="matchup">
     <div class="mu"><b>타자</b><span id="muBat">-</span><em id="muBatS"></em></div>
     <div class="mu" id="muP"><b>투수</b><span id="muPit">CPU</span><div class="sta"><i id="staBar"></i></div><em id="muPc">0구</em></div>
+    <div class="mu" id="muC"><b>ABS</b><span id="chalLeft">챌린지 2</span></div>
     <div class="mu hide" id="muW"><b>바람</b><span id="windTxt">무풍</span><i id="windArr" aria-hidden="true">↑</i><em id="windSp"></em></div>
   </div>
   <div id="role"></div>
@@ -834,6 +860,8 @@ body[data-screen=over] #hud{opacity:0;transition:opacity .35s ease}
   <div id="banner"><span></span></div>
   <div id="innCard" aria-live="polite"></div>
   <div id="absCard" aria-live="polite"></div>
+  <div id="absRev" aria-live="assertive"></div>
+  <div id="chalBar" class="hide"><span id="chalTxt"></span><button class="chal-btn" onclick="window.__absChallenge&&window.__absChallenge()">챌린지</button><div class="cb"><i></i></div></div>
   <div id="coach"><b></b><span></span></div>
   <div id="walkup"><div class="wu-no"></div><div class="wu-main"><div class="wu-nm"></div><div class="wu-st"></div></div></div>
   <div id="intro"><div class="in-l"><div class="in-tag"></div><div class="in-nm"></div><div class="in-today"></div><div class="in-car"></div></div><div class="in-r"><div class="in-big"></div><div class="in-bigl"></div><div class="in-sit"></div></div></div>
