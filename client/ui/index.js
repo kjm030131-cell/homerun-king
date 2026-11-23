@@ -102,6 +102,7 @@ export function createUI(ctx) {
   for (const id of ['bSettings', 'lbSettings']) $(id).onclick = openSettings;
   for (const id of ['bHelp', 'lbHelp']) $(id).onclick = () => openModal('helpM');
   // [motion] 모션 컨트롤 창: 메뉴에서 열면 연결 설정만, '모션 플레이'로 열면 경기 설정 + 플레이 볼
+  let motionAsked = null;
   const openMotion = (play) => { show('mPlay', play); show('mGo', play); setText('mClose', play ? '취소' : '확인'); openModal('motionM'); window.__motion && window.__motion.paint(); };
   for (const id of ['bMotion', 'lbMotion']) $(id).onclick = () => openMotion(false);
 
@@ -158,12 +159,12 @@ export function createUI(ctx) {
   $('bMotionPlay').onclick = () => { if (!getName()) return; ctx.unlockAudio(); paintSoloClubs(); oLoad(); openMotion(true); if (!OFFLINE && window.__motion && !window.__motion.pad) window.__motion.connectPad(); };
   $('mGo').onclick = () => {
     const M = window.__motion;
-    if (!M || !M.active()) { setText('mPlaySt', '먼저 핸드폰을 연결하거나 웹캠을 켜줘'); replay('mPlaySt', 'tap'); return; }
+    if (!M || !M.connected()) { setText('mPlaySt', '먼저 핸드폰을 연결하거나 웹캠을 켜줘'); replay('mPlaySt', 'tap'); return; }
     if (!ctx.myName && !getName()) return;
     closeModal('motionM'); ctx.unlockAudio(); showErr('');
     const team = segVal('mTeam') || 'away', sv = store.get('solo', {}) || {};
     soloRules = cfg.rules;
-    ctx.startLocal(ctx.myName, { rules: cfg.rules, fld: 'auto', hitEase: store.get('hitEase', 1), tod: store.get('tod', 'night'), mode: 'game', inn: +segVal('mInn') || 3, diff: sv.diff ?? 1, team, pos: 'any', clubs: team === 'away' ? [soloClub.me, soloClub.op] : [soloClub.op, soloClub.me] });
+    ctx.startLocal(ctx.myName, { rules: cfg.rules, fld: 'auto', hitEase: store.get('hitEase', 1), tod: store.get('tod', 'night'), mode: 'game', mo: segVal('mKind') === 'screen' ? 2 : 1, inn: +segVal('mInn') || 3, diff: sv.diff ?? 1, team, pos: 'any', clubs: team === 'away' ? [soloClub.me, soloClub.op] : [soloClub.op, soloClub.me] });
     setScreen('game');
   };
   $('bSolo').onclick = () => { if (!getName()) return; ctx.unlockAudio(); paintSoloClubs(); oLoad(); openModal('soloM'); };
@@ -199,7 +200,7 @@ export function createUI(ctx) {
     try {
       const r = await fetch('/api/new', { method: 'POST' }); const j = await r.json();
       const mode = segVal('cMode'), n = +$('cInn').value;
-      pendingSettings = { rules: segVal('cRules') || cfg.rules, name: $('cName').value.trim(), mode, innings: mode === 'game' ? Math.min(9, n) : 3, derbyOuts: mode === 'derby' ? n : 10, max: +$('cMax').value, size: +segVal('cSize'), tod: segVal('cTod'), hitEase: +segVal('cHit'), pw: $('cPw').value, pub: segVal('cPub') === '1', timeLim: +segVal('cTime') || 0 };
+      pendingSettings = { rules: segVal('cRules') || cfg.rules, name: $('cName').value.trim(), mode, innings: mode === 'game' ? Math.min(9, n) : 3, derbyOuts: mode === 'derby' ? n : 10, max: +$('cMax').value, size: +segVal('cSize'), tod: segVal('cTod'), hitEase: +segVal('cHit'), pw: $('cPw').value, pub: segVal('cPub') === '1', timeLim: +segVal('cTime') || 0, mo: +segVal('cMo') || 0 };
       enterRoom(j.code);
     } catch { showErr('서버에 연결할 수 없어. 잠시 뒤 다시 해봐'); }
   };
@@ -286,6 +287,10 @@ export function createUI(ctx) {
     const L = ctx.lobby; if (!L) return;
     if (pendingSettings && L.host === ctx.myId) { send({ t: 'set', ...pendingSettings }); pendingSettings = null; }
     const cl = renderRoom(L, ctx.myId, send);
+    // [motion] 모션 방: 이름 옆 표시 + 아직 연결 안 했으면 연결 창 한 번 띄움
+    const mo = L.set.mo | 0, rn = $('rName');
+    if (rn) { let tag = rn.querySelector('.motag'); if (mo && !tag) { tag = document.createElement('span'); tag.className = 'motag'; rn.appendChild(tag); } if (tag) { if (mo) tag.textContent = mo === 2 ? '스크린야구' : '모션 플레이'; else tag.remove(); } }
+    if (mo && screen === 'room' && window.__motion && !window.__motion.connected() && motionAsked !== (L.host || '') + (L.set.name || '')) { motionAsked = (L.host || '') + (L.set.name || ''); openMotion(false); if (!window.__motion.pad) window.__motion.connectPad(); }
     ctx.applyClubs(cl); ctx.applyTimeOfDay(L.set.tod || 'night');
     show('mLobby', L.host === ctx.myId && !ctx.local);
     if (L.phase === 'lobby' && (screen === 'game' || screen === 'over') && !ctx.local) setScreen('room');

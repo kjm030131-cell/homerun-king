@@ -126,6 +126,8 @@ h1{font-size:26px;font-weight:900;line-height:1.2}
   function setRole(r) {
     if (r === st && !$('vJoin').classList.contains('hide') === false) { /* 같은 화면 */ }
     st = r; show(r === 'bat' ? 'vBat' : r === 'pitch' ? 'vPitch' : 'vWait');
+    if (r === 'nomo') { $('wRole').textContent = '일반 모드'; $('wTxt').textContent = '이 경기는 키보드·마우스로 해'; $('wSub').textContent = '핸드폰으로 하려면 PC에서 "모션 플레이"로 시작하거나 방 만들 때 조작 방식을 모션으로 골라줘.'; }
+    else if (r === 'wait') { $('wRole').textContent = '대기'; $('wTxt').textContent = hs.st === 'wait' && hs.ph ? '수비 중 · CPU가 수비해' : 'PC에서 경기를 시작해줘'; $('wSub').textContent = '타석에 서거나 마운드에 오르면 이 화면이 바뀌어. 수비는 CPU가 해.'; }
     if (r !== 'pitch') endGrip(true);
   }
   function paintHS() {
@@ -138,7 +140,7 @@ h1{font-size:26px;font-weight:900;line-height:1.2}
   let fbT = 0;
   function fb(id, txt, col, v) { const e = $(id); e.textContent = txt; e.style.color = col || '#e9f0fb'; e.classList.add('pop'); setTimeout(() => e.classList.remove('pop'), 160); clearTimeout(fbT); fbT = setTimeout(() => { e.textContent = ''; }, 2200); if (v) vib(v); }
   function onAck(m) {
-    if (m.k === 'swing') { if (m.lag != null) $('spdL').textContent = `PC까지 ${m.lag}ms (판정은 보정됨)`; if (m.r === 'early') fb('bFb', '투수가 던지기 전이야', '#ffb36b'); else if (m.r === 'skip') fb('bFb', '지금은 칠 공이 없어', '#8ea3bf'); }
+    if (m.k === 'swing') { if (m.lag != null) $('spdL').textContent = `PC까지 ${m.lag}ms (판정은 보정됨)`; if (m.r === 'early') fb('bFb', '투수가 던지기 전이야', '#ffb36b'); else if (m.r === 'skip') fb('bFb', '지금은 칠 공이 없어', '#8ea3bf'); else if (m.r === 'nomo') fb('bFb', '일반 모드 경기야 (키보드·마우스)', '#8ea3bf'); }
     if (m.k === 'pitch') { if (m.r === 'ok') fb('pFb', `투구! 세기 ${m.lv}%`, m.lv > 100 ? '#ff6b6b' : m.lv >= 84 ? '#4fd18b' : '#ffcf3f', 40); else fb('pFb', '지금은 던질 수 없어', '#8ea3bf'); }
   }
 

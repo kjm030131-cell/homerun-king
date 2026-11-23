@@ -708,6 +708,9 @@ body[data-screen=over] #hud{opacity:0;transition:opacity .35s ease}
 .body.motion{display:grid;grid-template-columns:1fr 1fr;gap:18px 22px;overflow:auto;min-height:0;flex:1}
 .macts{margin:0;padding:12px 18px;border-top:1px solid var(--line);background:rgba(9,17,42,.6);justify-content:flex-end;display:flex;gap:10px}
 .mplay .mst.ok{color:#4fd18b}
+.pl .pad{font-size:11px;font-weight:800;padding:2px 6px;border-radius:3px;background:rgba(79,209,139,.16);color:#4fd18b}
+.pl .pad.off{background:rgba(255,138,128,.14);color:#ff8a80}
+.motag{margin-left:8px;font-size:12px;font-weight:800;padding:3px 8px;border-radius:3px;background:#ffcf3f;color:#1a1300;vertical-align:middle}
 .body.motion .full{grid-column:1/-1}
 .act.motion{border-left-color:#ffcf3f}
 .act.motion b:after{content:"NEW";font-family:inherit;font-weight:800;font-size:11px;line-height:1;letter-spacing:.06em;margin-left:10px;padding:3px 6px;border-radius:3px;background:#ffcf3f;color:#1a1300;vertical-align:middle}
@@ -984,6 +987,7 @@ body[data-screen=over] #hud{opacity:0;transition:opacity .35s ease}
     <div><label class="lbl">팀 인원</label><div class="seg" id="cSize"><button data-v="1">1 : 1</button><button data-v="2" class="on">2 : 2</button><button data-v="3">3 : 3</button><button data-v="0">자유</button></div></div>
     <div class="full"><label class="lbl">시간제</label><div class="seg" id="cTime"><button data-v="0" class="on">끔</button><button data-v="10">10분</button><button data-v="15">15분</button><button data-v="20">20분</button><button data-v="30">30분</button></div></div>
     <div><label class="lbl">타격 난이도</label><div class="seg" id="cHit"><button data-v="0">쉬움</button><button data-v="1" class="on">보통</button><button data-v="2">어려움</button></div></div>
+    <div class="full"><label class="lbl">조작 방식</label><div class="seg" id="cMo"><button data-v="0" class="on">키보드·마우스</button><button data-v="1">모션 플레이 (핸드폰·웹캠)</button><button data-v="2">스크린야구 (타격만)</button></div><p class="note" style="margin-top:6px">모션 플레이·스크린야구 방은 각자 핸드폰이나 웹캠을 자기 PC에 연결해서 해. 수비는 CPU가 자동, 스크린야구는 투수도 CPU.</p></div>
     <div><label class="lbl">시간대</label><div class="seg" id="cTod"><button data-v="night" class="on">야간 경기</button><button data-v="day">주간 경기</button></div></div>
     <div><label class="lbl">공개</label><div class="seg" id="cPub"><button data-v="1" class="on">공개</button><button data-v="0">비공개</button></div></div>
     <div><label class="lbl" for="cPw">비밀번호 (선택)</label><input id="cPw" class="inp" maxlength="20" placeholder="없으면 비워둬" autocomplete="off"></div>
@@ -1043,6 +1047,7 @@ body[data-screen=over] #hud{opacity:0;transition:opacity .35s ease}
     </section>
     <div class="full hide mplay" id="mPlay">
       <div class="setgrp">경기 설정</div>
+      <div class="mprow"><div class="mkind"><label class="lbl">경기 방식</label><div class="seg" id="mKind"><button data-v="full" class="on">풀 모션 (투구+타격)</button><button data-v="screen">스크린야구 (타격만)</button></div></div></div>
       <div class="mprow"><div><label class="lbl">이닝</label><div class="seg" id="mInn"><button data-v="1">1</button><button data-v="3" class="on">3</button><button data-v="5">5</button><button data-v="9">9</button></div></div>
       <div><label class="lbl">내 팀</label><div class="seg" id="mTeam"><button data-v="away" class="on">원정 (선공 · 타격부터)</button><button data-v="home">홈 (후공 · 투구부터)</button></div></div></div>
       <p class="mst" id="mPlaySt">핸드폰을 연결하거나 웹캠을 켜면 시작할 수 있어</p>
