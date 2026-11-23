@@ -12,6 +12,7 @@ import { Character, tintedMaterial } from './character.js';
 import { loadLib, getLib } from './loader.js';
 import { CLIPS, FIT, BODY } from './clips.js';
 import { PITCH_TL, tauFromPitchK } from './timing.js';
+import { D, now, since, mood, rnd, hash } from './director.js'; // [motion]
 
 const clamp = (v, a, b) => Math.max(a, Math.min(b, v));
 const _v = new THREE.Vector3(), _w = new THREE.Vector3();
@@ -81,10 +82,10 @@ export class CharPlayer {
   constructor(lib, { team = 'home', num = '', name = '', role = 'fielder', seed = Math.random() } = {}) {
     const u = UNIFORMS[team] || UNIFORMS.home;
     const rnd = (k) => { const x = Math.sin(seed * 9301 + k * 49297) * 233280; return x - Math.floor(x); };
-    this.team = team; this.role = role; this.isChar = true;
+    this.team = team; this.role = role; this.isChar = true; this.seed = seed; // [motion] seed: 선수별 동작 버릇
     this.scale = 0.96 + rnd(3) * 0.08;
     this.look = { u, num, name };
-    this.char = new Character(lib, { colors: u, num: team === 'ump' ? '' : num, name, scale: this.scale });
+    this.char = new Character(lib, { colors: u, num: team === 'ump' ? '' : num, name, scale: this.scale, seed });
     this.root = this.char.root; this.body = this.char.body; this.J = {};
     const C = this.char;
     this.capG = C.attach('head', tint(lib.acc.cap.clone(), u.cap, FIT.cap.tint || 'all'));
@@ -122,78 +123,188 @@ export class CharPlayer {
 }
 
 // ── 새 몸 애니메이터: 옛 Animator 와 같은 호출 → 클립 재생 ──
+// [motion] 상황별 모션: director.js 가 기록한 이벤트(스윙·삼진·홈런·경기 끝 …)를 읽어 같은 호출 안에서 클립을 고른다.
+//  · 판정·시간표는 그대로: 스윙 컨택 = swingK 0.5(main.js 가 sim 스윙 시각으로 줌), 투구 릴리스 = 와인드업 + 1.85초(timing.js), 송구 릴리스 = throwK 0.55
+//  · 변주는 선수·타자별 시드(같은 선수는 같은 버릇, 멀티에서 화면마다 같게). 매 프레임 할당 없음
+//  · 한 번 재생 동작(shot): 입장·삼진 반응·주먹 불끈 등. 새 투구(windup)가 오면 바로 끊고 기본 자세로 크로스페이드
 export class ClipAnimator {
-  constructor(p) { this.p = p; this.c = p.char; this.ev = {}; this.loco = 'idle'; this.gk = 0; this.pk0 = -1; this.call = null; this.t = 0; }
+  constructor(p) {
+    this.p = p; this.c = p.char; this.ev = {}; this.loco = 'idle'; this.gk = 0; this.pk0 = -1; this.call = null; this.t = 0;
+    this.seed = Number.isFinite(p.seed) ? p.seed : Math.random() * 1e4;
+    p.root.userData.anim = this; // [qa] 하네스·스크린샷이 지금 클립을 읽음(tools/qa/motionshots.mjs)
+    this.shot = null; this.queue = null; this.wSeen = D.windup.at;
+    // 투구 사이 버릇(mill — Baseball_Milling_Idle): 선수마다 빈도 다르게, 처음엔 흩어서
+    this.fidRate = 0.4 + rnd(this.seed, 11) * 0.6; this.fidOn = false; this.fidEnd = 0;
+    this.fidNext = now() + 3 + rnd(this.seed, 12) * 9;
+  }
+  // 한 번 재생: from(클립 초)부터 speed 배속으로 dur 초 동안(기본 = 끝까지). 클립이 없으면 fallback 사슬
+  _shot(name, { from = 0, speed = 1, dur = null, fade = 0.25, kind = '' } = {}) {
+    const C = this.c;
+    C.play(name, { fade, restart: true, from, speed });
+    this.shot = { name, speed, kind, until: now() + (dur ?? Math.max(0.2, (C.duration(name) - from) / speed - fade)) };
+  }
+  // 차례로: [[이름, from, speed, dur], ...]
+  _seq(list, kind) { this.queue = list.slice(1); const [n, f, s, d] = list[0]; this._shot(n, { from: f, speed: s, dur: d, kind, fade: 0.3 }); }
+  _shotOn() {
+    const s = this.shot; if (!s) return false;
+    if (now() < s.until) { this.c.play(s.name, { speed: s.speed }); return true; }
+    if (this.queue && this.queue.length) { const [n, f, sp, d] = this.queue.shift(); this._shot(n, { from: f, speed: sp, dur: d, kind: s.kind, fade: 0.35 }); return true; }
+    this.shot = null; this.queue = null; return false;
+  }
+  _cut() { this.shot = null; this.queue = null; }
+  // 새 투구 시작 → 하던 한 번 재생 동작을 끊음(타자는 대기 자세, 심판은 자세)
+  _newPitch() { if (D.windup.at !== this.wSeen) { this.wSeen = D.windup.at; this._cut(); return true; } return false; }
+  // 서 있는 대기: 가끔 서성임(mill) 한 번 → 다시 대기
+  _idle(base) {
+    if (base !== 'idle' || this.noFid || !this.c.has('mill')) { this.fidOn = false; return base; }
+    const t = now();
+    if (this.fidOn) { if (t < this.fidEnd) return 'mill'; this.fidOn = false; this.fidNext = t + (5 + rnd(this.seed, t | 0) * 10) / this.fidRate; return 'idle'; }
+    if (t >= this.fidNext) { this.fidOn = true; this.fidEnd = t + this.c.duration('mill') - 0.5; this.c.play('mill', { fade: 0.5, restart: true }); return 'mill'; }
+    return 'idle';
+  }
+  // 경기 끝·끝내기: 이긴 팀 Victory, 진 팀 Defeated (서 있을 때만)
+  _mood(speed) {
+    if (speed > 0.5) return false;
+    const m = mood(this.p.team); if (!m) return false;
+    this.c.play(m === 'win' ? 'celebrate' : 'disappointed', { fade: 0.45, from: m === 'win' ? 0.9 + rnd(this.seed, 41) * 0.8 : rnd(this.seed, 42) * 0.4 }); // 세리머니는 동작 있는 구간부터(선수마다 조금씩 어긋나게)
+    return true;
+  }
   _loco(speed, base) {
     const C = this.c; let st = this.loco;
     if (st === 'sprint') { if (speed < 5.4) st = speed > 0.35 ? 'run' : base; }
     else if (st === 'run') { if (speed > 6.2 && C.has('sprint')) st = 'sprint'; else if (speed < 0.35) st = base; }
     else st = speed > 0.6 ? 'run' : base;
     // 재생 속도 = 실제 속도/클립 원래 속도. 너무 느리게 돌리면 슬로모션처럼 보여서(조깅도 발 구르는 템포는 빠름) 최소 0.8
-    if (st === 'run' || st === 'sprint') C.play(st, { fade: 0.22, speed: clamp(speed / (CLIPS[st].speed || 4), 0.8, 1.7), sync: true });
-    else C.play(st, { fade: 0.3 });
+    if (st === 'run' || st === 'sprint') { this.fidOn = false; C.play(st, { fade: 0.22, speed: clamp(speed / (CLIPS[st].speed || 4), 0.8, 1.7), sync: true }); }
+    else { const b = this._idle(st); C.play(b, { fade: b === 'mill' ? 0.5 : 0.35 }); }
     this.loco = st;
   }
   // [model] 투수판 맞춤: 루트(sim 투수 위치 = 투수판 가운데)에서 몸을 앞(+z 로컬)으로 BODY.pitchFwd 만큼 — 클립의 축발이 투수판 앞 모서리에 붙게
   _fwd(on, dt) { const b = this.c.body.position, t = on ? BODY.pitchFwd : 0; if (b.z !== t) b.z = Math.abs(t - b.z) < 1e-3 ? t : b.z + (t - b.z) * Math.min(1, dt * 8); }
   fielder(dt, c) {
     motionEvents(this.ev, this.p, 'fielder', c);
-    const C = this.c, P = this.p;
+    const C = this.c, P = this.p, sp = c.speed || 0;
     this._fwd(false, dt);
+    const busy = c.diveK >= 0 || c.throwK >= 0 || c.jumpK >= 0 || (c.ground && sp < 3);
+    const isC = P.role === 'catcher';
+    if (busy || sp > 0.8) this._cut();
+    else {
+      // 투수: 홈런 맞으면 고개 숙임(Defeated) / 포수: 뜬공 잡은 뒤 머리 위 글러브를 내림(Catcher 클립 2.95초~)
+      if (this.isP && since(D.hr) < 3 && this.hrSeen !== D.hr.at) { this.hrSeen = D.hr.at; this._shot('disappointed', { from: 0.6, dur: 3.4, fade: 0.45 }); }
+      if (isC && D.catchC.fly && since(D.catchC) < 0.6 && this.popSeen !== D.catchC.at) { this.popSeen = D.catchC.at; this._shot('catcherPop', { from: 0.55, fade: 0.15 }); }
+    }
     if (c.clip) C.play(c.clip);
-    else if (c.celebrate || (c.ground === undefined && c.jumpK >= 0 && !c.ballW && !c.reachW)) C.play('celebrate', { fade: 0.3 });
+    else if (c.celebrate || (c.ground === undefined && c.jumpK >= 0 && !c.ballW && !c.reachW)) C.play('celebrate', { fade: 0.3, from: 0.9 + rnd(this.seed, 43) * 0.8 }); // [motion] Victory 앞 1초는 가만히 서 있는 구간
     else if (c.diveK >= 0) C.scrubK('dive', c.diveK);
-    else if (c.throwK >= 0) C.scrubK('throw', c.throwK);
+    // 포수 송구는 Baseball_Catcher 의 짧은 팔 송구(일어서며), 야수는 투구 동작 송구
+    else if (c.throwK >= 0) C.scrubK(isC && C.has('catcherThrow') ? 'catcherThrow' : 'throw', c.throwK, { fade: isC ? 0.15 : 0.12 });
     else if (c.jumpK >= 0) C.scrubK('catchHigh', c.jumpK);
-    else if (c.ground && c.speed < 3) { this.gk = Math.min(1, this.gk + dt / 0.5); C.scrubK('catchLow', this.gk); }
-    else this._loco(c.speed || 0, c.ready || c.knees ? 'ready' : 'idle');
-    if (!(c.ground && c.speed < 3)) this.gk = 0;
+    else if (c.ground && sp < 3) { this.gk = Math.min(1, this.gk + dt / 0.5); C.scrubK('catchLow', this.gk); }
+    else if (this._shotOn()) { /* 한 번 재생 동작 */ }
+    else if (!this._mood(sp)) this._loco(sp, c.ready || c.knees ? 'ready' : 'idle');
+    if (!(c.ground && sp < 3)) this.gk = 0;
     P.ball.visible = c.throwK >= 0 ? c.throwK < 0.55 : !!c.hasBall;
     if (c.reachW && !(c.throwK >= 0)) C.reach('L', c.reachW, c.reachWeight ?? 1);
     if (c.ballW && !(c.diveK >= 0) && !(c.throwK >= 0)) C.look(c.ballW, 0.8);
     C.update(dt);
   }
+  // 투구 변주: 주자 있으면 세트 포지션(Baseball_Pitching — 낮은 레그킥), 없으면 투수 버릇(대부분 하이 레그킥 Pitching_1)
+  //  ※ 구종으로는 고르지 않음(와인드업 모양으로 구종이 미리 보이면 안 됨 — 공 위치·구종 미리보기 금지)
+  _pitchVariant() {
+    if (!this.c.has('pitch2')) return 'pitch';
+    if (D.windup.runners > 0 && since(D.windup) < 3) return 'pitch2';
+    return rnd(this.seed, 31) < 0.3 ? 'pitch2' : 'pitch';
+  }
   // c.k = anim.js pitchK(tau) (옛 호출) 또는 c.tau = 와인드업 시작부터 초(있으면 우선)
   pitcher(dt, c) {
-    const C = this.c, P = this.p;
+    const C = this.c, P = this.p, sp = c.speed || 0;
+    this.isP = true;
     let tau = Number.isFinite(c.tau) && c.tau >= 0 ? c.tau : -1;
     if (tau < 0 && c.k >= 0) {
       if (this.pk0 < 0) this.pk0 = 0;
       if (c.k === 0) { this.pk0 += dt; tau = Math.min(this.pk0, PITCH_TL.lift); } else tau = tauFromPitchK(c.k);
     }
-    this._fwd(tau >= 0 || (c.speed || 0) <= 0.5, dt);
-    if (tau >= 0) { C.scrubPitch(tau); P.ball.visible = tau < PITCH_TL.release; }
-    else {
-      this.pk0 = -1;
-      if ((c.speed || 0) > 0.5) this._loco(c.speed, 'idle');
-      else { C.scrubPitch(0, { fade: 0.3 }); this.loco = 'idle'; }
+    this._fwd(tau >= 0 || sp <= 0.5, dt);
+    if (tau >= 0) {
+      if (!this.inPitch) { this.inPitch = true; this.pv = this._pitchVariant(); this.pvAt = D.windup.at; this._cut(); }
+      // [net 예측] 내 투구는 누른 순간(서버 windup 이벤트 전) 시작 → 이벤트(주자 정보)가 세트 자세 동안 오면 그때 변주를 다시 고름
+      else if (this.pvAt !== D.windup.at && tau < PITCH_TL.lift) { this.pvAt = D.windup.at; this.pv = this._pitchVariant(); }
+      C.scrubPitch(tau, undefined, this.pv); P.ball.visible = tau < PITCH_TL.release;
+    } else {
+      this.inPitch = false; this.pk0 = -1;
+      // 삼진 잡으면 주먹 불끈(Victory 1.05초~): 이닝 끝내는 삼진은 항상, 아니면 투수 버릇대로
+      if (since(D.kOut) < 2 && this.kSeen !== D.kOut.at) {
+        this.kSeen = D.kOut.at;
+        if (D.kOut.outs >= 3 || rnd(this.seed, 21 + ((D.kOut.at * 10) | 0)) < 0.45) this._shot('celebrate', { from: 1.05, speed: 1.15, dur: 1.9, fade: 0.3 });
+      }
+      if (sp > 0.5) { this._cut(); this._loco(sp, 'idle'); }
+      else if (this._shotOn()) { /* 세리머니 */ }
+      else { C.scrubPitch(0, { fade: 0.3 }, this.pv || 'pitch'); this.loco = 'idle'; }
       P.ball.visible = false;
-      if (c.catchW && (c.speed || 0) < 0.5) C.reach('L', c.catchW, 1);
-      if (c.lookW) C.look(c.lookW, 0.6);
+      if (c.catchW && sp < 0.5 && !this.shot) C.reach('L', c.catchW, 1);
+      if (c.lookW && !this.shot) C.look(c.lookW, 0.6);
     }
     C.update(dt);
+  }
+  // 스윙 고르기(스윙이 시작되는 프레임에 한 번): 강타 = Hit_1, 정타(good·perfect) = Hit(끝까지 크게), 늦거나 빗맞음 = Hit_2(짧게 밀어침)
+  //  CPU·상대 타자는 스윙 시각에 판정 이벤트가 같이 오고, 내 스윙은 localSwing(누른 즉시, 맞았는지 포함)이 먼저 와서 첫 프레임에 이미 앎
+  _pickSwing(c) {
+    const C = this.c, S = D.sw, fresh = since(S) < 1.5;
+    if ((c.power || (fresh && S.mode === 'power')) && C.has('powerSwing')) return 'powerSwing';
+    if (!C.has('swing2')) return 'swing';
+    if (fresh) {
+      if (S.grade === 'perfect' || S.grade === 'good') return 'swing';
+      if (S.grade === 'weak' || S.grade === 'tip' || S.grade === 'ok' || S.dt > 45 || S.why === 'late') return 'swing2';
+      if (S.why === 'early') return 'swing';
+    }
+    return this.swPref < 0.35 ? 'swing2' : 'swing';
+  }
+  // 타자 반응: 삼진(헛스윙 → Strike 반응 또는 Defeated / 루킹 → 가끔 Defeated) 뒤 Walk_Out, 헛스윙(삼진 아님)은 가끔 Strike 반응
+  _batReact() {
+    const C = this.c;
+    if (this.shot && this.shot.kind === 'react') return;
+    if (since(D.kOut) < 2.5 && this.kSeen !== D.kOut.at) {
+      const swung = !D.kOut.looking;
+      if (since(D.kOut) < (swung ? 0.42 : 0.3)) return; // 스윙 팔로스루가 끝난 뒤
+      this.kSeen = D.kOut.at;
+      const L = [];
+      if (swung) L.push(this.kStyle < 0.6 && C.has('batStrike') ? ['batStrike', 0, 1.45, 1.15] : ['disappointed', 0.75, 1.25, 1.25]);
+      else if (this.kStyle < 0.5) L.push(['disappointed', 0.75, 1.2, 1.1]);
+      L.push(['batWalkOut', 0, 1, 3.2]);
+      this._seq(L, 'react');
+    } else if (since(D.strike) < 1.2 && D.strike.swinging && !D.strike.k && this.sSeen !== D.strike.at && since(D.strike) > 0.4) {
+      this.sSeen = D.strike.at;
+      if (C.has('batStrike') && rnd(this.seedB, (D.strike.at * 10) | 0) < 0.4) this._seq([['batStrike', 0, 1.5, 1.6]], 'react');
+    }
   }
   batter(dt, c) {
     motionEvents(this.ev, this.p, 'batter', c);
     const C = this.c;
-    // 타자마다 대기 자세를 조금씩 다르게(등번호로 고정) — 9명이 똑같이 서 있으면 어색함
+    // 타자가 바뀌면: 대기 자세·템포·스윙 버릇을 타자별로(이름/id 해시) + 타석 입장(Walk_In 또는 Step_In)
     const who = String(c.who ?? this.p.look.num ?? '');
-    if (!this.stance || this.who !== who) {
-      this.who = who;
+    if (this.who !== who) {
+      const first = this.who === undefined;
+      this.who = who; const h = hash(who); this.seedB = h;
       const opts = ['batStance', 'batStance2', 'batStance3'].filter((n) => C.has(n));
-      const h = [...who].reduce((a, ch) => (a * 31 + ch.charCodeAt(0)) | 0, 7);
-      this.stance = opts[Math.abs(h) % opts.length] || 'batStance';
+      this.stance = opts[h % Math.max(1, opts.length)] || 'batStance';
+      this.stSpeed = 0.85 + rnd(h, 1) * 0.3; // Idle_1·Idle_2 는 원본 동작이 같아서 템포로도 구분
+      this.swPref = rnd(h, 2); this.kStyle = rnd(h, 3);
+      this.kSeen = D.kOut.at; this.sSeen = D.strike.at; this.wSeen = D.windup.at; this._cut();
+      const ent = rnd(h, 4) < 0.55 && C.has('batWalkIn') ? 'batWalkIn' : C.has('batStepIn') ? 'batStepIn' : null;
+      // 입장은 3.6초 안에 끝나게(CPU 투수 첫 공까지 3.4~4.3초 + 와인드업) — 와인드업이 먼저 오면 바로 대기 자세로
+      if (ent) { const s = ent === 'batWalkIn' ? 1.3 : 1.05; this._shot(ent, { speed: s, fade: first ? 0 : 0.3, kind: 'enter' }); }
     }
-    // 등장(인트로): 타석에 걸어 들어와 자리 잡기 → 끝나면 대기 자세
-    if (c.intro && !this.stepT && C.has('batStepIn')) { this.stepT = 1e-6; C.play('batStepIn', { fade: 0.2, restart: true }); }
-    if (this.stepT) { this.stepT += dt; if (!c.intro && this.stepT > 0.3) this.stepT = 0; }
-    const stepping = this.stepT > 0 && this.stepT < (C.duration ? C.duration('batStepIn') : 3.7) - 0.25;
-    if (c.bunt) C.play('buntStance', { fade: 0.25 });
-    else if (c.swingK >= 0) C.scrubK(c.power ? 'powerSwing' : 'swing', c.swingK, { fade: 0.06 });
+    this._newPitch();
+    const swinging = c.swingK >= 0;
+    if (swinging && !this.wasSw) this.swClip = this._pickSwing(c);
+    this.wasSw = swinging;
+    if (!swinging || c.swingK >= 1) this._batReact();
+    if (c.bunt && !this.shot) C.play('buntStance', { fade: 0.25 });
+    else if (swinging && (c.swingK < 1 || !this.shot)) { this._cut(); C.scrubK(this.swClip || 'swing', c.swingK, { fade: this.swClip && this.swClip !== 'swing' ? 0.1 : 0.06 }); }
+    else if (this._shotOn()) { /* 입장·반응 */ }
     else if (c.loadK > 0.02) C.scrubK('swing', 0.25 * clamp(c.loadK, 0, 1), { fade: 0.2 });
-    else if (stepping) { /* 등장 동작 계속 */ }
-    else C.play(this.stance, { fade: 0.35 });
-    if (c.lookW && !(c.swingK >= 0)) C.look(c.lookW, 0.4);
+    else C.play(this.stance, { fade: 0.35, speed: this.stSpeed });
+    if (c.lookW && !(swinging) && !this.shot) C.look(c.lookW, 0.4);
     C.update(dt);
   }
   catcher(dt, c) {
@@ -204,27 +315,49 @@ export class ClipAnimator {
     if (c.lookW) C.look(c.lookW, 0.7);
     C.update(dt);
   }
+  // 심판: 주심은 투구 시작 ~ 공 도착까지 무릎 짚은 자세(Umpire 클립 첫 자세), 스트라이크 콜은 Umpire 콜 구간(0.45초~)을 끝까지,
+  //  삼진 콜은 조금 느리게(힘 줘서). 루심 아웃 콜도 같은 콜 동작. 세이프는 클립이 없어 대기 자세.
   ump(dt, c) {
-    const C = this.c;
+    const C = this.c, t = now(), home = !c.stand;
     const call = c.call || null;
-    if (call && call !== this.call) C.play(call === 'safe' ? 'umpireSafe' : 'umpireCall', { fade: 0.15, restart: true });
-    else if (!call) C.play(c.stand ? 'idle' : 'ready', { fade: 0.35 });
+    if (call && call !== this.call) {
+      if (call === 'safe' && !C.has('umpireSafe')) this.callUntil = 0;
+      else {
+        const k = call === 'strike' && since(D.strike) < 1.5 && D.strike.k;
+        const s = k ? 0.85 : 1.1, from = call === 'safe' ? 0 : call === 'strike' ? 0.45 : 0.55;
+        const nm = call === 'safe' ? 'umpireSafe' : 'umpireCall';
+        C.play(nm, { fade: 0.12, restart: true, from, speed: s });
+        this.callUntil = t + Math.max(0.6, (C.duration(nm) - 0.45 - from) / s);
+      }
+    }
     this.call = call;
-    if (c.lookW && !call) C.look(c.lookW, 0.6);
+    const calling = t < (this.callUntil || 0);
+    if (!calling) {
+      if (home && since(D.windup) < 3.4 && C.has('umpireCall')) C.scrub('umpireCall', 0.22, { fade: 0.35 });
+      else if (!this._mood(0)) C.play(c.stand ? 'idle' : 'ready', { fade: 0.4 });
+    }
+    if (c.lookW && !calling) C.look(c.lookW, 0.6);
     C.update(dt);
   }
   runner(dt, c) {
     motionEvents(this.ev, this.p, 'runner', c);
     const C = this.c, sp = c.speed || 0;
+    this.noFid = true; // 주자는 서성임 없이(타격 직후 홈에서 서성이면 어색)
     if (c.clip) C.play(c.clip);
     else if (c.slideK >= 0) C.scrubK('slide', c.slideK);
-    else if (c.cheer && sp < 0.5) C.play('celebrate', { fade: 0.3 });
+    else if (c.cheer && sp < 0.5) C.play('celebrate', { fade: 0.3, from: 0.9 + rnd(this.seed, 44) * 0.8 });
+    else if (this._mood(sp)) { /* 경기 끝 */ }
     else if (sp < 0.4 && c.lead) { C.play('ready', { fade: 0.3 }); this.loco = 'ready'; }
     else this._loco(sp, 'idle');
     if (c.lookW) C.look(c.lookW, 0.5);
     C.update(dt);
   }
-  idle(dt, c = {}) { this.c.play(c.clip || 'idle', { fade: 0.3 }); this.c.update(dt); }
+  // 코치·덕아웃·세리머니 대기: Breathing_Idle + 가끔 서성임, 경기 끝이면 팀 분위기
+  idle(dt, c = {}) {
+    if (c.clip) this.c.play(c.clip, { fade: 0.3 });
+    else if (!this._mood(0)) { const b = this._idle('idle'); this.c.play(b, { fade: b === 'mill' ? 0.5 : 0.3 }); }
+    this.c.update(dt);
+  }
 }
 
 // ── 배우 만들기 + 늦게 온 새 몸으로 바꿔 끼우기 ──

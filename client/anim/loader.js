@@ -126,6 +126,15 @@ export function prepClip(name, animations, T) {
   }
   const tr = cfg.trim;
   if (Array.isArray(tr) && tr[1] > tr[0]) tracks = tracks.map((t) => trimTrack(t, tr[0], Math.min(tr[1], src.duration)));
+  // [motion] anchor: 걸어 들어오기/나가기처럼 루트가 움직이는 클립 — 끝(또는 첫) 프레임 엉덩이 수평 위치를 제자리(몸 바인드 위치)로 옮김
+  //  → 'end' 면 걸어 들어와 멈춘 자리가 정확히 타석(대기 자세와 같은 자리), 'start' 면 대기 자세 자리에서 출발
+  const hp = (cfg.anchor === 'end' || cfg.anchor === 'start') && tracks.find((t) => t.name === 'Hips.position');
+  if (hp) {
+    const V = hp.values, r = T.hipsRest, up = T.hipsUp, i = cfg.anchor === 'end' ? V.length - 3 : 0;
+    let dx = V[i] - r.x, dy = V[i + 1] - r.y, dz = V[i + 2] - r.z; const d = dx * up.x + dy * up.y + dz * up.z;
+    dx -= up.x * d; dy -= up.y * d; dz -= up.z * d;
+    for (let k = 0; k < V.length; k += 3) { V[k] -= dx; V[k + 1] -= dy; V[k + 2] -= dz; }
+  }
   const clip = new THREE.AnimationClip(name, -1, tracks);
   clip.optimize();
   const markers = { ...autoMarkers(name, clip, T), ...(cfg.markers || {}) };
@@ -136,15 +145,23 @@ export function prepClip(name, animations, T) {
 let PROBE = null;
 export function autoMarkers(name, clip, T) {
   const dur = clip.duration, m = { start: 0, end: dur };
-  const kind = name === 'powerSwing' ? 'swing' : name;
+  const kind = (CLIPS[name] && CLIPS[name].kind) || (name === 'powerSwing' ? 'swing' : name); // [motion] kind: swing2·pitch2·catcherThrow 도 같은 방식
   if (!['pitch', 'swing', 'throw', 'catchLow', 'catchHigh', 'dive', 'slide'].includes(kind)) return m;
   if (!PROBE || PROBE.T !== T) { const model = SkeletonUtils.clone(T.tpl); const b = {}; model.traverse((o) => { if (o.isBone) b[o.name] = o; }); PROBE = { T, model, b, mixer: new THREE.AnimationMixer(model) }; }
   const { model, b, mixer } = PROBE;
   const act = mixer.clipAction(clip); act.reset(); act.play(); act.timeScale = 0;
   const N = Math.max(2, Math.ceil(dur * 60)), dt = dur / N;
-  const S = { rh: [], lh: [], lf: [], hip: [] }, p = new THREE.Vector3();
+  const S = { rh: [], lh: [], lf: [], hip: [], bat: [] }, p = new THREE.Vector3();
+  // [motion] 배트 방향(오른손 뼈 기준, FIT.bat.dir 을 손 로컬로) — 스윙 컨택 = 배트가 투구 선(±x)에 수직이 되는 순간
+  let batLocal = null;
+  if (kind === 'swing' && b.RightHand && T.rest && T.rest.get('RightHand')) {
+    const qr = new THREE.Quaternion(); T.rest.get('RightHand').decompose(new THREE.Vector3(), qr, new THREE.Vector3());
+    batLocal = new THREE.Vector3(...FIT.bat.dir).normalize().applyQuaternion(qr.invert());
+  }
+  const qh = new THREE.Quaternion();
   for (let i = 0; i <= N; i++) {
     act.time = i * dt; mixer.update(0); model.updateMatrixWorld(true);
+    if (batLocal) S.bat.push(batLocal.clone().applyQuaternion(b.RightHand.getWorldQuaternion(qh)));
     S.rh.push((b.RightHand || b.Hips).getWorldPosition(p).clone());
     S.lh.push((b.LeftHand || b.Hips).getWorldPosition(p).clone());
     S.lf.push((b.LeftFoot || b.Hips).getWorldPosition(p).clone());
@@ -165,7 +182,16 @@ export function autoMarkers(name, clip, T) {
     m.release = rel * dt; m.peak = peak * dt; m.lift = lift * dt; m.set = Math.max(0, m.lift - 0.35);
   } else if (kind === 'swing') {
     const c = argmax(spd(S.rh), edge, N - edge);
-    m.contact = c * dt; m.launch = Math.max(0, m.contact - 0.12); m.load = Math.max(0, m.contact - 0.35); m.start = Math.max(0, m.load - 0.5);
+    m.contact = c * dt;
+    // [motion] 손 속도 최대는 배트가 아직 포수 쪽(-x)으로 누워 있는 '채찍 전' 순간(실측 0.04~0.07초 이름). 공을 맞히는 건 그 뒤
+    //  배트 수평 방향이 -x → +x 로 넘어가는(투구 선에 수직, 홈플레이트 위) 순간을 컨택으로. 못 찾으면 손 속도 최대 그대로
+    if (S.bat.length) {
+      const i1 = Math.min(N, c + Math.ceil(0.3 / dt));
+      for (let i = Math.max(1, c - 2); i <= i1; i++) {
+        const a = S.bat[i - 1], q = S.bat[i];
+        if (a.x < 0 && q.x >= 0 && q.z > 0.2) { m.contact = (i - 1 + (-a.x) / Math.max(1e-6, q.x - a.x)) * dt; break; }
+      }
+    } m.launch = Math.max(0, m.contact - 0.12); m.load = Math.max(0, m.contact - 0.35); m.start = Math.max(0, m.load - 0.5);
   } else if (kind === 'throw') {
     const r = argmax(spd(S.rh), edge, N - edge);
     m.release = r * dt; m.start = Math.max(0, m.release - 0.45); m.end = Math.min(dur, m.release + 0.5);
@@ -308,7 +334,9 @@ export function loadLib({ dir = MODEL_DIR, onClip = null } = {}) {
       }
     } catch { /* 없으면 LOD 없이 */ }
     if (FILES.mask) try { const t = await new THREE.TextureLoader().loadAsync(url('mask', FILES.mask)); t.flipY = false; t.colorSpace = THREE.NoColorSpace; lib.maskTex = t; } catch { /* 자동 판정 */ }
-    const addClip = (name, gltf) => { try { const e = prepClip(name, gltf.animations, T); e.src = gltf.animations; e.index = lib.clipList.length; lib.clipList.push(e); lib.clips.set(name, e); if (onClip) onClip(e); return e; } catch (err) { console.warn('[anim] 클립', name, err.message); return null; } };
+    // [motion] 원본 애니메이션(e.src)은 ?animlab(구간 다시 자르기)에서만 들고 있음 — 게임에선 잘라 만든 클립만 남겨 클립 메모리 절반
+    const keepSrc = typeof location !== 'undefined' && /[?&]animlab\b/.test(location.search);
+    const addClip = (name, gltf) => { try { const e = prepClip(name, gltf.animations, T); if (keepSrc) e.src = gltf.animations; e.index = lib.clipList.length; lib.clipList.push(e); lib.clips.set(name, e); if (onClip) onClip(e); return e; } catch (err) { console.warn('[anim] 클립', name, err.message); return null; } };
     const getClip = (name) => loader.loadAsync(X && X.anim && X.anim[name] ? X.anim[name] : dir + 'anim/' + name + '.glb').then((g) => addClip(name, g)).catch(() => { lib.missing.push(name); return null; });
     await Promise.all(EARLY.map(getClip));
     // 필수 클립이 빠지면 게임은 옛 몸 유지(LIB 를 비워 둠) — 그래도 ?animlab 에서 있는 클립은 볼 수 있게 lib 는 돌려준다
