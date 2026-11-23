@@ -141,7 +141,7 @@ export function createMotion(api) {
 
   function paint() {
     const P = M.pad;
-    const padTxt = !P ? '' : !P.open ? '서버에 붙는 중…' : P.pads ? `핸드폰 연결됨 · 지연 ${Math.round(P.rtt / 2)}ms` : 'QR을 핸드폰 카메라로 찍어줘';
+    const padTxt = !P ? '' : !P.open ? '서버에 붙는 중…' : P.pads ? `핸드폰 연결됨${P.direct ? ' ⚡ 직접' : ' · 서버 경유'} · 지연 ${Math.round(P.rtt / 2)}ms` : 'QR을 핸드폰 카메라로 찍어줘';
     setText('mPadSt', padTxt); cls('mPadSt', 'ok', !!(P && P.pads));
     if (M.cam) { setText('mCamSt', M.cam.on ? (M.pose && M.pose.ready ? (M.pose.now() ? '전신 인식 중 · 선수가 내 몸을 따라 해' : '몸이 안 보여 — 카메라에 전신이 나오게 서줘') : M.pose && M.pose.loading ? '전신 인식 모델 불러오는 중…' : M.pose && M.pose.err ? M.pose.err : '웹캠 켜짐 · 옆으로 서서 휘둘러봐') : M.cam.err || '꺼짐'); setText('mCamBtn', M.cam.on ? '웹캠 끄기' : '웹캠 켜기'); cls('mCamSt', 'ok', M.cam.on); }
     show('mCamView', !!(M.cam && M.cam.on));

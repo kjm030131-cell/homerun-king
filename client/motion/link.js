@@ -6,7 +6,27 @@ export const newPadCode = () => Array.from({ length: 6 }, () => CHARS[(Math.rand
 
 export function createPadLink(code, onMsg, onState) {
   let ws = null, closed = false, retry = 0, pingT = 0;
-  const L = { code, open: false, pads: 0, rtt: 0, offset: null, samples: [] };
+  const L = { code, open: false, pads: 0, rtt: 0, offset: null, samples: [], direct: false };
+  // [11-24] WebRTC 직접 연결: 서버(Pad DO)는 처음 연결해 줄 때만 쓰고, 같은 와이파이면 핸드폰↔PC 바로 (핑 수 ms). 안 되면 서버 경유 그대로
+  let pc = null, dc = null;
+  function rtcReset() { try { dc && dc.close(); } catch { } try { pc && pc.close(); } catch { } pc = dc = null; if (L.direct) { L.direct = false; L.samples = []; onState(L); } }
+  async function onRtc(m) {
+    if (typeof RTCPeerConnection === 'undefined') return;
+    if (m.t === 'rtc' && m.sdp && m.sdp.type === 'offer') {
+      rtcReset();
+      pc = new RTCPeerConnection({ iceServers: [{ urls: 'stun:stun.l.google.com:19302' }] });
+      pc.onicecandidate = (e) => { if (e.candidate) wsSend({ t: 'ice', c: e.candidate.toJSON ? e.candidate.toJSON() : e.candidate }); };
+      pc.onconnectionstatechange = () => { if (pc && (pc.connectionState === 'failed' || pc.connectionState === 'closed')) rtcReset(); };
+      pc.ondatachannel = (e) => {
+        dc = e.channel;
+        dc.onopen = () => { L.direct = true; L.samples = []; L.offset = null; onState(L); };
+        dc.onclose = () => { if (L.direct) { L.direct = false; L.samples = []; onState(L); } };
+        dc.onmessage = (ev) => handle(ev.data);
+      };
+      try { await pc.setRemoteDescription(m.sdp); const ans = await pc.createAnswer(); await pc.setLocalDescription(ans); wsSend({ t: 'rtc', sdp: pc.localDescription }); } catch (e) { console.warn('[rtc]', e); rtcReset(); }
+    } else if (m.t === 'ice' && pc && m.c) { try { await pc.addIceCandidate(m.c); } catch { } }
+  }
+  const wsSend = (m) => { if (ws && ws.readyState === 1) ws.send(JSON.stringify(m)); };
   function connect() {
     if (closed) return;
     const proto = location.protocol === 'https:' ? 'wss' : 'ws';
@@ -14,9 +34,13 @@ export function createPadLink(code, onMsg, onState) {
     ws.onopen = () => { L.open = true; retry = 0; onState(L); };
     ws.onclose = () => { L.open = false; L.pads = 0; onState(L); later(); };
     ws.onerror = () => { };
-    ws.onmessage = (e) => {
-      let m; try { m = JSON.parse(e.data); } catch { return; }
-      if (m.t === 'peer') { const was = L.pads; L.pads = m.pads | 0; if (L.pads !== was) { L.samples = []; L.offset = null; } onState(L); return; }
+    ws.onmessage = (e) => handle(e.data);
+  }
+  function handle(data) {
+    {
+      let m; try { m = JSON.parse(data); } catch { return; }
+      if (m.t === 'rtc' || m.t === 'ice') { onRtc(m); return; }
+      if (m.t === 'peer') { const was = L.pads; L.pads = m.pads | 0; if (L.pads !== was) { L.samples = []; L.offset = null; } if (!L.pads) rtcReset(); onState(L); return; }
       if (m.t === 'pog') {
         const now = performance.now(), rtt = now - m.h;
         if (rtt < 0 || rtt > 2000) return;
@@ -26,14 +50,14 @@ export function createPadLink(code, onMsg, onState) {
         onState(L); return;
       }
       onMsg(m);
-    };
+    }
   }
   function later() { if (closed) return; setTimeout(connect, Math.min(8000, 600 * 2 ** retry++)); }
-  L.send = (m) => { if (ws && ws.readyState === 1) ws.send(JSON.stringify(m)); };
+  L.send = (m) => { if (dc && dc.readyState === 'open') { try { dc.send(JSON.stringify(m)); return; } catch { } } wsSend(m); };
   // 핸드폰 시각(ms) → PC performance.now() 기준(ms)
   L.toLocal = (padMs) => (L.offset == null ? performance.now() - L.rtt / 2 : padMs - L.offset);
   L.tick = () => { const n = performance.now(); if (L.pads && n - pingT > (L.samples.length < 5 ? 250 : 1000)) { pingT = n; L.send({ t: 'png', h: n }); } };
-  L.close = () => { closed = true; try { ws && ws.close(); } catch { } };
+  L.close = () => { closed = true; rtcReset(); try { ws && ws.close(); } catch { } };
   connect();
   return L;
 }

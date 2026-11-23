@@ -1397,6 +1397,11 @@ window.__camRig = camRig; // [cam] qa: 데드존 여부(direct)·모드
 // ═════════════ [ABS] 챌린지 판독: 포수 뒤 슬로모션으로 투구를 다시 그리고 존 통과 여부를 보여줌 ═════════════
 const pByPid = {};
 let absRv = null;
+// [11-24] ABS 판독 중 홈 쪽(주심·포수) 숨기기 — 판독 박스·궤적과 겹쳤음
+function absHide(on) {
+  for (const U of umps) if (U.p && U.p.root) U.p.root.visible = !on || U.p.root.position.z > 3;
+  for (const A of fielders) if (A.pos === 'C' || (A.p && A.p.pos === 'C')) A.p.root.visible = !on;
+}
 const absTrail = new THREE.Line(new THREE.BufferGeometry().setAttribute('position', new THREE.BufferAttribute(new Float32Array(64 * 3), 3)), new THREE.LineBasicMaterial({ color: 0x5ab8ff, transparent: true, opacity: 0.95, depthTest: false }));
 absTrail.renderOrder = 31; absTrail.visible = false; absTrail.frustumCulled = false; scene.add(absTrail);
 const absBox = new THREE.LineSegments(new THREE.EdgesGeometry(new THREE.BoxGeometry(1, 1, 0.43)), new THREE.LineBasicMaterial({ color: 0xffffff, transparent: true, opacity: 0.9, depthTest: false }));
@@ -1411,7 +1416,7 @@ const ABS_T = { intro: 0.7, fly: 2.6, hold: 1.7 };
 function updateAbsReview() {
   if (!absRv) return false;
   const e = nowP() - absRv.t0, total = ABS_T.intro + ABS_T.fly + ABS_T.hold;
-  if (e > total || !S || (S.ph !== 'result' && e > 1)) { absRv = null; absTrail.visible = absBox.visible = false; if (batter) batter.p.root.visible = true; ui.absReview && ui.absReview(null); return false; }
+  if (e > total || !S || (S.ph !== 'result' && e > 1)) { absRv = null; absTrail.visible = absBox.visible = false; if (batter) batter.p.root.visible = true; absHide(false); ui.absReview && ui.absReview(null); return false; }
   const p = absRv.p, ab = absRv.ab, u = clamp((e - ABS_T.intro) / ABS_T.fly, 0, 1), us = u < 1 ? 1 - Math.pow(1 - u, 1.6) : 1;
   const q = pitchPos(p, us);
   ballMesh.visible = true; ballMesh.position.set(q[0], q[1], Math.max(q[2], -0.25)); ballMesh.scale.setScalar(0.75);
@@ -1426,6 +1431,7 @@ function updateAbsReview() {
   camera.lookAt(0, zc + 0.05 + (q[1] - zc) * 0.3 * (1 - kk), 6 - 6 * kk);
   camera.fov = 40 - 6 * kk; camera.updateProjectionMatrix();
   if (batter) batter.p.root.visible = false; // 판독 그래픽: 타자 없이 공·존만 (중계 ABS 화면처럼)
+  absHide(true); // [11-24] 주심·포수도 숨김 (판독 박스와 겹쳐 보였음)
   if (e > ABS_T.intro + ABS_T.fly && !absRv.shown) { absRv.shown = true; ui.absReview && ui.absReview(ab, 1); bus.emit('ui:perfect'); }
   return true;
 }
