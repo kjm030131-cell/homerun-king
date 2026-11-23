@@ -1,6 +1,6 @@
 // [ui] 화면 흐름: 타이틀 → 모드 선택(리얼/캐주얼) → 로비(혼자·방 만들기·방 목록·코드 참가) → 대기실 → 경기(HUD) → 결과
 // main.js는 createUI(ctx) 하나만 부르고, 게임 상태는 ctx 게터로만 읽는다. UI는 게임 상태를 바꾸지 않고 서버/Game에 메시지만 보낸다.
-import { $, esc, show, isShown, segVal, setSeg, bindSegs, replay } from './dom.js';
+import { $, esc, show, isShown, segVal, setSeg, bindSegs, replay, setText } from './dom.js';
 import { cfg, store, bindSettings, fillSettings, emitVolume, TOUCH } from './settings.js';
 import { banner, feedback, toast, castLine, stopSpeech, clearBanner, gradeFeedback } from './announce.js';
 import { RULES } from '../../shared/rules.js';
@@ -101,7 +101,9 @@ export function createUI(ctx) {
   $('nick').onkeydown = (e) => { e.stopPropagation(); if (e.key === 'Enter') $('bPlay').click(); };
   for (const id of ['bSettings', 'lbSettings']) $(id).onclick = openSettings;
   for (const id of ['bHelp', 'lbHelp']) $(id).onclick = () => openModal('helpM');
-  for (const id of ['bMotion', 'lbMotion']) $(id).onclick = () => { openModal('motionM'); window.__motion && window.__motion.paint(); }; // [motion]
+  // [motion] 모션 컨트롤 창: 메뉴에서 열면 연결 설정만, '모션 플레이'로 열면 경기 설정 + 플레이 볼
+  const openMotion = (play) => { show('mPlay', play); show('mGo', play); setText('mClose', play ? '취소' : '확인'); openModal('motionM'); window.__motion && window.__motion.paint(); };
+  for (const id of ['bMotion', 'lbMotion']) $(id).onclick = () => openMotion(false);
 
   // ── 모드 선택 ──
   function paintRules() {
@@ -153,6 +155,17 @@ export function createUI(ctx) {
     replay(b, 'tap');
   }));
   for (const id of ['oMode', 'oInn']) $(id).addEventListener('click', () => setTimeout(paintPreset, 0));
+  $('bMotionPlay').onclick = () => { if (!getName()) return; ctx.unlockAudio(); paintSoloClubs(); oLoad(); openMotion(true); if (!OFFLINE && window.__motion && !window.__motion.pad) window.__motion.connectPad(); };
+  $('mGo').onclick = () => {
+    const M = window.__motion;
+    if (!M || !M.active()) { setText('mPlaySt', '먼저 핸드폰을 연결하거나 웹캠을 켜줘'); replay('mPlaySt', 'tap'); return; }
+    if (!ctx.myName && !getName()) return;
+    closeModal('motionM'); ctx.unlockAudio(); showErr('');
+    const team = segVal('mTeam') || 'away', sv = store.get('solo', {}) || {};
+    soloRules = cfg.rules;
+    ctx.startLocal(ctx.myName, { rules: cfg.rules, fld: 'auto', hitEase: store.get('hitEase', 1), tod: store.get('tod', 'night'), mode: 'game', inn: +segVal('mInn') || 3, diff: sv.diff ?? 1, team, pos: 'any', clubs: team === 'away' ? [soloClub.me, soloClub.op] : [soloClub.op, soloClub.me] });
+    setScreen('game');
+  };
   $('bSolo').onclick = () => { if (!getName()) return; ctx.unlockAudio(); paintSoloClubs(); oLoad(); openModal('soloM'); };
   $('oMode').addEventListener('change', (e) => oMode(e.detail));
   const oDefaults = (r) => { setSeg('oHit', r === 'casual' ? 0 : 1); setSeg('oInn', RULES[r].innings); };
@@ -294,7 +307,7 @@ export function createUI(ctx) {
   // ── 일시정지 메뉴 ──
   $('mSettings').onclick = () => { closeModal('menuM'); openSettings(); };
   $('mHelp').onclick = () => { closeModal('menuM'); openModal('helpM'); };
-  $('mMotion').onclick = () => { closeModal('menuM'); openModal('motionM'); window.__motion && window.__motion.paint(); }; // [motion]
+  $('mMotion').onclick = () => { closeModal('menuM'); openMotion(false); }; // [motion]
   $('mLobby').onclick = () => { closeModal('menuM'); send({ t: 'lobby' }); };
   $('mQuit').onclick = () => { closeModal('menuM'); ctx.leave(); };
   function openMenu() {

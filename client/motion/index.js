@@ -106,6 +106,7 @@ export function createMotion(api) {
     if (M.cam) { setText('mCamSt', M.cam.on ? '웹캠 켜짐 · 옆으로 서서 휘둘러봐' : M.cam.err || '꺼짐'); setText('mCamBtn', M.cam.on ? '웹캠 끄기' : '웹캠 켜기'); cls('mCamSt', 'ok', M.cam.on); }
     show('mCamView', !!(M.cam && M.cam.on));
     setText('mCalV', (M.calib > 0 ? '+' : '') + M.calib + 'ms');
+    const on = M.active(); setText('mPlaySt', on ? '준비 끝 · 플레이 볼을 눌러!' : '핸드폰을 연결하거나 웹캠을 켜면 시작할 수 있어'); cls('mPlaySt', 'ok', on);
   }
 
   // 모달 바인딩

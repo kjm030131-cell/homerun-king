@@ -704,12 +704,19 @@ body[data-screen=over] #hud{opacity:0;transition:opacity .35s ease}
 @media (prefers-reduced-motion:reduce){*,*:before,*:after{animation:none!important;transition:none!important}}
 
 /* [motion] 모션 컨트롤 */
-.body.motion{display:grid;grid-template-columns:1fr 1fr;gap:18px 22px}
+.modal .board.mboard{display:flex;flex-direction:column;overflow:hidden;max-height:calc(100vh - 32px)}
+.body.motion{display:grid;grid-template-columns:1fr 1fr;gap:18px 22px;overflow:auto;min-height:0;flex:1}
+.macts{margin:0;padding:12px 18px;border-top:1px solid var(--line);background:rgba(9,17,42,.6);justify-content:flex-end;display:flex;gap:10px}
+.mplay .mst.ok{color:#4fd18b}
 .body.motion .full{grid-column:1/-1}
+.act.motion{border-left-color:#ffcf3f}
+.act.motion b:after{content:"NEW";font-family:inherit;font-weight:800;font-size:11px;line-height:1;letter-spacing:.06em;margin-left:10px;padding:3px 6px;border-radius:3px;background:#ffcf3f;color:#1a1300;vertical-align:middle}
+.mplay .mprow{display:flex;gap:18px;flex-wrap:wrap;margin-top:8px}
+.mplay .mst{margin-top:10px}
 .body.motion .mcol{display:flex;flex-direction:column;gap:10px;min-width:0}
 .body.motion .setgrp em{font-style:normal;font-size:11px;margin-left:6px;padding:2px 6px;border-radius:4px;background:rgba(255,207,63,.16);color:#ffcf3f;letter-spacing:.04em}
 .padbox{display:flex;gap:14px;align-items:center}
-.padbox canvas{width:150px;height:150px;border-radius:8px;image-rendering:pixelated;flex:none}
+.padbox canvas{width:132px;height:132px;border-radius:8px;image-rendering:pixelated;flex:none}
 .padinfo{display:flex;flex-direction:column;gap:4px;min-width:0}
 .padinfo .url{font-size:13px;word-break:break-all;color:#cfe3ff}
 .padinfo .pcode{font-size:30px;letter-spacing:.16em;color:#ffcf3f;line-height:1.1}
@@ -781,6 +788,7 @@ body[data-screen=over] #hud{opacity:0;transition:opacity .35s ease}
   <div class="lbody">
     <div class="acts-l">
       <button id="bSolo" class="act pri"><b>혼자 하기</b><span>CPU 경기 · 홈런 더비 · 타격 연습</span></button>
+      <button id="bMotionPlay" class="act motion"><b>모션 플레이</b><span>핸드폰·웹캠으로 진짜 휘두르고 던지기 · 수비는 CPU</span></button>
       <button id="bCreate" class="act mp"><b>방 만들기</b><span>방 코드가 생겨. 친구한테 보내면 바로 들어와</span></button>
       <div class="joinbox mp">
         <label class="lbl" for="code">방 코드로 참가</label>
@@ -1013,7 +1021,7 @@ body[data-screen=over] #hud{opacity:0;transition:opacity .35s ease}
     <div class="acts"><button class="go" data-close>확인</button></div>
   </div>
 </div></div>
-<div id="motionM" class="modal hide"><div class="board wide">
+<div id="motionM" class="modal hide"><div class="board wide mboard">
   <header><h3>모션 컨트롤</h3><span class="note">진짜 휘두르고 던지기 · 수비는 CPU가 자동</span></header>
   <div class="body motion">
     <section class="mcol">
@@ -1033,9 +1041,15 @@ body[data-screen=over] #hud{opacity:0;transition:opacity .35s ease}
       <canvas id="mCamView" class="hide camview" width="320" height="240"></canvas>
       <p class="mst" id="mCamSt"></p>
     </section>
+    <div class="full hide mplay" id="mPlay">
+      <div class="setgrp">경기 설정</div>
+      <div class="mprow"><div><label class="lbl">이닝</label><div class="seg" id="mInn"><button data-v="1">1</button><button data-v="3" class="on">3</button><button data-v="5">5</button><button data-v="9">9</button></div></div>
+      <div><label class="lbl">내 팀</label><div class="seg" id="mTeam"><button data-v="away" class="on">원정 (선공 · 타격부터)</button><button data-v="home">홈 (후공 · 투구부터)</button></div></div></div>
+      <p class="mst" id="mPlaySt">핸드폰을 연결하거나 웹캠을 켜면 시작할 수 있어</p>
+    </div>
     <div class="full"><label class="lbl" for="mCal">타이밍 보정 (계속 늦게 맞으면 +, 빨리 맞으면 −)</label><div class="range"><input id="mCal" type="range" min="-150" max="150" step="10" value="0"><output id="mCalV">0ms</output></div></div>
   </div>
-  <div class="acts"><button class="go" data-close>확인</button></div>
+  <div class="acts sticky macts"><button class="btn" data-close id="mClose">확인</button><button class="go hide" id="mGo">플레이 볼</button></div>
 </div></div>
 <div id="menuM" class="modal hide"><div class="board">
   <header><h3 id="menuT">일시정지</h3></header>
