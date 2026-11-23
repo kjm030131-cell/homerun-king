@@ -14,6 +14,7 @@
   (다른 프로젝트 ARCLIGHT에서 옛 폴더를 직접 올려 사이트가 초기 버전으로 덮어써진 사고가 있었다. 그래서 이 방식을 그대로 가져옴)
 - ✅ 작업 흐름: `git pull` → 수정 → `npm run check`(빌드+문법+테스트) → commit → `git push` → `gh run watch`로 배포 성공 확인.
 - ✅ 큰 작업·확정 전 작업은 브랜치에서. `main` 이외 브랜치는 `qa.yml`(빌드+테스트)만 돌고 배포 안 된다. 테스트 통과 후 `main`에 merge.
+- ✅ (2026-11-23 사용자 결정) **작업은 PR로 합친다**: 작업 브랜치를 push → `gh api repos/kjm030131-cell/homerun-king/pulls`로 PR 생성(바뀐 점·테스트 결과·사용자가 맥에서 볼 것) → qa 통과 확인 → PR merge(= 배포). `main`에 직접 push 하지 않는다. 여러 Claude 채팅이 동시에 작업하니 merge 전 최신 `main`을 브랜치에 합쳐 충돌을 먼저 정리할 것. 사용자가 "배포하지 마"라고 하면 PR은 열어 두고 merge만 미룬다.
 - 롤백: Actions에서 이전 성공 run을 `gh run rerun <id>` 하거나, 이전 커밋으로 `git revert` 후 push. (`git push --force`는 사용자 확인 후에만)
 - 필요한 저장소 Secrets: `CLOUDFLARE_API_TOKEN`(Workers 편집 권한), `CLOUDFLARE_ACCOUNT_ID`(선택 — 토큰이 계정 하나만 볼 수 있으면 없어도 됨).
 - Durable Object 클래스 이름(`Room`, `Lobby`)을 바꾸거나 지우면 `wrangler.jsonc`의 `migrations`에 새 tag를 추가해야 한다. 안 그러면 배포 실패.

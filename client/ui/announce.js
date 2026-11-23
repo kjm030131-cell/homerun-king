@@ -68,14 +68,15 @@ const CAST = [
   [/직선타|플라이 아웃/, ['잘 맞았지만 정면이었습니다.', '수비 위치가 좋았어요, 아웃.', '높이 뜬 공, 잡아냅니다.'], 0.35],
   [/득점/, ['홈인! 점수가 납니다!'], 0.5],
 ];
-let castT = 0, castLast = '', castBus = false;
-function showCast(l) {
+let castT = 0, castLast = '', castBus = true; // [sound 11-23] 사운드 캐스터가 항상 있음 → 아래 내장 멘트(다른 목소리로 사운드 캐스터 말을 끊던 것) 끔
+function showCast(l, who) {
   const e = $('cast'); e.querySelector('span').textContent = l;
+  const tag = e.querySelector('i'); if (tag) tag.textContent = who === 'color' ? '해설' : '캐스터'; // [sound] 중계석 두 명
   replay(e, 'show');
   clearTimeout(castT); castT = setTimeout(() => e.classList.remove('show'), 3800);
 }
 // 사운드 파트의 캐스터가 bus 'caster:line' ({text} 또는 문자열)을 보내면 그 자막을 그림. 한 번이라도 오면 아래 내장 멘트(+브라우저 음성)는 끔
-bus.on('caster:line', (d) => { castBus = true; const t = typeof d === 'string' ? d : d && (d.text || d.line); if (t && cfg.cast) showCast(String(t)); });
+bus.on('caster:line', (d) => { castBus = true; const t = typeof d === 'string' ? d : d && (d.text || d.line); if (t && cfg.cast) showCast(String(t), d && d.who); });
 // 내장 멘트 (사운드 파트 캐스터가 생기기 전 대체용)
 export function castLine(t, s) {
   if (castBus || !cfg.cast || (s && s.mode === 'derby' && !/홈런/.test(t))) return;

@@ -8,38 +8,64 @@ const clamp = (v, a, b) => Math.max(a, Math.min(b, v));
 const rnd = (a, b) => a + Math.random() * (b - a);
 
 // 리얼: 메이저리그 중계처럼 투구 땐 조용, 큰 순간에 터짐 / 캐주얼: KBO식으로 늘 시끌벅적, 응원 박수·오르간 잦음
+// [sound 11-23] 전체적으로 낮춤(시끄럽다는 피드백): 바탕 웅성임은 '들리는 듯 마는 듯', 반응만 또렷하게
 export const PROFILES = {
-  real: { bed: 0.16, hush: 0.45, react: 1.0, chantP: 0.25, buzz: 0.6, casual: false },
-  casual: { bed: 0.22, hush: 0.15, react: 1.3, chantP: 0.7, buzz: 1.0, casual: true },
+  real: { bed: 0.22, hush: 0.45, react: 0.8, chantP: 0.25, buzz: 0.5, casual: false },
+  casual: { bed: 0.3, hush: 0.15, react: 0.95, chantP: 0.6, buzz: 0.8, casual: true },
 };
+
+// ── [sound 11-23] 사람 목소리로 만든 관중 ──
+// 예전: 잡음(쉬익)에 필터만 건 '바람 소리' → 관중 같지 않았음. 이제 성대 펄스(실제 목소리의 '음높이')를 포먼트(모음)로 걸러
+// 여러 사람이 동시에 말하거나(웅성임) 소리 지르는(함성 '와아') 버퍼를 만든다. 남녀 음높이 섞음, 사람마다 떨림·모음이 다름.
+const VOWELS = [[730, 1090, 2440], [530, 1840, 2480], [270, 2290, 3010], [570, 840, 2410], [300, 870, 2240], [660, 1720, 2410]]; // 아 에 이 오 우 애
+async function mkVoices(a, { sec = 5, talkers = 16, f0lo = 100, f0hi = 240, sustain = false, syl = [3, 6], bright = 1 } = {}) {
+  const sr = a.sampleRate, n = (sr * sec) | 0, b = a.createBuffer(2, n, sr);
+  const W = E.noise.getChannelData(0), wn = W.length;
+  const C1 = new Float64Array(3), C2 = new Float64Array(3), G = new Float64Array(3), Y1 = new Float64Array(3), Y2 = new Float64Array(3);
+  for (let ch = 0; ch < 2; ch++) {
+    const d = b.getChannelData(ch);
+    for (let k = 0; k < talkers / 2; k++) {
+      const female = Math.random() < 0.4, base = female ? rnd(Math.max(f0lo, 170), f0hi) : rnd(f0lo, Math.min(f0hi, 165));
+      const sylHz = Math.round(rnd(syl[0], syl[1]) * sec) / sec, phr = Math.max(1, Math.round(rnd(0.2, 0.5) * sec)) / sec; // 루프 이음매 맞춤
+      const amp = rnd(0.35, 1), ph0 = Math.random();
+      let gph = Math.random(), gPrev = 0, p = (Math.random() * wn) | 0, v0 = (Math.random() * 6) | 0, v1 = (Math.random() * 6) | 0, lastSyl = -1;
+      let env = 0, f0 = base, jit = 0;
+      Y1.fill(0); Y2.fill(0);
+      for (let i = 0; i < n; i++) {
+        if ((i & 63) === 0) { // 64샘플마다 모음·음높이·세기 갱신
+          const t = i / sr, sp = sylHz * t + ph0, si = Math.floor(sp), frac = sp - si;
+          if (si !== lastSyl) { lastSyl = si; v0 = v1; v1 = (Math.random() * 6) | 0; }
+          const m = sustain ? 0.5 - 0.5 * Math.cos(Math.PI * Math.min(1, frac * 2.5)) : Math.min(1, frac * 3);
+          for (let j = 0; j < 3; j++) {
+            const F = VOWELS[v0][j] + (VOWELS[v1][j] - VOWELS[v0][j]) * m, r = Math.exp(-Math.PI * (60 + F * 0.08) / sr);
+            C1[j] = 2 * r * Math.cos(2 * Math.PI * F / sr); C2[j] = r * r; G[j] = (1 - r) * (j === 0 ? 1.2 : j === 1 ? 0.8 : 0.4);
+          }
+          const sv = Math.sin(2 * Math.PI * (sylHz * t + ph0)), sw = 0.55 + 0.45 * Math.sin(2 * Math.PI * (phr * t + ph0));
+          env = sustain ? amp * (0.65 + 0.35 * sw) : (sv > 0 ? sv : 0) * sw * amp;
+          jit = jit * 0.9 + (Math.random() - 0.5) * 0.02;
+          f0 = base * (1 + (sustain ? 0.05 : 0.12) * Math.sin(2 * Math.PI * (0.7 * t + ph0)) + jit); // 억양
+        }
+        gph += f0 / sr; if (gph >= 1) gph -= 1;
+        const g = gph < 0.6 ? Math.sin(Math.PI * gph / 0.6) : 0; // 성대 펄스
+        const src = (g - gPrev) * 6 + W[p] * 0.06 * bright; gPrev = g; if (++p === wn) p = 0; // 미분(입술 방사) + 숨소리
+        let y = 0;
+        for (let j = 0; j < 3; j++) { const o = src * G[j] + C1[j] * Y1[j] - C2[j] * Y2[j]; Y2[j] = Y1[j]; Y1[j] = o; y += o; }
+        d[i] += y * env;
+      }
+      await new Promise((r) => setTimeout(r, 0)); // 한 사람 만들 때마다 양보 → 메인 스레드가 한 번에 오래 안 멈춤(사람당 수 ms)
+    }
+    // 멀리서 들리게: 저역통과 + 정규화
+    let lp = 0, pk = 0; const kc = Math.exp(-2 * Math.PI * 3800 / sr);
+    for (let i = 0; i < n; i++) { lp = lp * kc + d[i] * (1 - kc); d[i] = lp; if (Math.abs(lp) > pk) pk = Math.abs(lp); }
+    const nm = 0.6 / (pk || 1); for (let i = 0; i < n; i++) d[i] *= nm;
+  }
+  return b;
+}
 
 // ── 오프라인 생성 버퍼 ──
 // 웅성임: '말하는 사람' 여러 명(공명 필터 + 음절 리듬 엔벨로프)을 섞어서 만든 스테레오 루프
 // [net] 첫 소리 켤 때 한 번에 합성하느라 메인 스레드가 멈췄음(이 서버 기준 웅성임 50ms + 박수 85ms, 할당 ~90MB) →
 //       샘플마다 Math.random·Math.exp·나머지 연산 대신 미리 만든 백색잡음 표를 순서대로 읽고 감쇠는 곱셈으로: 웅성임 ~30ms, 박수 ~25ms (소리 성격은 같음)
-function mkBabble(a, sec = 5, talkers = 8) {
-  const sr = a.sampleRate, n = (sr * sec) | 0, b = a.createBuffer(2, n, sr);
-  const W = E.noise.getChannelData(0), wn = W.length; // 들뜸 신호는 이미 만든 백색잡음을 재사용(빠름)
-  for (let ch = 0; ch < 2; ch++) {
-    const d = b.getChannelData(ch);
-    for (let k = 0; k < talkers; k++) {
-      const f = rnd(350, 1300), r = Math.exp(-Math.PI * (f * 0.35) / sr), c = 2 * r * Math.cos(2 * Math.PI * f / sr), r2 = r * r, g0 = 1 - r;
-      // 루프 이음매가 안 튀게 음절 리듬은 sec 주기의 정수배로 맞춤
-      const syl = Math.round(rnd(3, 6.5) * sec) / sec, phr = Math.max(1, Math.round(rnd(0.15, 0.4) * sec)) / sec;
-      const ph = Math.random() * 6.28, php = Math.random() * 6.28, amp = rnd(0.4, 1) * 0.9;
-      let p = (Math.random() * wn) | 0, y1 = 0, y2 = 0, e = 0;
-      for (let i = 0; i < n; i++) {
-        if ((i & 31) === 0) { const t = i / sr, sv = Math.sin(2 * Math.PI * syl * t + ph); e = (sv > 0 ? sv * sv : 0) * (0.5 + 0.5 * Math.sin(2 * Math.PI * phr * t + php)) * amp; }
-        const y = W[p] * g0 + c * y1 - r2 * y2; y2 = y1; y1 = y;
-        d[i] += y * e; if (++p === wn) p = 0;
-      }
-    }
-    // 바탕 쉬쉬 소리
-    let q = (ch * 977) % wn;
-    for (let i = 0; i < n; i++) { d[i] = d[i] * 0.5 + W[q] * 0.02; q += 7; if (q >= wn) q -= wn; }
-  }
-  return b;
-}
 // 박수: 짧은 손뼉 펄스를 촘촘히
 function mkApplause(a, sec = 4, rate = 520) {
   const sr = a.sampleRate, n = (sr * sec) | 0, b = a.createBuffer(2, n, sr);
@@ -61,15 +87,19 @@ function mkApplause(a, sec = 4, rate = 520) {
 export class Crowd {
   constructor() { this.on = false; this.prof = PROFILES.real; this.L = null; this.inGame = false; this.riseT = 0; this.chantT = 0; this.expect = 0; this.riseAt = 0; this.duck = 1; }
   setProfile(k) { this.prof = PROFILES[k] || PROFILES.real; this.base(0.8); }
-  // 첫 입력(오디오 해제) 뒤 한 번 만든다
-  start() {
-    const a = E.ctx; if (!a || this.L) return;
+  // 첫 입력(오디오 해제) 뒤 한 번 만든다. 목소리 버퍼는 조금씩 나눠 만들고(비동기) 다 되면 층을 붙인다
+  async start() {
+    const a = E.ctx; if (!a || this.L || this._building) return;
+    this._building = true;
+    const babble = await mkVoices(a, { sec: 4, talkers: 16, syl: [3, 6] });
+    const roarV = await mkVoices(a, { sec: 3, talkers: 20, f0lo: 150, f0hi: 380, sustain: true, syl: [0.6, 1.5], bright: 1.4 }); // 두 겹을 다른 속도로 돌려 40명처럼
+    const appl = mkApplause(a);
     const out = a.createGain(); out.gain.value = 1;
     const lp = a.createBiquadFilter(); lp.type = 'lowpass'; lp.frequency.value = 7000; lp.Q.value = 0.4;
     const wet = a.createGain(); wet.gain.value = 0.45;
     out.connect(lp).connect(E.groups.crowd.dry); out.connect(wet).connect(E.groups.crowd.wet);
     this.out = out;
-    const babble = mkBabble(a), appl = mkApplause(a);
+    // [sound] 웅성임 = 말하는 목소리 24명 / 함성 = 소리 지르는 목소리 32명(높은 음, 모음 길게) / 박수
     const layer = (srcBuf, rate, filt, pan = 0) => {
       const g = a.createGain(); g.gain.value = 0;
       const s = a.createBufferSource(); s.buffer = srcBuf; s.loop = true; s.playbackRate.value = rate;
@@ -81,18 +111,19 @@ export class Crowd {
       return { g, s, f: n };
     };
     // 바탕 웅성임 = 핑크노이즈(좌·우 따로) + 말소리
-    const bedN1 = layer(E.pink, 1, [['bandpass', 900, 0.5]], -0.7), bedN2 = layer(E.pink, 0.97, [['bandpass', 1000, 0.5]], 0.7);
-    const bedB = layer(babble, 1, [['highpass', 180, 0.7]]);
-    // 함성 = 밝은 노이즈 + 빠르게 돌린 말소리(높은 '우와')
-    const roarN = layer(E.noise, 1, [['bandpass', 1700, 0.7], ['lowpass', 5000, 0.5]]), roarB = layer(babble, 1.3, [['bandpass', 1500, 0.6]]);
-    // 탄식·'오~' = 좁은 대역 핑크노이즈 2개 (주파수를 움직여 모음처럼)
-    const gr1 = layer(E.pink, 1, [['bandpass', 600, 3]]), gr2 = layer(babble, 0.75, [['bandpass', 450, 1.5]]);
-    const ap = layer(appl, 1, [['highpass', 700, 0.5]]);
+    // 바탕: 말소리 + 아주 작은 구장 울림(낮은 핑크노이즈) — 쉬익 소리는 없앰
+    const bedHum = layer(E.pink, 1, [['lowpass', 500, 0.5]]);
+    const bedB = layer(babble, 1, [['highpass', 160, 0.7]]), bedB2 = layer(babble, 0.93, [['highpass', 160, 0.7]], 0.4);
+    // 함성: 목소리 함성 두 겹(조금 다른 속도로 돌려 두꺼운 '와아아')
+    const roarA = layer(roarV, 1, [['highpass', 200, 0.6], ['lowpass', 4500, 0.5]], -0.3), roarB = layer(roarV, 1.06, [['highpass', 200, 0.6], ['lowpass', 4500, 0.5]], 0.3);
+    // 탄식·'오~': 함성 목소리를 느리게(낮은 '아~') — 재생 속도를 내려 음이 떨어지게
+    const gr1 = layer(roarV, 0.8, [['lowpass', 1800, 0.6]]), gr2 = layer(babble, 0.8, [['lowpass', 1400, 0.6]]);
+    const ap = layer(appl, 1, [['highpass', 450, 0.5], ['lowpass', 7000, 0.5]]);
     this.L = {
-      bed: { parts: [[bedN1, 0.5], [bedN2, 0.5], [bedB, 1]], v: 0 },
-      roar: { parts: [[roarN, 0.55], [roarB, 1]], v: 0 },
-      groan: { parts: [[gr1, 0.9], [gr2, 1]], v: 0, flt: [gr1.f, gr2.f] },
-      appl: { parts: [[ap, 1]], v: 0 },
+      bed: { parts: [[bedHum, 0.25], [bedB, 1], [bedB2, 0.7]], v: 0 },
+      roar: { parts: [[roarA, 1], [roarB, 0.8]], v: 0 },
+      groan: { parts: [[gr1, 1], [gr2, 0.6]], v: 0, flt: [], src: [gr1.s, gr2.s] },
+      appl: { parts: [[ap, 0.75], ], v: 0 },
     };
     // 루프 샘플이 들어오면 합성 층을 그걸로 교체
     const swap = (name, key) => {
@@ -185,7 +216,7 @@ export class Crowd {
     this.set('roar', this.rest('roar'), 0.12);
     if (!this.shot('crowd_groan', a)) {
       const t = E.ctx.currentTime;
-      for (const f of this.L.groan.flt) { f.frequency.cancelScheduledValues(t); f.frequency.setValueAtTime(850, t); f.frequency.exponentialRampToValueAtTime(380, t + 1.4); }
+      for (const sr of this.L.groan.src) { const r = sr.playbackRate; r.cancelScheduledValues(t); r.setValueAtTime(0.95, t); r.exponentialRampToValueAtTime(0.7, t + 1.4); } // '아~' 내려가는 탄식
       this.env('groan', a * 0.9 * this.prof.react, 0.12, 0.5, 1.2);
     }
     this.env('appl', a * 0.25, 1.0, 0.8, 1.2); // 탄식 뒤 박수 조금 (잘 잡았다)
@@ -198,7 +229,7 @@ export class Crowd {
     this.set('roar', this.rest('roar'), 0.3);
     if (!this.shot('crowd_ooh', a)) {
       const t = E.ctx.currentTime;
-      for (const f of this.L.groan.flt) { f.frequency.cancelScheduledValues(t); f.frequency.setValueAtTime(420, t); f.frequency.linearRampToValueAtTime(820, t + 0.45); f.frequency.exponentialRampToValueAtTime(480, t + 1.3); }
+      for (const sr of this.L.groan.src) { const r = sr.playbackRate; r.cancelScheduledValues(t); r.setValueAtTime(0.8, t); r.linearRampToValueAtTime(1.0, t + 0.45); r.exponentialRampToValueAtTime(0.78, t + 1.3); } // '오~' 올라갔다 내려감
       this.env('groan', a * 0.8 * this.prof.react, 0.2, 0.4, 0.9);
     }
     this.set('bed', this.rest('bed'), 0.5);

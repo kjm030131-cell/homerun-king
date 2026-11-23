@@ -1,6 +1,6 @@
 // audio/synth.js — 효과음 레시피. 샘플 슬롯에 파일이 있으면 그걸, 없으면 합성음.
 // 모든 함수는 (데이터) → 소리. 위치(x,z)를 주면 거리감·좌우가 붙는다.
-import { voice, nz, osc, modal, buf, place } from './engine.js';
+import { voice, nz, osc, modal, buf, place, duck, E } from './engine.js';
 import { sample } from './samples.js';
 
 const clamp = (v, a, b) => Math.max(a, Math.min(b, v));
@@ -26,6 +26,52 @@ export function batKind(q, ev, o = {}) {
   if (q >= 0.85 || (ev >= 168 && q >= 0.65)) return 'barrel';
   return 'solid';
 }
+// ── [sound 11-23] 나무 배트 타격음을 파형으로 미리 만들어 둔다 (예전: 사인파 몇 개 → 장난감 같은 '띵') ──
+// 실제 나무 배트 '딱': ① 1~2ms 넓은 대역 충격(공-배트 접촉) ② 1.2~5kHz 대역 나무 부분음이 20~60ms 안에 급히 꺼짐
+// ③ 공이 찌그러졌다 펴지는 저음 '퍽'(80~140Hz, 30~50ms) ④ 배트 휨 진동(150~200Hz, 정타일수록 짧고 먹히면 길게 '징')
+// 마지막에 tanh 로 살짝 포화시켜 귀에 꽂히는 압(타격감)을 만든다. 종류마다 변형 3개를 돌려 써서 매번 똑같지 않게.
+const BAT = {
+  //        충격 대역(Hz)  충격ms  부분음 [주파수, 감쇠ms, 세기]                                         퍽(Hz,ms,세기)   휨(Hz,ms,세기)   포화
+  barrel: { hp: 1400, imp: 1.6, modes: [[2150, 26, 1.0], [3050, 16, 0.7], [1380, 38, 0.75], [4600, 9, 0.45], [820, 55, 0.45], [5900, 6, 0.3]], thump: [105, 42, 0.9], bend: [178, 70, 0.22], drive: 2.6, gain: 1.0 },
+  solid: { hp: 1200, imp: 1.4, modes: [[1950, 24, 1.0], [2850, 15, 0.6], [1250, 34, 0.7], [4200, 8, 0.35], [760, 48, 0.4]], thump: [110, 38, 0.75], bend: [172, 80, 0.25], drive: 2.2, gain: 0.85 },
+  weak: { hp: 800, imp: 1.2, modes: [[1150, 22, 0.9], [1750, 14, 0.5], [620, 30, 0.6], [2600, 8, 0.25]], thump: [120, 40, 0.8], bend: [160, 110, 0.35], drive: 1.8, gain: 0.7 },
+  jam: { hp: 400, imp: 1.0, modes: [[520, 26, 0.8], [880, 16, 0.45], [1350, 9, 0.25]], thump: [95, 55, 1.0], bend: [140, 260, 0.6], drive: 1.6, gain: 0.7 },
+  tip: { hp: 2500, imp: 0.7, modes: [[3300, 8, 0.6], [4600, 5, 0.35]], thump: [0, 0, 0], bend: [0, 0, 0], drive: 1.2, gain: 0.45 },
+  bunt: { hp: 900, imp: 0.9, modes: [[1050, 14, 0.7], [1700, 9, 0.35]], thump: [140, 30, 0.6], bend: [0, 0, 0], drive: 1.3, gain: 0.5 },
+};
+const batBank = new Map();
+function mkBat(a, k) {
+  const P = BAT[k], sr = a.sampleRate, len = (sr * 0.32) | 0, b = a.createBuffer(1, len, sr), d = b.getChannelData(0);
+  const W = E.noise.getChannelData(0); let o = (Math.random() * (W.length - len)) | 0;
+  // ① 충격: 하이패스한 잡음 펄스 + 단일 샘플 클릭
+  const impN = (P.imp / 1000 * sr) | 0, hc = Math.exp(-2 * Math.PI * P.hp / sr); let lp = 0;
+  for (let i = 0; i < impN; i++) { const w = W[o + i]; lp = lp * hc + w * (1 - hc); const env = Math.exp(-i / (impN * 0.35)); d[i] += (w - lp) * env * 1.4; }
+  d[0] += 0.9; d[1] -= 0.5;
+  // ② 나무 부분음: 매번 ±3% 흔들고 위상 무작위
+  for (const [f0, ms, g] of P.modes) {
+    const f = f0 * (0.97 + Math.random() * 0.06), w = 2 * Math.PI * f / sr, dk = Math.exp(-1 / (ms / 1000 * sr)), ph = Math.random() * 6.28;
+    let e = g; for (let i = 0; i < len && e > 1e-4; i++) { d[i] += Math.sin(w * i + ph) * e; e *= dk; }
+  }
+  // ③ 공 찌그러짐 '퍽' (빠르게 피치가 내려가는 저음)
+  if (P.thump[0]) { const [f, ms, g] = P.thump, n = (ms / 1000 * sr * 3) | 0; let ph = 0;
+    for (let i = 0; i < n && i < len; i++) { const t = i / sr, ff = f * (1.6 - 0.6 * Math.min(1, t / (ms / 1000))); ph += 2 * Math.PI * ff / sr; d[i] += Math.sin(ph) * g * Math.exp(-t / (ms / 1000)) * Math.min(1, i / (sr * 0.0015)); } }
+  // ④ 배트 휨 진동 (먹힌 타구는 길게 '징')
+  if (P.bend[0]) { const [f, ms, g] = P.bend, w = 2 * Math.PI * f / sr, dk = Math.exp(-1 / (ms / 1000 * sr)); let e = g;
+    for (let i = 0; i < len && e > 1e-4; i++) { d[i] += Math.sin(w * i) * e * Math.min(1, i / (sr * 0.004)); e *= dk; } }
+  // 짧은 나무 '사각' 질감(대역 잡음 꼬리)
+  let bp1 = 0, bp2 = 0; const fc = P.modes[0][0], r = Math.exp(-Math.PI * fc * 0.6 / sr), c = 2 * r * Math.cos(2 * Math.PI * fc / sr);
+  for (let i = 0; i < (sr * 0.05) | 0; i++) { const y = W[o + 4000 + i] * (1 - r) + c * bp1 - r * r * bp2; bp2 = bp1; bp1 = y; d[i] += y * 0.9 * Math.exp(-i / (sr * 0.012)); }
+  // 포화 + 정규화
+  let pk = 0; for (let i = 0; i < len; i++) { d[i] = Math.tanh(d[i] * P.drive); pk = Math.max(pk, Math.abs(d[i])); }
+  const nrm = 0.95 / (pk || 1); for (let i = 0; i < len; i++) d[i] *= nrm;
+  return b;
+}
+function batBuf(a, k) {
+  let l = batBank.get(k); if (!l) { l = [0, 1, 2].map(() => mkBat(a, k)); batBank.set(k, l); }
+  return l[(Math.random() * l.length) | 0];
+}
+export function warmBat(a) { if (!E.noise) return; for (const k in BAT) batBuf(a, k); } // 오디오 켤 때 미리 (첫 타격 끊김 방지)
+
 /** @param d {q, ev?, la?, mode?, bunt?, foul?, kmh?} @param prof 리얼/캐주얼 톤 */
 export function bat(d, prof = {}) {
   const q = clamp(d.q ?? 0.6, 0, 1), mode = d.mode || 'contact';
@@ -34,55 +80,26 @@ export function bat(d, prof = {}) {
   const b = clamp((ev - 90) / 90, 0, 1) * 0.6 + q * 0.4; // 밝기·세기
   const pl = place(0, 0.3, 1);
   const big = kind === 'barrel';
-  const v = voice({ prio: 9, dur: big ? 1.6 : 0.9, pan: pl.pan * 0.4, dist: pl.dist * 0.3, wet: big ? 0.34 : 0.2, gain: 1 });
+  const v = voice({ prio: 9, dur: big ? 1.6 : 0.9, pan: pl.pan * 0.3, dist: pl.dist * 0.25, wet: big ? 0.26 : 0.16, gain: 1 });
   if (!v) return kind;
+  if (kind !== 'tip' && kind !== 'bunt') duck('crowd', big ? 0.35 : 0.55, big ? 0.5 : 0.3);
   if (trySample(v, 'bat_' + kind, { rate: 0.97 + Math.random() * 0.06 + (b - 0.5) * 0.06, gain: 0.65 + 0.55 * b })) { echo(kind, b, true); return kind; }
-  if (kind === 'barrel' || kind === 'solid') {
-    const k = 0.92 + 0.16 * b;
-    nz(v, { type: 'highpass', f: 3500, dur: 0.006, gain: 0.5 + 0.6 * b });                                   // 접촉 순간 '틱'
-    nz(v, { f: 1600 + 1600 * b, q: 2.5 + 4 * b, dur: 0.05 + 0.05 * b, gain: 1.1 + 0.6 * b });                  // '따악' 몸통
-    modal(v, [[720 * k, 0.07 + 0.08 * q, 0.3], [1580 * k, 0.05 + 0.05 * q, 0.24], [2700 * k, 0.035 + 0.03 * q, 0.18], [4100 * k, 0.02, 0.1]]); // 나무 공명
-    osc(v, { f: 150, f2: 65, dur: 0.1, gain: 0.5 * q });                                                       // 손에 오는 묵직함
-    if (big) {
-      osc(v, { f: 62, f2: 36, dur: 0.28, gain: 0.5 });                                                         // 저음 쿵
-      nz(v, { buf: 'pink', type: 'lowpass', f: 1000, dur: 0.25, gain: 0.3 });
-      modal(v, [[2350 * k, 0.2, 0.08]]);                                                                       // 맑게 남는 '잉'
-      if (prof.casual) osc(v, { type: 'triangle', f: 1320, dur: 0.3, gain: 0.1, t: 0.01 });
-    }
-  } else if (kind === 'weak') {
-    nz(v, { type: 'highpass', f: 2500, dur: 0.004, gain: 0.45 });
-    nz(v, { f: 900 + 300 * b, q: 2, dur: 0.06, gain: 0.95 });
-    modal(v, [[480, 0.05, 0.28], [1100, 0.035, 0.18], [1900, 0.02, 0.09]]);
-    osc(v, { f: 130, f2: 80, dur: 0.08, gain: 0.32 });
-    nz(v, { type: 'lowpass', f: 600, dur: 0.08, gain: 0.45 });
-  } else if (kind === 'jam') {
-    nz(v, { type: 'lowpass', f: 520, dur: 0.09, gain: 0.95 });                                                 // '퍽' 둔탁
-    osc(v, { type: 'triangle', f: 210, f2: 150, dur: 0.06, gain: 0.3 });
-    osc(v, { type: 'triangle', f: 92, f2: 80, dur: 0.26, gain: 0.13 });                                        // 손 울리는 '징'
-    modal(v, [[350, 0.04, 0.22], [820, 0.03, 0.1]]);
-  } else if (kind === 'tip') {
-    nz(v, { type: 'highpass', f: 3000, dur: 0.012, gain: 0.7 });                                               // 스치는 '틱'
-    osc(v, { f: 3200, f2: 2600, dur: 0.02, gain: 0.1 });
-    nz(v, { f: 2200, q: 1.5, dur: 0.03, gain: 0.4 });
-    nz(v, { f: 1500, f2: 4000, q: 1, dur: 0.08, t: 0.01, gain: 0.14 });                                        // 뒤로 튀는 바람소리
-  } else { // bunt
-    modal(v, [[900, 0.03, 0.3], [1750, 0.02, 0.14]]);
-    nz(v, { type: 'lowpass', f: 1400, dur: 0.04, gain: 0.6 });
-    osc(v, { f: 180, f2: 120, dur: 0.05, gain: 0.24 });
-  }
-  echo(kind, b, false);
+  // 세게 맞을수록 살짝 높고 크게 (rate 0.96~1.06)
+  buf(v, batBuf(v.a, kind), { rate: 0.96 + 0.1 * b + (Math.random() - 0.5) * 0.03, gain: BAT[kind].gain * (0.75 + 0.35 * b) });
+  if (big) { osc(v, { f: 58, f2: 38, dur: 0.22, gain: 0.35 }); if (prof.casual) osc(v, { type: 'triangle', f: 1320, dur: 0.25, gain: 0.05, t: 0.01 }); } // 홈런성: 가슴 울리는 저음
+  echo(kind, b, false, v.a);
   return kind;
 }
 // 관중석에서 되돌아오는 메아리 (정타일수록 크고 두 번)
-function echo(kind, b, smp) {
+function echo(kind, b, smp, a) {
   if (kind !== 'barrel' && kind !== 'solid') return;
   const n = kind === 'barrel' ? 2 : 1;
   for (let i = 0; i < n; i++) {
-    const v = voice({ prio: 3, dur: 0.4, dist: 70 + i * 40, wet: 0.5, pan: i ? -0.5 : 0.45, delay: 0.01, gain: (kind === 'barrel' ? 0.5 : 0.28) * (i ? 0.55 : 1) * (0.6 + 0.4 * b) });
+    // 관중석·외야 담장에서 0.2~0.45초 뒤 돌아오는 '딱' (구장 크기 체감의 핵심)
+    const v = voice({ prio: 3, dur: 0.5, dist: 75 + i * 45, wet: 0.6, pan: i ? -0.55 : 0.5, delay: 0.02, gain: (kind === 'barrel' ? 0.42 : 0.24) * (i ? 0.55 : 1) * (0.6 + 0.4 * b) });
     if (!v) return;
     if (smp && trySample(v, 'bat_' + kind, { gain: 0.6, lp: 2500, dur: 0.3 })) continue;
-    nz(v, { f: 1500 + 800 * b, q: 2.5, dur: 0.08, gain: 0.9 });
-    modal(v, [[720, 0.06, 0.18], [1580, 0.04, 0.12]]);
+    buf(v, batBuf(v.a, kind), { gain: 0.7, lp: 2600 - i * 600 });
   }
 }
 
@@ -182,6 +199,7 @@ export function ump(kind, d = {}) {
   const pl = place(d.x ?? 0, d.z ?? -1, 1.7);
   const v = voice({ group: 'sfx', prio: 7, dur: 1.3, pan: pl.pan, dist: pl.dist * 0.6, wet: 0.3, key: 'ump', gap: 0.25, gain: d.big ? 1.1 : 0.9 });
   if (!v) return;
+  duck('crowd', 0.6, 0.6);
   if (trySample(v, 'ump_' + kind, { rate: rnd(0.97, 1.03) })) return;
   const g = 0.32 * (d.big ? 1.2 : 1);
   if (kind === 'strike' || kind === 'strike3') {
