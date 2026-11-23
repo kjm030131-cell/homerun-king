@@ -99,7 +99,40 @@
 - main.js [motion]: 맞힌 순간 타자가 주자로 바뀌어 스윙이 컨택 프레임에서 끊기던 것 → 0.34초 팔로스루까지 타자 표시, 그동안 홈의 주자·떨어진 배트 숨김.
 - 메모리: 원본 애니메이션(e.src)은 `?animlab` 에서만 보관 → 게임 클립 메모리 약 절반. 프레임 비용 같음(game-real 90초 seed 5: 렌더 끔 0.78→0.71ms, 렌더 1.24→1.18ms/프레임, main 대비).
 - 확인 도구: `node tools/qa/clipsheet.mjs <클립> [--marks] [--view=top|front|side|back]` (클립 한 장 보기, 축 표시) · `node tools/qa/motionshots.mjs` (CPU 경기 돌리며 상황별 장면 → `tools/qa/.out/motion-*.png`).
-- 남은 것: 세이프 콜 클립 없음(umpireSafe → 대기), catchHigh/catchLow 없음(IK), 이닝 교대 때 수비 팀이 뛰어 들어가는 동작 없음.
+- ~~남은 것: 세이프 콜 클립 없음, catchHigh/catchLow 없음, 이닝 교대 뛰기 없음~~ → 11-23 [motion2] (아래 절).
+
+### 11-23 [motion2] 빠진 동작 보충 — 절차적 클립 + 이닝 교대 뛰기 (FBX 없이)
+| 동작 | 전 | 후 | 방법 |
+|---|---|---|---|
+| 세이프 콜(루심·주심) | 대기 자세(클립 없음) | **umpireSafe**: 0.16s 가슴 앞 팔 교차(살짝 숙임) → 0.36s 양팔 수평 쫙 → 1.05s 유지 → 1.5s 내림 | (b) 절차적: idle 첫 자세 + 팔 뼈 방향 키프레임 |
+| 높은 공 포구 | ready + 글러브 IK | **catchHigh**: 0.27s 글러브 머리 위 앞·오른손이 덮음 → 0.6s 가슴으로. 공이 1.75m 넘게 다가오면(4.2m 안, 3.5m/s 미만) 거리만큼 올리고 잡은 뒤 0.5초 내림. 점프 캐치(jumpK)도 이 클립 | (b) + (c) 손 IK 가 공 쪽으로 다듬음 |
+| 땅볼 포구 | ready(안 숙임) + 0.5초 진행 | **catchLow**: 0.3s 엉덩이 −0.33m·허리 50°·글러브 바닥 앞(오른손 덮음) → 0.6s 반쯤 일어나 배꼽. 다가오는 공 거리로 숙임(3.8m→0.6m) | (b) 절차적: 발 고정 다리 2본 IK + 허리·팔 방향 |
+| 이닝 교대 | 공수 바뀌는 순간 9명 순간이동 | 나가는 수비 = 자기 덕아웃 앞(홈 3루 쪽 / 원정 1루 쪽)으로 조깅(6.8m/s, 도착 또는 5초에 치움), 들어오는 수비 = 덕아웃 쪽 최대 24m 에서 자기 자리로 조깅(≤3.5초) | main.js `leavers`·`A.entry` (화면만) |
+
+- `client/anim/procedural.js`: 받은 클립(idle/ready) 첫 프레임 자세를 probe 몸에 입히고 → 뼈를 '월드 방향으로 겨누기'(팔·몸통), 발 고정 2본 IK(다리, 무릎 앞·바깥) → 키프레임 몇 개를 QuaternionKeyframeTrack 클립으로. 로더가 뒤에서 받는 클립을 다 받은 뒤 **파일이 없는 것만** 만듦(진짜 FBX 를 넣으면 자동으로 그게 우선). 만드는 데 클립당 수 ms, 프레임 비용 0(일반 클립과 같음). 캐릭터 몸 비율이 바뀌어도 같은 방향으로 다시 계산됨.
+- 템포: 이닝 교대 뛰기는 sim 시간을 안 건드림(startHalf 결과 대기 2.76초 + 투구 대기 그대로) → 첫 투구 시각 그대로. 들어오는 수비는 최대 3.5초면 자리(CPU 첫 와인드업 ≥4.2초, 사람 투수 ≥3.9초 — 그 전에 투구하면 바로 자리로).
+- 확인: `node tools/qa/clipsheet.mjs umpireSafe --view=front --role=ump`, `catchLow catchHigh --view=side --role=fielder` → `tools/qa/.out/clip-*.png` / 경기 장면 `node tools/qa/motionshots.mjs --only=next-safe,next-catch,next-inning` → `next-*.png`.
+
+#### 나중에 받으면 좋은 Mixamo (받으면 절차적 대신 자동으로 그걸 씀)
+공통: FBX Binary · **Without Skin** · 30fps · Keyframe Reduction none · In Place 보이면 체크. `assets-src/mixamo/<파일>.fbx` 로 저장 → `assets-src/mixamo/clips.json` 에 `"<클립>": { "src": "<파일>.fbx", "trim": [시작, 끝] }` 한 줄('clips' 안, 타자 클립이면 `"yaw": 90`) → `python3 tools/mixamo-retarget.py <클립>` → `public/assets/models/anim/<클립>.glb` 생김 → 끝(로더가 파일 있으면 절차적 클립을 안 만듦). `node tools/qa/clipsheet.mjs <클립>` 으로 한 장 보고 trim·yaw 조정.
+
+| 클립 | Mixamo 검색 1순위 | 대안 | 메모 |
+|---|---|---|---|
+| `umpireSafe` | **Baseball Umpire** 의 safe 변형(미리보기에서 팔 벌리는 것) | Safe, Arms Out, "Incredulous" 앞부분 | 팔 교차 → 양옆. 1~1.5초면 충분 |
+| `catchHigh` | **Goalkeeper Catch** | Jump Catch, Catching | 머리 위에서 잡고 가슴으로. 점프 캐치에도 씀 |
+| `catchLow` | **Goalkeeper Scoop** | Pick Up, Picking Up | 무릎 굽혀 땅볼 → 일어나기. `kmap` catch = 왼손 최저점(자동) |
+| `throw` | **Baseball Pitching** 말고 **Throw** | Goalkeeper Overhand Throw, Throwing | 야수 송구(지금은 투구 동작 잘라 씀) |
+| `run` | **Running** (In Place) | Jog Forward | 지금은 Fast_Run 임시 — 이닝 교대 조깅·트롯이 더 자연스러워짐 |
+| (선택) `jogOut` | **Jogging** (In Place) | Slow Jog | 이닝 교대용(넣으면 `clips.js` 에 `jogOut: { loop: true, lockXZ: true, speed: 3, optional: true, fallback: 'run' }` 추가 후 actor `_loco` 에서 6.8m/s 미만에 사용) |
+| (선택) `highFive` | **High Five** | Clapping | 홈런 뒤 홈 옆 하이파이브(지금은 손 IK) |
+
+### 11-23 [lefty] 좌타자 화면
+- 타석: 루트 x = 0.95·h, 방향 ry = −90°·h (main.js). 카메라는 타자 x 부호로 자동 미러(camera.js `side()` 그대로 — 확인함).
+- 클립: `procedural.js mirrorName` — 타자 클립 11개(batStance·2·3, swing·powerSwing·swing2, buntStance, batStepIn/WalkIn/WalkOut, batStrike)를 처음 쓸 때 '<이름>_L' 로 거울(30fps 샘플, 바인드 대비 월드 회전 차이를 짝 뼈에 (x,−y,−z,w)로, 엉덩이 x 반전). 마커·kmap 그대로라 스윙 컨택 = swingK 0.5 동일. ClipAnimator `_m(이름)`.
+- 배트: 같은 배트를 캐릭터 공간 x 거울로 왼손 뼈에(`CharPlayer.batL`), `setHand(h)` 로 바꿈. 헬멧: 내용을 거울 그룹에 넣어 좌타면 x −1 → 귀가리개 오른쪽 귀(투수 쪽).
+- 옛 몸(?legacy)은 루트 x 배율 −1(통째 거울, 등번호 글씨도 뒤집힘 — 대체 경로라 그대로).
+- 주자로 나간 뒤 헬멧은 우타 모양(주자 스냅샷에 타석 정보 없음).
+- 확인: `node tools/qa/motionshots.mjs --only=next-lefty` → `next-lefty-stance|catcher|swing-*.png`.
 
 ## 1. 구조
 

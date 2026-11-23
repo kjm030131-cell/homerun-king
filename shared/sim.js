@@ -15,6 +15,8 @@ export const WALL_H = 2.6;
 export const RUN_SPEED = 7.2; // 평균 주루 속도(예측·도루용)
 export const RUN_TOP = 8.0; // 최고 속도: 정지 상태에서 ~1초 가속 → 타자 1루 도달 ~4.3초 (실제 MLB 평균)
 export const TROT_SPEED = 6.5;
+// [trot] 홈런 트롯: 마지막 주자(타자)가 HR_ARRIVE 초 안에 홈에 오게 주자마다 속도를 정함(5.2~9.2m/s) → 결과 시간 = 도착 + HR_GREET(하이파이브), 8~11.2초
+export const HR_ARRIVE = 9.6, HR_GREET = 1.3;
 export const FIELD_SPEED = 6.7; // CPU 수비수 실효 이동 속도(판단·경로 손실 포함)
 export const SPRINT_SPEED = 8.9;
 export const THROW_SPEED = 31;
@@ -162,8 +164,9 @@ export const HIT_SLOW = [1.14, 1.06, 1.0];
 export let LIFT_H = { contact: 12, power: 21 }, LIFT_SLOPE_H = 34, LIFT_NOISE_H = 8, SWEET_H = 15;
 export function setLift(o) { if (o.lift) LIFT_H = o.lift; if (o.slope) LIFT_SLOPE_H = o.slope; if (o.noise) LIFT_NOISE_H = o.noise; if (o.sweet) SWEET_H = o.sweet; }
 // human: 사람 타자 보정 켜기, hq/pull: 모드별(RULES) 맞힌 공 질 보정·스윗스팟 모으기
-export function evalSwing(mode, dt, ax, ay, pitchV = 40, ease = 1, human = false, hq = 0.85, pull = 0.35) {
-  if (human && mode !== 'bunt') return evalPCI(mode, dt, ax, ay, pitchV, ease, hq, pull);
+// [lefty] hand: 1 = 우타, -1 = 좌타 — 판정(맞힘·질·발사각)은 좌우 대칭이라 그대로, 방향(spray)만 좌우 반전(가로 오차 ax 도 반전해서 넣음)
+export function evalSwing(mode, dt, ax, ay, pitchV = 40, ease = 1, human = false, hq = 0.85, pull = 0.35, hand = 1) {
+  if (human && mode !== 'bunt') return evalPCI(mode, dt, ax, ay, pitchV, ease, hq, pull, hand);
   const M0 = SWING[mode] || SWING.contact;
   const M = ease === 1 ? M0 : { ...M0, W: M0.W * ease, R: M0.R * ease };
   const d = Math.hypot(ax, ay);
@@ -180,14 +183,15 @@ export function evalSwing(mode, dt, ax, ay, pitchV = 40, ease = 1, human = false
   let q = Math.pow(qt, 0.5) * Math.pow(qa, 0.6);
   if (human) q = 1 - (1 - q) * hq; // 사람 타자: 맞힌 공의 질을 조금 후하게 (같은 실수라도 타구가 덜 죽음)
   if (q < 0.2 || (qt < 0.3 && Math.random() < 0.6)) return { v: rand(14, 24), launch: rand(25, 70), spray: (Math.random() < 0.5 ? -1 : 1) * rand(60, 125), q, foul: true };
+  const hx = ax * hand; // [lefty]
   // [11-22] CPU 타자 파울: 실제 메이저는 배트에 맞은 공의 절반 가까이가 파울(뒤로 튀는 공·라인 밖으로 휘는 공). 예전엔 13%라 카운트 싸움이 없었음
   if (!human && Math.random() < 0.3 + 0.35 * (1 - qt)) {
     const back = Math.random() < 0.45; // 뒤(백네트)로 / 라인 밖으로
     return back ? { v: rand(18, 34), launch: rand(15, 60), spray: (Math.random() < 0.5 ? -1 : 1) * rand(100, 170), q, foul: true }
-      : { v: rand(24, 42), launch: rand(-5, 45), spray: (dt < 0 ? 1 : -1) * rand(47, 80), q, foul: true };
+      : { v: rand(24, 42), launch: rand(-5, 45), spray: hand * (dt < 0 ? 1 : -1) * rand(47, 80), q, foul: true };
   }
   // 배트 끝/손잡이에 맞으면 빗맞은 타구
-  if (qa < 0.3 && Math.random() < (human ? 0.55 : 0.7)) return { v: rand(18, 30), launch: ay > 0 ? rand(-20, 5) : human ? rand(18, 55) : rand(45, 75), spray: clamp(-(dt / M.W) * 40 + gauss() * 12, -78, 78), q: q * 0.5 };
+  if (qa < 0.3 && Math.random() < (human ? 0.55 : 0.7)) return { v: rand(18, 30), launch: ay > 0 ? rand(-20, 5) : human ? rand(18, 55) : rand(45, 75), spray: hand * clamp(-(dt / M.W) * 40 + gauss() * 12, -78, 78), q: q * 0.5 };
   // 타구 속도: 메이저리그 인플레이 타구 분포(중앙값 ~146km/h, 상위10% ~167km/h, 최고 ~190km/h)에 맞춤
   const v = (31.5 + 20.2 * q) * M.pow + 0.18 * (pitchV - 35) + rand(-1.2, 1.2);
   // 발사각: 배트 원 중심이 공보다 아래(ay<0)면 공 아랫면을 때려 뜸, 위(ay>0)면 윗면을 때려 땅볼.
@@ -196,7 +200,7 @@ export function evalSwing(mode, dt, ax, ay, pitchV = 40, ease = 1, human = false
   let launch = clamp(lift - (ay / M.R) * (human ? LIFT_SLOPE_H : 42) + gauss() * (human ? LIFT_NOISE_H : 6), -25, 70);
   // 사람 타자: 잘 맞힌 공(q>0.55)은 '스윗스팟' 쪽으로 살짝 모아줌
   if (human && q > 0.55) launch += (SWEET_H - launch) * Math.min(pull, (q - 0.55) * 0.9);
-  const spray = clamp(-(dt / M.W) * 52 - (ax / M.R) * 20 + 5 + gauss() * 12, -78, 78); // 우타자: 빠르면 당겨서 좌측(+x)
+  const spray = hand * clamp(-(dt / M.W) * 52 - (hx / M.R) * 20 + 5 + gauss() * 12, -78, 78); // 우타자: 빠르면 당겨서 좌측(+x) · [lefty] 좌타자는 우측(-x)
   return { v, launch, spray, q };
 }
 
@@ -232,22 +236,22 @@ export function pciQ(mode, dt, J, ease = 1) {
   const tq = Math.max(0, 1 - Math.abs(dt) / W);
   return Math.pow(tq, PCI.qT) * (1 - PCI.qN * J.n * J.n);
 }
-export function evalPCI(mode, dt, ax, ay, pitchV = 40, ease = 1, hq = 0.85, pull = 0.35) {
+export function evalPCI(mode, dt, ax, ay, pitchV = 40, ease = 1, hq = 0.85, pull = 0.35, hand = 1) {
   const J = pciJudge(mode, dt, ax, ay, ease);
   if (!J.contact) return null;
   const P = PCI[mode] || PCI.contact;
   let q = pciQ(mode, dt, J, ease);
-  q = 1 - (1 - q) * hq; // 모드별 후하게 (같은 실수라도 타구가 덜 죽음)
+  q = Math.max(0, 1 - (1 - q) * hq); // 모드별 보정: hq<1 후하게(같은 실수라도 타구가 덜 죽음), hq>1 빗맞은 공이 더 약하게 (11-23 난이도)
   // 파울: 타이밍 끝자락이거나 커서 가장자리에 걸치면 자주 파울 (실제처럼 2스트라이크 이후 버티기)
   const pf = (J.tq < 0.25 ? 0.55 * (1 - J.tq / 0.25) : 0) + (J.n > 0.8 ? 0.5 * (J.n - 0.8) / 0.2 : 0) + 0.12;
-  if (Math.random() < pf) return { v: rand(14, 26), launch: rand(20, 70), spray: (dt < 0 ? 1 : -1) * rand(55, 125), q: q * 0.5, foul: true };
+  if (Math.random() < pf) return { v: rand(14, 26), launch: rand(20, 70), spray: hand * (dt < 0 ? 1 : -1) * rand(55, 125), q: q * 0.5, foul: true };
   // 커서 맨 가장자리(손잡이·배트 끝): 빗맞은 약한 타구
-  if (J.n > 0.88 && Math.random() < 0.5) return { v: rand(19, 31), launch: J.ny > 0 ? rand(-18, 4) : rand(25, 58), spray: clamp(-(dt / J.W) * 40 + gauss() * 12, -78, 78), q: q * 0.5 };
+  if (J.n > 0.88 && Math.random() < 0.5) return { v: rand(19, 31), launch: J.ny > 0 ? rand(-18, 4) : rand(25, 58), spray: hand * clamp(-(dt / J.W) * 40 + gauss() * 12, -78, 78), q: q * 0.5 };
   const v = (31.5 + 20.2 * q) * P.pow + 0.18 * (pitchV - 35) + rand(-1.2, 1.2);
   // 발사각: 커서 중심 = LIFT_H(정타 12°·강타 21°), 공이 커서 위쪽(ny<0)일수록 뜸, 아래쪽일수록 땅볼 (11-19 '뜬공 기준 명확' 피드백 값 그대로)
   let launch = clamp((LIFT_H[mode] ?? 12) - J.ny * LIFT_SLOPE_H + gauss() * LIFT_NOISE_H, -25, 70);
   if (q > 0.55) launch += (SWEET_H - launch) * Math.min(pull, (q - 0.55) * 0.9); // 정타는 스윗스팟 쪽으로 살짝 모음
-  const spray = clamp(-(dt / J.W) * 46 - J.nx * 10 + 4 + gauss() * 10, -78, 78); // 빠르면 당겨서 좌측(+x)
+  const spray = hand * clamp(-(dt / J.W) * 46 - J.nx * hand * 10 + 4 + gauss() * 10, -78, 78); // 빠르면 당겨서 좌측(+x) · [lefty] 좌타자는 거울(당겨서 우측)
   return { v, launch, spray, q };
 }
 // 타구 초기 상태 (속도 + 스핀)
@@ -417,6 +421,12 @@ export function runnerXZ(b) {
   return [a[0] + (c[0] - a[0]) * f, a[1] + (c[1] - a[1]) * f];
 }
 
+// [lefty] 타석: 'R' 우타 · 'L' 좌타 · 'S' 스위치(투수 반대쪽 — 투수는 전부 우투라 좌타석). 반환 1 = 우타(+x 쪽에 섬), -1 = 좌타
+export const PITCHER_HAND = 1;
+export function handOf(bats) { return bats === 'L' ? -1 : bats === 'S' ? -PITCHER_HAND : 1; }
+// CPU 타자: 구단·타순으로 정해진 좌/우/스위치(같은 경기 내내 같음, 서버·혼자하기 같은 값). 약 30% 좌타 · 7% 스위치 (MLB 좌타 ~28%, 스위치 ~4%)
+export function cpuBats(club, team, slot) { const k = ((club | 0) * 7 + slot * 5 + (team === 'home' ? 3 : 0)) % 14; return k < 4 ? 'L' : k === 4 ? 'S' : 'R'; }
+
 export const DEFAULT_SETTINGS = {
   name: '', mode: 'game', innings: 3, derbyOuts: 10, diff: 1, max: 12, pub: true, teams: ['서울 나이츠', '부산 하버스'],
   size: 0, // 팀당 인원 제한 (0=자유, 1·2·3 = 1:1·2:2·3:3)
@@ -473,7 +483,7 @@ export class Game {
     const cap = this.teamCap();
     let team = this.phase !== 'lobby' ? 'spec' : cnt.away <= cnt.home ? 'away' : 'home';
     if (team !== 'spec' && cnt[team] >= cap) team = cnt.away < cap ? 'away' : cnt.home < cap ? 'home' : 'spec';
-    this.players.set(id, { id, name: String(name || '선수').slice(0, 12), team, order: this.joinSeq++, ready: false, pos: 'any', bo: 0, ping: 0, conn: true, dcAt: 0 });
+    this.players.set(id, { id, name: String(name || '선수').slice(0, 12), team, order: this.joinSeq++, ready: false, pos: 'any', bo: 0, ping: 0, conn: true, dcAt: 0, bats: 'R' });
     if (!this.hostId) this.hostId = id;
     this.emitLobby();
     if (this.phase !== 'lobby') this.say(`${this.players.get(id).name} 관전 입장`, false);
@@ -553,6 +563,7 @@ export class Game {
       case 'sw': this.onSwitch(id); break;
       case 'ppick': if (this.dy && this.dy.pr && (m.type === 'MIX' || PITCH_KEYS.includes(m.type))) { this.ppick = m.type; this.say(m.type === 'MIX' ? '연습 구종: 섞어서' : `연습 구종: ${PITCHES[m.type].name || m.type}`, false); } break;
       case 'ready': if (inLobby) { p.ready = !!m.on; this.emitLobby(); } break;
+      case 'bats': if (['R', 'L', 'S'].includes(m.v)) p.bats = m.v; break; // [lefty] 좌/우/스위치 — 다음 타석부터
       case 'pos': if (inLobby && (m.pos === 'any' || POS.includes(m.pos))) { p.pos = m.pos; this.emitLobby(); } break;
       case 'name': {
         const n = String(m.name || '').trim().slice(0, 12);
@@ -729,6 +740,7 @@ export class Game {
     } else {
       this.batter = { id: null, name: `CPU ${slot}번`, n, slot };
     }
+    this.batter.h = handOf(this.batter.id ? this.players.get(this.batter.id)?.bats : cpuBats(this.set.clubs ? this.set.clubs[team === 'home' ? 1 : 0] : 0, team, slot)); // [lefty] 1 우타 · -1 좌타 (스냅샷 s.bat.h)
     this.lineIdx[team]++;
     if (this.set.pitRot === 'batter' && this.mode === 'game' && this.fielders.length && n > 1) this.rotatePitcher();
     [this.balls, this.strikes] = this.mode === 'game' ? this.R.startCount : [0, 0];
@@ -958,8 +970,8 @@ export class Game {
       if (r1 && Math.random() < 0.04) { r1.steal = true; this.ev('steal', { rid: r1.rid, from: 1, to: 2, cpu: 1 }); }
     }
     for (const r of this.runners) if (r.steal) { r.target = r.b + 1; r.stealT = t0 - 0.95; }
-    // 몸에 맞는 공 (우타자는 +x 쪽에 섬)
-    this.pitch.hbp = tx > 0.56 && ty > 0.2 && ty < 1.75;
+    // 몸에 맞는 공 (우타자는 +x 쪽, [lefty] 좌타자는 -x 쪽에 섬)
+    this.pitch.hbp = tx * (this.batter.h || 1) > 0.56 && ty > 0.2 && ty < 1.75;
     // CPU 타자 판단
     this.aiSwing = null;
     if (this.batterIsCPU() && !this.pitch.hbp) {
@@ -1032,7 +1044,7 @@ export class Game {
     p.mode = mode;
     p.swingAt = r2(p.arrive + (isFinite(dt) ? clamp(dt, -0.5, 0.5) : 0));
     const R = this.R;
-    const res = evalSwing(mode, dt, ax, ay, p.kmh / 3.6, ease, human, R.humanQ, R.sweetPull);
+    const res = evalSwing(mode, dt, ax, ay, p.kmh / 3.6, ease, human, R.humanQ, R.sweetPull, this.batter.h || 1); // [lefty]
     this.lastPitch = { type: p.type, kmh: p.kmh, id: p.id };
     const dms = isFinite(dt) ? Math.round(clamp(dt, -0.5, 0.5) * 1000) : 0;
     this.ev('swing', { pid: p.id, mode, human: human ? 1 : 0, dt: dms, bid: this.batter.id || null });
@@ -1633,13 +1645,14 @@ export class Game {
     const sc0 = [...this.score];
     const wo = this.half === 1 && this.inning >= this.innings && this.score[1] + n > this.score[0] ? 1 : 0;
     this.ev('hr', { dist, n, walkoff: wo, name: this.batter.name, bid: this.batter.id || null, ev: this.ball.ev, la: this.lastHit ? this.lastHit.la : 0, x: r2(this.ball.x), z: r2(this.ball.z), before: sc0 });
-    for (const r of al) { r.trot = true; r.target = 4; r.manual = 0; this.addRun(r); }
+    let arrive = 0;
+    for (const r of al) { r.trot = true; r.target = 4; r.manual = 0; r.tv = clamp((4 - r.b) * BASE_D / HR_ARRIVE, 5.2, 9.2); arrive = Math.max(arrive, (4 - r.b) * BASE_D / r.tv); this.addRun(r); } // [trot]
     st.rbi += n;
     this.say(`${n >= 4 ? '만루 홈런!!!' : n > 1 ? `${n}점 홈런!` : '솔로 홈런!'} ${dist}m`);
     this.hrEv = { id: ++this.seq, dist, name: this.batter.name, n };
     for (const r of this.runners) delete r.batter;
     this.play = null;
-    this.pause(8.0, this.outs >= 3 ? 'half' : 'next'); // 홈런 리플레이 시간 확보
+    this.pause(clamp(arrive + HR_GREET, 8, 11.2), this.outs >= 3 ? 'half' : 'next'); // [trot] 홈런 리플레이 + 타자가 홈까지 (전: 8초 고정 → 타자가 3루 근처에서 다음 타석으로 사라짐)
   }
 
   call(out, k, x, z) { this.callEv = { id: ++this.seq, out: out ? 1 : 0, k, x: r2(x), z: r2(z) }; }
@@ -1791,7 +1804,7 @@ export class Game {
           if ((r > fenceR(phi) + 1 && b.y < 7) || (Math.abs(phi) > FOUL && r * Math.sin(Math.abs(phi) - FOUL) > 22 && b.y < 4) || b.z < -18 || (b.vy === 0 && Math.hypot(b.vx, b.vz) < 0.2)) b.state = 'dead';
         }
         // 홈런 트롯
-        for (const r of this.runners) if (r.trot && !r.scored) { r.b = Math.min(4, r.b + TROT_SPEED / BASE_D * dt); if (r.b >= 4) r.scored = true; }
+        for (const r of this.runners) if (r.trot && !r.scored) { r.b = Math.min(4, r.b + (r.tv || TROT_SPEED) / BASE_D * dt); if (r.b >= 4) r.scored = true; }
         this.walkBack(dt);
         if (this.now >= this.phaseUntil) this.afterResult();
         break;

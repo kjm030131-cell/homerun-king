@@ -150,7 +150,9 @@ export function runGame({ seed = 1, rules = 'real', innings, fuzz = false, timeL
       if (fuzz) fuzzInput(g, fz, rnd);
       const b0 = g.balls, s0 = g.strikes, o0 = g.outs, sc0 = [...g.score], inn0 = g.inning, half0 = g.half;
       prev.b = b0; prev.s = s0; prev.o = o0;
+      const trotPend = g.phase === 'result' ? g.runners.filter((r) => r.trot && !r.scored) : null; // [trot]
       g.tick(dt);
+      if (trotPend && trotPend.length && g.phase !== 'result' && g.phase !== 'over') { const r = trotPend.find((q) => !q.scored); if (r) flag('홈런 트롯이 홈에 오기 전에 결과 시간이 끝남', `b=${r.b.toFixed(2)}`); }
       if (trace && g.now >= trace[0] && g.now <= trace[1]) { const b = g.ball, t = `${g.phase} ${g.alive().map((r) => `${r.rid}:${r.b.toFixed(1)}>${r.target}${r.forced ? 'F' : ''}${r.batter ? 'B' : ''}${r.mustReturn ? 'M' : ''}`).join(' ')}${b ? ` ball ${b.state} h${b.holder} (${b.x.toFixed(0)},${b.z.toFixed(0)})` : ''} ctrl[${g.fielders.map((f, i) => (f.ctrl ? i + (g.isHumanActive(f) ? '*' : '') : '')).join('')}] ${g.msg}`; if (t !== st.lastT) { st.lastT = t; console.log(g.now.toFixed(2), t); } }
       if (g.phase !== phase) {
         // 국면 전환
@@ -188,7 +190,7 @@ export function runGame({ seed = 1, rules = 'real', innings, fuzz = false, timeL
       // 체력
       for (const s of g.stam.values()) if (!(s.sta >= 0 && s.sta <= 100)) flag('투수 체력 범위 밖', `${s.sta}`);
       // 멈춤
-      const lim = { pitch: 18, pitching: 6, live: 30, result: 10, starting: 5 }[g.phase];
+      const lim = { pitch: 18, pitching: 6, live: 30, result: 12, starting: 5 } /* [trot] 홈런 결과 최대 11.2초 */[g.phase];
       if (lim && g.now - since > lim) { flag(`'${g.phase}' 상태가 ${lim}초 넘게 지속(멈춤)`, g.phase === 'live' ? `ball=${b?.state} holder=${b?.holder}` : ''); since = g.now + 1e6; }
     }
     if (g.phase !== 'over') flag('경기가 안 끝남', `${(g.now / 60).toFixed(0)}분`);

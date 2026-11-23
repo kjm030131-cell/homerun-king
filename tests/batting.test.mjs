@@ -1,7 +1,7 @@
 // 사람 타자 PCI + 타이밍 위주 타격 (docs/rebuild/gameplay.md 5절) · 바운드/경계 (6절)
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { Game, inZone, PCI, pciJudge, evalSwing, integrate, surface, standR, FOUL, WALL_FOUL } from '../shared/sim.js';
+import { Game, inZone, PCI, pciJudge, evalSwing, integrate, surface, standR, FOUL, WALL_FOUL, handOf, cpuBats } from '../shared/sim.js';
 
 // 결정적 난수 (사람 흉내 테스트가 CI에서 운에 따라 깨지지 않게)
 const seeded = (s) => () => { s |= 0; s = (s + 0x6D2B79F5) | 0; let t = Math.imul(s ^ (s >>> 15), 1 | s); t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t; return ((t ^ (t >>> 14)) >>> 0) / 4294967296; };
@@ -41,6 +41,22 @@ test('공이 커서 아래쪽 → 땅볼, 가운데 → 라인드라이브, 위�
   assert.ok(avg(0, PCI.contact.W * 0.6)[1] < -10, '늦으면 밀어서 우측(-)');
 });
 
+// [lefty] 좌타자: 판정은 같고 방향만 거울 — 빠르면 당겨서 우측(-), 늦으면 밀어서 좌측(+). CPU 타자 분포도 반전
+test('좌타자: 당겨치기/밀어치기 방향 반전 + 타석·몸에 맞는 공 쪽 + 스위치는 투수 반대', () => {
+  const avg = (hand, dt, human = true) => { let sp = 0, n = 0; for (let i = 0; i < 800; i++) { const r = evalSwing('contact', dt, 0, 0, 40, 1, human, 1, 0, hand); if (r && !r.foul && !r.bunt) { sp += r.spray; n++; } } return sp / n; };
+  const W = PCI.contact.W;
+  assert.ok(avg(-1, -W * 0.6) < -15, `좌타 빠름 → 우측(-): ${avg(-1, -W * 0.6).toFixed(1)}`);
+  assert.ok(avg(-1, W * 0.6) > 10, `좌타 늦음 → 좌측(+): ${avg(-1, W * 0.6).toFixed(1)}`);
+  assert.ok(avg(-1, -0.03, false) < -5 && avg(1, -0.03, false) > 5, 'CPU 타자도 반전');
+  assert.equal(handOf('R'), 1); assert.equal(handOf('L'), -1); assert.equal(handOf('S'), -1); assert.equal(handOf(undefined), 1);
+  // 경기: 사람 타자 좌타 설정 → s.bat.h = -1, CPU 타자는 구단·타순으로 정해진 값
+  const g = new Game({}); g.addPlayer('me', 'me'); g.players.get('me').team = 'away'; g.applySettings({ innings: 1 });
+  g.handle('me', { t: 'bats', v: 'L' }); g.start();
+  assert.equal(g.batter.id, 'me'); assert.equal(g.snapshot().bat.h, -1);
+  let L = 0; for (let s = 1; s <= 9; s++) if (handOf(cpuBats(3, 'home', s)) < 0) L++;
+  assert.ok(L >= 1 && L <= 5, `CPU 좌타 ${L}/9`);
+});
+
 // 보통 사람 흉내(옛 '초보 흉내' 테스트와 같은 오차): 타이밍 σ 100ms(변화구 ×1.25), 커서 오차 σ 14cm(변화구 세로 ×1.25), 존 안 78%/밖 30% 스윙(2스트 90%/42%), 강타 25%
 function human(rules, games, innings) {
   const gs = (s) => { let u = 0, v = 0; while (!u) u = Math.random(); while (!v) v = Math.random(); return s * Math.sqrt(-2 * Math.log(u)) * Math.cos(2 * Math.PI * v); };
@@ -67,14 +83,17 @@ function human(rules, games, innings) {
   return { avg: h / ab, k: k / pa };
 }
 // [bugs 11-19] 파울 타구가 타석(pa)으로 세지던 버그를 고친 뒤 같은 흉내의 '진짜' 타율: 리얼 .281 → .341, 캐주얼 .354 → .463 (판정 수치는 그대로, 측정만 바로잡음)
-test('보통 사람 흉내: 리얼 타율 .26~.41 · 삼진율 15~29% (파울 타석 버그 수정 후 기준)', () => {
+// [11-23 난이도] humanQ 리얼 1.0→1.3 · 캐주얼 1.0→1.1: 리얼 .32→.28(5시드 .26~.30, 삼진 20~22%) · 캐주얼 .40→.37(.35~.43) — gameplay.md 4-1
+test('보통 사람 흉내: 리얼 타율 .24~.33 · 삼진율 16~27% (11-23 난이도 조정 후)', () => {
   const r = withSeed(21, () => human('real', 24, 9)); // [qa 11-19] 12판은 시드 하나가 삼진율 14%대로 튐(5개 시드 평균 17.6%)
-  assert.ok(r.avg > 0.26 && r.avg < 0.41, `리얼 타율 ${r.avg.toFixed(3)}`);
-  assert.ok(r.k > 0.15 && r.k < 0.29, `리얼 삼진율 ${(r.k * 100).toFixed(1)}%`);
+  console.log(`# 리얼 보통 흉내: 타율 ${r.avg.toFixed(3)} 삼진 ${(r.k * 100).toFixed(1)}%`);
+  assert.ok(r.avg > 0.24 && r.avg < 0.33, `리얼 타율 ${r.avg.toFixed(3)}`);
+  assert.ok(r.k > 0.16 && r.k < 0.27, `리얼 삼진율 ${(r.k * 100).toFixed(1)}%`);
 });
-test('보통 사람 흉내: 캐주얼 타율 .36~.55 (파울 타석 버그 수정 후 기준)', () => {
-  const r = withSeed(22, () => human('casual', 30, 3)) // [11-23] 18→30경기: 표본 작아 시드 흐름만 바뀌어도 .355~.40 흔들림;
-  assert.ok(r.avg > 0.36 && r.avg < 0.55, `캐주얼 타율 ${r.avg.toFixed(3)}`);
+test('보통 사람 흉내: 캐주얼 타율 .31~.45 (11-23 난이도 조정 후)', () => {
+  const r = withSeed(22, () => human('casual', 18, 3));
+  console.log(`# 캐주얼 보통 흉내: 타율 ${r.avg.toFixed(3)} 삼진 ${(r.k * 100).toFixed(1)}%`);
+  assert.ok(r.avg > 0.31 && r.avg < 0.45, `캐주얼 타율 ${r.avg.toFixed(3)}`);
 });
 
 test('지면 재질이 새 경기장 그림과 같음 (내야 흙 = 29m 원 ∩ 파울라인 바깥 1.8m)', () => {

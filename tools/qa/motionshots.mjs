@@ -70,12 +70,19 @@ const STEP = String(function step(arg) {
       const { e, d } = window.__mev.shift();
       if (e === 'batterUp') { W.bu = t; W.n++; if (W.n >= 2) { sched('motion-enter-a', t + 0.9, { pos: [-1.2, 1.4, 4.2], look: [1.6, 0.9, 0], fov: 42 }, 'Walk_In/Step_In 시작'); sched('motion-enter-b', t + 2.2, { pos: [-1.2, 1.4, 4.2], look: [1.3, 0.9, 0], fov: 42 }, '입장 중간'); } }
       if (e === 'windup' && W.bu && t - W.bu > 3.2 && W.n >= 2) sched('motion-stance', t + 0.05, batCam, '타석 대기');
+      if (e === 'windup' && s.bat && s.bat.h < 0) { sched('next-lefty-stance', t + 0.05, { pos: [1.8, 1.35, 3.6], look: [-1.1, 0.95, 0.1], fov: 42 }, '[lefty] 좌타 대기(헬멧 귀가리개 오른쪽)'); sched('next-lefty-catcher', t + 1.0, { pos: [0.3, 1.9, -5.5], look: [0, 1.0, 6], fov: 40 }, '[lefty] 포수 뒤: 좌타석'); }
       if (e === 'windup') { const r = (d.on || []).some((x) => x); sched(r ? 'motion-pitch-stretch-peak' : 'motion-pitch-peak', t + 1.32, { pos: [6.5, 1.1, 18.2], look: [0, 1.1, 18.2], fov: 35 }, '레그킥 정점 멈춤'); sched(r ? 'motion-pitch-stretch-release' : 'motion-pitch-release', t + 1.85, { pos: [6.5, 1.1, 18.0], look: [0, 1.2, 17.6], fov: 35 }, '릴리스 = 와인드업 + 1.85초'); }
       if (e === 'release') sched('motion-catcher', t + d.T - 0.03, { pos: [-2.6, 0.8, -0.9], look: [0, 0.6, -0.8], fov: 40 }, '포수 받기');
       if (e === 'strikeCall') { sched(d.k ? 'motion-ump-k' : 'motion-ump-strike', t + (d.k ? 0.8 : 0.55), { pos: [3.2, 1.3, -3.4], look: [0, 1.0, -1.4], fov: 40 }, d.k ? '삼진 콜' : '스트라이크 콜'); }
       if (e === 'out' && d.kind === 'k') { sched(d.looking ? 'motion-k-looking-react' : 'motion-k-swing-react', t + 0.7, batCam, '삼진 반응'); sched('motion-k-walkout', t + 1.8, { pos: [-1.0, 1.4, 4.6], look: [1.6, 0.9, 0], fov: 42 }, 'Walk_Out'); sched('motion-k-walkout2', t + 2.4, { pos: [-1.0, 1.4, 4.6], look: [1.8, 0.9, 0], fov: 42 }, 'Walk_Out 뒤'); sched('motion-pitcher-pump', t + 1.0, { pos: [-4.5, 1.2, 15.5], look: [0, 1.2, 18.0], fov: 38 }, '삼진 잡은 투수'); }
       if (e === 'dive') { const f = s.fl[d.i]; if (f) sched('motion-dive', t + 0.32, { pos: [f[1] + 3.2, 1.3, f[2] - 3.2], look: [f[1], 0.5, f[2]], fov: 45, follow: d.i }, '다이빙 ' + d.pos); }
       if (e === 'slide') { const b = B[d.base % 4]; sched('motion-slide', t + 0.3, { pos: [b[0] + 3.5, 1.1, b[1] - 3.2], look: [b[0], 0.4, b[1]], fov: 45 }, '슬라이딩 ' + d.base + '루'); }
+      // [motion2] 세이프 콜(접전) · 높은 공 · 땅볼 포구 · 이닝 교대 뛰기
+      if (e === 'safe' && d.close) { const U = [[0, -2.35], [-22.5, 27], [22.5, 27]].sort((a, c) => Math.hypot(a[0] - d.x, a[1] - d.z) - Math.hypot(c[0] - d.x, c[1] - d.z))[0]; const hx = -U[0], hz = -U[1], hl = Math.hypot(hx, hz) || 1; sched('next-safe-call', t + 0.5, { pos: [U[0] + hx / hl * 4.2, 1.5, U[1] + hz / hl * 4.2 + (U[0] === 0 ? 4 : 0)], look: [U[0], 1.25, U[1]], fov: 45 }, '세이프 콜 ' + d.k + '루'); }
+      if (e === 'catch' && !d.pitch && d.fly && d.y > 1.7 && !d.dive && !d.jump) { const f = s.fl[d.i]; if (f) sched('next-catch-high', t + 0.0, { pos: [f[1] - f[1] / Math.hypot(f[1], f[2]) * 4, 1.6, f[2] - f[2] / Math.hypot(f[1], f[2]) * 4], look: [f[1], 1.5, f[2]], fov: 45, follow2: d.i }, '높은 공 포구 ' + d.pos); }
+      if (e === 'catch' && !d.pitch && !d.fly && d.y < 0.6 && !d.dive) { const f = s.fl[d.i]; if (f) sched('next-catch-low', t + 0.0, { pos: [f[1] - f[1] / Math.hypot(f[1], f[2]) * 4 + 1.5, 1.2, f[2] - f[2] / Math.hypot(f[1], f[2]) * 4], look: [f[1], 0.6, f[2]], fov: 45 }, '땅볼 포구 ' + d.pos); }
+      if (e === 'inningStart' && d.inning >= 1 && (d.inning > 1 || d.half === 1)) { sched('next-inning-swap-a', t + 0.9, { pos: [0, 16, -20], look: [0, 0, 24], fov: 58 }, '이닝 교대: 나가는 수비·들어오는 수비'); sched('next-inning-swap-b', t + 2.4, { pos: [0, 16, -20], look: [0, 0, 24], fov: 58 }, '이닝 교대 1.5초 뒤'); }
+      if (e === 'hr' && !d.derby) { sched('next-hr-trot', t + 8.4, { game: 1 }, '[trot] 리플레이 끝/건너뛴 뒤 게임 카메라: 3루→홈 트롯'); sched('next-hr-greet', t + 10.0, { pos: [-1.2, 1.5, 3.4], look: [-3.0, 1.2, -0.5], fov: 42 }, '[trot] 홈 옆 하이파이브'); sched('next-hr-greet2', t + 10.5, { pos: [-1.2, 1.5, 3.4], look: [-3.0, 1.2, -0.5], fov: 42 }, '[trot] 하이파이브 뒤'); }
       if (e === 'hr') sched('motion-hr-pitcher', t + 1.6, { pos: [-4.5, 1.2, 15.5], look: [0, 1.0, 18.2], fov: 38 }, '홈런 맞은 투수');
       if (e === 'catch' && !d.pitch && d.pos === 'C' && d.fly) sched('motion-catcher-pop', t + 0.4, { pos: [-2.6, 1.0, 2.0], look: [d.x, 1.0, d.z], fov: 45 }, '포수 뜬공');
       if (e === 'throw' && d.pos === 'C') sched('motion-catcher-throw', t + (d.pick ? 0.3 : 0.32), { pos: [-3.0, 1.0, 1.5], look: [d.from[0], 0.9, d.from[1]], fov: 40 }, '포수 송구');
@@ -84,8 +91,9 @@ const STEP = String(function step(arg) {
     // 스윙: 컨택 순간(swingAt) — 클립별로 한 장씩
     if (s.p && s.p.swingAt && t >= s.p.swingAt && t - s.p.swingAt < 0.06 && !W.swings[s.p.id]) {
       W.swings[s.p.id] = 1;
-      const b = near(0.95, 0.05); const nm = b ? cur(b) : '?';
+      const b = near(0.95 * (s.bat && s.bat.h < 0 ? -1 : 1), 0.05); const nm = b ? cur(b) : '?';
       if (s.ph === 'live') sched('motion-swing-follow', t + 0.22, { pos: [0.9, 1.3, 4.6], look: [0.6, 1.0, 0.0], fov: 40 }, '타격 후 팔로스루(주자로 바뀌기 전)');
+      if (s.bat && s.bat.h < 0 && !has('next-lefty-swing-' + nm)) return { name: 'next-lefty-swing-' + nm, cam: { pos: [-0.9, 1.3, 4.6], look: [-0.6, 1.0, 0.0], fov: 40 }, why: '[lefty] 좌타 스윙 컨택 프레임', t, clip: nm };
       if (nm && !has('motion-swing-' + nm)) return { name: 'motion-swing-' + nm, cam: { pos: [0.9, 1.3, 4.6], look: [0.6, 1.0, 0.0], fov: 40 }, why: '스윙 컨택 프레임 = sim 스윙 시각', t, clip: nm };
     }
     // 서성임(mill)
@@ -95,7 +103,7 @@ const STEP = String(function step(arg) {
     if (i >= 0) {
       const x = W.q.splice(i, 1)[0];
       if (x.cam.follow != null) { const f = s.fl[x.cam.follow]; if (f) { x.cam.look = [f[1], 0.45, f[2]]; x.cam.pos = [f[1] + 3.2, 1.3, f[2] - 3.2]; } }
-      const clips = anims().filter((o) => { const c = x.cam.look; return Math.hypot(o.position.x - c[0], o.position.z - c[2]) < 3; }).map((o) => curT(o));
+      const clips = anims().filter((o) => { const c = x.cam.look || [-1, 0, 0]; return Math.hypot(o.position.x - c[0], o.position.z - c[2]) < 3; }).map((o) => curT(o));
       return { name: x.name, cam: x.cam, why: x.why, t, clip: clips.join(',') };
     }
     if (s.ph === 'over' && !W.q.length) return { end: 1, t };
@@ -115,7 +123,8 @@ while (simT < max) {
   await page.evaluate((cam) => {
     const c = document.getElementById('c'); for (const el of document.body.querySelectorAll('*')) if (el !== c && !el.contains(c) && el.style) el.style.visibility = 'hidden';
     if (c) c.style.visibility = 'visible';
-    window.__cam = cam; window.__qaStep(1 / 60, { render: 0 }); window.__noRender = 0; window.__frame(window.__V); window.__noRender = 1;
+    if (cam.game) { window.__hr.rp.stop(); window.__cam = null; window.__fastCam = 0; for (let i = 0; i < 20; i++) window.__qaStep(1 / 60, { render: 0 }); window.__fastCam = 1; } else window.__cam = cam; // [trot] game: 게임 카메라 그대로(리플레이 건너뛰기)
+    window.__qaStep(1 / 60, { render: 0 }); window.__noRender = 0; window.__frame(window.__V); window.__noRender = 1;
   }, r.cam);
   const f = join(outDir, r.name + '.png');
   await page.screenshot({ path: f }); files.push(f);

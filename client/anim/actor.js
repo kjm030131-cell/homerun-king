@@ -13,6 +13,7 @@ import { loadLib, getLib } from './loader.js';
 import { CLIPS, FIT, BODY } from './clips.js';
 import { PITCH_TL, tauFromPitchK } from './timing.js';
 import { D, now, since, mood, rnd, hash } from './director.js'; // [motion]
+import { mirrorName } from './procedural.js'; // [lefty]
 
 const clamp = (v, a, b) => Math.max(a, Math.min(b, v));
 const _v = new THREE.Vector3(), _w = new THREE.Vector3();
@@ -90,16 +91,21 @@ export class CharPlayer {
     const C = this.char;
     this.capG = C.attach('head', tint(lib.acc.cap.clone(), u.cap, FIT.cap.tint || 'all'));
     this.helmetG = C.attach('head', tint(lib.acc.helmet.clone(), u.cap, FIT.helmet.tint || 'all')); this.helmetG.visible = false;
+    // [lefty] 헬멧 거울용: 장비 내용을 캐릭터 공간 원점의 그룹에 넣어 두고 좌타면 x 배율 −1 (귀가리개가 오른쪽 귀로)
+    this.helmetFlip = new THREE.Group(); for (const ch of [...this.helmetG.children]) this.helmetFlip.add(ch); this.helmetG.add(this.helmetFlip);
     this.maskG = C.attach('head', maskGroup(lib)); this.maskG.visible = false;
     this.glove = C.attach('handL', (role === 'catcher' ? lib.acc.gloveC : lib.acc.glove).clone());
     const bh = C.attach('handR', lib.acc.bat.clone());
     this.bat = bh.getObjectByName('batFrame') || bh; this.bat.visible = false;
+    // [lefty] 좌타 배트: 같은 배트를 캐릭터 공간에서 x 거울(오른손 자리 → 왼손 자리)로 왼손 뼈에. 거울 클립과 함께 쓰면 우타 배트의 정확한 거울
+    const bl = lib.acc.bat.clone(), flip = new THREE.Group(); flip.scale.x = -1; for (const ch of [...bl.children]) flip.add(ch); bl.add(flip);
+    C.attach('handL', bl); this.batR = this.bat; this.batL = bl.getObjectByName('batFrame') || bl; this.batL.visible = false; this.hand = 1;
     this.ball = new THREE.Mesh(new THREE.SphereGeometry(0.037, 10, 8), new THREE.MeshStandardMaterial({ color: '#f7f5ef', roughness: 0.5 }));
     this.ball.visible = false;
     const bp = new THREE.Vector3().setFromMatrixPosition(lib.rest.get('RightHand')).add(_v.set(...FIT.ball.pos));
     this.ball.userData.rest = new THREE.Matrix4().makeTranslation(bp.x, bp.y, bp.z).toArray();
     C.attach('handR', this.ball);
-    for (const g of [this.capG, this.helmetG, this.maskG, this.glove, this.bat, this.ball]) g.userData.acc = true;
+    for (const g of [this.capG, this.helmetG, this.maskG, this.glove, this.bat, this.batL, this.ball]) g.userData.acc = true;
     if (role === 'catcher' || role === 'ump') {
       const col = role === 'ump' ? '#2a2c33' : u.accent;
       C.attach('chest', protGroup(lib, col));
@@ -117,6 +123,13 @@ export class CharPlayer {
     if (!['catcher', 'ump'].includes(role)) this.glove.visible = role !== 'batter' && role !== 'runner';
   }
   placeBat() { /* 배트는 오른손 뼈에 붙어 있음 */ }
+  // [lefty] 타석 방향: 1 우타 · -1 좌타 → 배트 손·헬멧 귀가리개 거울 (클립 거울은 ClipAnimator._m)
+  setHand(h) {
+    h = h < 0 ? -1 : 1; if (h === this.hand) return;
+    const vis = this.bat.visible; this.bat.visible = false;
+    this.hand = h; this.bat = h < 0 ? this.batL : this.batR; this.bat.visible = vis;
+    this.helmetFlip.scale.x = h;
+  }
   batPoint(t, out) { return this.bat.localToWorld(out.set(0, t, 0)); }
   ik() {} lookAt() {} applyPose() {}
   dispose() { this.char.dispose(); }
@@ -152,6 +165,8 @@ export class ClipAnimator {
     this.shot = null; this.queue = null; return false;
   }
   _cut() { this.shot = null; this.queue = null; }
+  // [lefty] 좌타자면 타자 클립을 거울 클립(<이름>_L, 처음 쓸 때 만듦)으로
+  _m(n) { return this.p.hand < 0 ? mirrorName(this.c.lib, CLIPS, n) : n; }
   // 새 투구 시작 → 하던 한 번 재생 동작을 끊음(타자는 대기 자세, 심판은 자세)
   _newPitch() { if (D.windup.at !== this.wSeen) { this.wSeen = D.windup.at; this._cut(); return true; } return false; }
   // 서 있는 대기: 가끔 서성임(mill) 한 번 → 다시 대기
@@ -185,7 +200,7 @@ export class ClipAnimator {
     motionEvents(this.ev, this.p, 'fielder', c);
     const C = this.c, P = this.p, sp = c.speed || 0;
     this._fwd(false, dt);
-    const busy = c.diveK >= 0 || c.throwK >= 0 || c.jumpK >= 0 || (c.ground && sp < 3);
+    const busy = c.diveK >= 0 || c.throwK >= 0 || c.jumpK >= 0 || (c.ground && sp < 3) || c.highK >= 0;
     const isC = P.role === 'catcher';
     if (busy || sp > 0.8) this._cut();
     else {
@@ -199,7 +214,8 @@ export class ClipAnimator {
     // 포수 송구는 Baseball_Catcher 의 짧은 팔 송구(일어서며), 야수는 투구 동작 송구
     else if (c.throwK >= 0) C.scrubK(isC && C.has('catcherThrow') ? 'catcherThrow' : 'throw', c.throwK, { fade: isC ? 0.15 : 0.12 });
     else if (c.jumpK >= 0) C.scrubK('catchHigh', c.jumpK);
-    else if (c.ground && sp < 3) { this.gk = Math.min(1, this.gk + dt / 0.5); C.scrubK('catchLow', this.gk); }
+    else if (c.ground && sp < 3) { this.gk = Math.min(1, this.gk + dt / 0.5); C.scrubK('catchLow', c.groundK >= 0 ? Math.max(c.groundK, Math.min(this.gk, 0.5)) : this.gk, { fade: 0.15 }); } // [motion2] 다가오는 공 거리로 숙임
+    else if (c.highK >= 0) C.scrubK('catchHigh', c.highK, { fade: 0.18 }); // [motion2] 높은 공 포구(절차적 catchHigh — FBX 받으면 그걸로)
     else if (this._shotOn()) { /* 한 번 재생 동작 */ }
     else if (!this._mood(sp)) this._loco(sp, c.ready || c.knees ? 'ready' : 'idle');
     if (!(c.ground && sp < 3)) this.gk = 0;
@@ -268,13 +284,13 @@ export class ClipAnimator {
       if (since(D.kOut) < (swung ? 0.42 : 0.3)) return; // 스윙 팔로스루가 끝난 뒤
       this.kSeen = D.kOut.at;
       const L = [];
-      if (swung) L.push(this.kStyle < 0.6 && C.has('batStrike') ? ['batStrike', 0, 1.45, 1.15] : ['disappointed', 0.75, 1.25, 1.25]);
+      if (swung) L.push(this.kStyle < 0.6 && C.has('batStrike') ? [this._m('batStrike'), 0, 1.45, 1.15] : ['disappointed', 0.75, 1.25, 1.25]);
       else if (this.kStyle < 0.5) L.push(['disappointed', 0.75, 1.2, 1.1]);
-      L.push(['batWalkOut', 0, 1, 3.2]);
+      L.push([this._m('batWalkOut'), 0, 1, 3.2]);
       this._seq(L, 'react');
     } else if (since(D.strike) < 1.2 && D.strike.swinging && !D.strike.k && this.sSeen !== D.strike.at && since(D.strike) > 0.4) {
       this.sSeen = D.strike.at;
-      if (C.has('batStrike') && rnd(this.seedB, (D.strike.at * 10) | 0) < 0.4) this._seq([['batStrike', 0, 1.5, 1.6]], 'react');
+      if (C.has('batStrike') && rnd(this.seedB, (D.strike.at * 10) | 0) < 0.4) this._seq([[this._m('batStrike'), 0, 1.5, 1.6]], 'react');
     }
   }
   batter(dt, c) {
@@ -292,18 +308,19 @@ export class ClipAnimator {
       this.kSeen = D.kOut.at; this.sSeen = D.strike.at; this.wSeen = D.windup.at; this._cut();
       const ent = rnd(h, 4) < 0.55 && C.has('batWalkIn') ? 'batWalkIn' : C.has('batStepIn') ? 'batStepIn' : null;
       // 입장은 3.6초 안에 끝나게(CPU 투수 첫 공까지 3.4~4.3초 + 와인드업) — 와인드업이 먼저 오면 바로 대기 자세로
-      if (ent) { const s = ent === 'batWalkIn' ? 1.3 : 1.05; this._shot(ent, { speed: s, fade: first ? 0 : 0.3, kind: 'enter' }); }
+      if (ent) { const s = ent === 'batWalkIn' ? 1.3 : 1.05; this._shot(this._m(ent), { speed: s, fade: first ? 0 : 0.3, kind: 'enter' }); }
     }
     this._newPitch();
     const swinging = c.swingK >= 0;
-    if (swinging && !this.wasSw) this.swClip = this._pickSwing(c);
+    if (swinging && !this.wasSw) this.swClip = this._m(this._pickSwing(c));
     this.wasSw = swinging;
     if (!swinging || c.swingK >= 1) this._batReact();
-    if (c.bunt && !this.shot) C.play('buntStance', { fade: 0.25 });
-    else if (swinging && (c.swingK < 1 || !this.shot)) { this._cut(); C.scrubK(this.swClip || 'swing', c.swingK, { fade: this.swClip && this.swClip !== 'swing' ? 0.1 : 0.06 }); }
+    const sw0 = this._m('swing');
+    if (c.bunt && !this.shot) C.play(this._m('buntStance'), { fade: 0.25 });
+    else if (swinging && (c.swingK < 1 || !this.shot)) { this._cut(); C.scrubK(this.swClip || sw0, c.swingK, { fade: this.swClip && this.swClip !== sw0 ? 0.1 : 0.06 }); }
     else if (this._shotOn()) { /* 입장·반응 */ }
-    else if (c.loadK > 0.02) C.scrubK('swing', 0.25 * clamp(c.loadK, 0, 1), { fade: 0.2 });
-    else C.play(this.stance, { fade: 0.35, speed: this.stSpeed });
+    else if (c.loadK > 0.02) C.scrubK(sw0, 0.25 * clamp(c.loadK, 0, 1), { fade: 0.2 });
+    else C.play(this._m(this.stance), { fade: 0.35, speed: this.stSpeed });
     if (c.lookW && !(swinging) && !this.shot) C.look(c.lookW, 0.4);
     C.update(dt);
   }
@@ -316,7 +333,7 @@ export class ClipAnimator {
     C.update(dt);
   }
   // 심판: 주심은 투구 시작 ~ 공 도착까지 무릎 짚은 자세(Umpire 클립 첫 자세), 스트라이크 콜은 Umpire 콜 구간(0.45초~)을 끝까지,
-  //  삼진 콜은 조금 느리게(힘 줘서). 루심 아웃 콜도 같은 콜 동작. 세이프는 클립이 없어 대기 자세.
+  //  삼진 콜은 조금 느리게(힘 줘서). 루심 아웃 콜도 같은 콜 동작. 세이프는 umpireSafe(FBX 없으면 procedural.js 절차적 클립: 팔 교차 → 양옆).
   ump(dt, c) {
     const C = this.c, t = now(), home = !c.stand;
     const call = c.call || null;
@@ -327,7 +344,7 @@ export class ClipAnimator {
         const s = k ? 0.85 : 1.1, from = call === 'safe' ? 0 : call === 'strike' ? 0.45 : 0.55;
         const nm = call === 'safe' ? 'umpireSafe' : 'umpireCall';
         C.play(nm, { fade: 0.12, restart: true, from, speed: s });
-        this.callUntil = t + Math.max(0.6, (C.duration(nm) - 0.45 - from) / s);
+        this.callUntil = t + Math.max(0.6, (C.duration(nm) - (call === 'safe' ? 0.15 : 0.45) - from) / s); // [motion2] 세이프는 팔 내리는 데까지
       }
     }
     this.call = call;

@@ -14,6 +14,7 @@ export const cfg = {
   camDist: store.get('camDist', 1), batH: store.get('batH', 1), // [cam] 시점 거리(0 가까이·1 기본·2 멀리, Z 키) · 타자 시점 높이(0 낮게·1 기본·2 높게)
   volSfx: store.get('volSfx', 100), volCrowd: store.get('volCrowd', 100), volCast: store.get('volCast', 100), // [ui] 사운드 파트 요청: 효과음/관중/캐스터 음량 (0~100)
   rules: store.get('rules', 'real') === 'casual' ? 'casual' : 'real', // [ui] 마지막으로 고른 모드
+  bats: ['R', 'L', 'S'].includes(store.get('bats', 'R')) ? store.get('bats', 'R') : 'R', // [lefty] 내 타석: 우타·좌타·스위치
 };
 
 // 설정 창 연결. hooks: { applyQuality, setVolume, stopReplay, stopSpeech, sound }
@@ -29,11 +30,12 @@ export function bindSettings(hooks) {
   $('fpsS').addEventListener('change', (e) => { cfg.fps = +e.detail; store.set('fps', cfg.fps); });
   $('camDistS').addEventListener('change', (e) => { cfg.camDist = +e.detail; store.set('camDist', cfg.camDist); }); // [cam]
   $('batHS').addEventListener('change', (e) => { cfg.batH = +e.detail; store.set('batH', cfg.batH); }); // [cam]
+  $('batsS').addEventListener('change', (e) => { cfg.bats = e.detail; store.set('bats', cfg.bats); bus.emit('ui:bats', cfg.bats); }); // [lefty]
 }
 const VOLS = ['vol', 'volSfx', 'volCrowd', 'volCast'];
 export function emitVolume() { bus.emit('ui:volume', { master: cfg.vol / 100, sfx: cfg.volSfx / 100, crowd: cfg.volCrowd / 100, cast: cfg.volCast / 100 }); }
 function paintRange(id) { const e = $(id), o = $(id + 'V'); if (o) o.textContent = id === 'sens' ? (e.value / 100).toFixed(2) + '×' : e.value; }
 export function fillSettings() {
   for (const id of [...VOLS, 'sens']) { $(id).value = cfg[id]; paintRange(id); }
-  setSeg('gq', cfg.gq); setSeg('shake', cfg.shake); setSeg('replayS', cfg.replay); setSeg('castS', cfg.cast); setSeg('assist', cfg.assist); setSeg('fpsS', cfg.fps); setSeg('camDistS', cfg.camDist); setSeg('batHS', cfg.batH); // [cam]
+  setSeg('gq', cfg.gq); setSeg('shake', cfg.shake); setSeg('replayS', cfg.replay); setSeg('castS', cfg.cast); setSeg('assist', cfg.assist); setSeg('fpsS', cfg.fps); setSeg('camDistS', cfg.camDist); setSeg('batHS', cfg.batH); setSeg('batsS', cfg.bats); // [cam] [lefty]
 }

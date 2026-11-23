@@ -33,6 +33,7 @@ const nowP = () => performance.now() / 1000;
 // [ui] 설정·localStorage·TOUCH 는 client/ui/settings.js 로 옮김 (cfg/store 는 위 import)
 // [cam] fcam(수비 3인칭 드래그 상태)는 client/game/camera.js
 setVolume(cfg.vol / 100);
+bus.on('ui:bats', (v) => { if (net) net.send({ t: 'bats', v }); }); // [lefty] 설정에서 바꾸면 다음 타석부터
 initAudio(); // [audio]
 
 // ═════════════ 렌더러 ═════════════
@@ -185,6 +186,7 @@ if (!/noskin/.test(location.search)) loadSkin((window.HR_ASSETS && window.HR_ASS
 function mkActor(opts) { return makeActor(opts, scene); } // [anim] 새 캐릭터(GLB) 있으면 Character, 없으면 옛 몸 — client/anim/actor.js
 // [qa] 공수 교대마다 수비 9명·타자·코치를 새로 만들던 것(유니폼 데칼 캔버스·스켈레톤 복제 → 교대 순간 프레임 40ms+ 멈칫)을 팀별로 보관해 다시 씀
 const teamCache = new Map();
+const greet = []; // [trot] 홈런 트롯으로 홈을 밟은 주자: 홈 옆에서 기다렸다가 타자와 하이파이브 ({A, t0, i})
 const runnerPool = new Map(); // [qa] 주자 재사용 (poolKey → 배우 목록)
 function parkRunner(A) { scene.remove(A.p.root); if (A.poolKey) (runnerPool.get(A.poolKey) || runnerPool.set(A.poolKey, []).get(A.poolKey)).push(A); }
 function takeRunner(pk) { const l = runnerPool.get(pk); const A = l && l.pop(); if (!A || (usingNewCharacter() && !A.p.char)) return null; A.init = false; A.slideT = 0; A.p.root.visible = true; scene.add(A.p.root); return A; }
@@ -196,6 +198,8 @@ function clearActors() {
   if (batter) scene.remove(batter.p.root); batter = null; batTeamBuilt = null;
   for (const A of runners.values()) scene.remove(A.p.root);
   runners.clear();
+  for (const g of greet) scene.remove(g.A.p.root); greet.length = 0; // [trot]
+  for (const L of leavers) scene.remove(L.A.p.root); leavers.length = 0; // [motion2]
   for (const A of coaches) scene.remove(A.p.root); coaches.length = 0;
 }
 window.__actors = () => ({ fielders, batter, runners: [...runners.values()], umps, coaches, celeb: celeb ? celeb.actors : [] }); // [bugs] QA 훅: 장비(헬멧·모자) 상태 확인용 (tools/qa/flows.mjs)
@@ -206,22 +210,42 @@ for (const [x, z, ry] of [[0, -2.35, 0], [-22.5, 27, Math.PI * 0.75], [22.5, 27,
   if (!U.home) { U.p.maskG.visible = false; U.p.capG.visible = true; }
   umps.push(U);
 }
+// [motion2] 이닝 교대 뛰기: 덕아웃 앞(홈 = 3루 쪽 +x, 원정 = 1루 쪽 -x — startCelebration 과 같은 쪽), 조깅 속도, 들어올 때 최대 거리(→ 3.5초 안에 도착, 첫 투구 전)
+const DUGOUT_XZ = (team) => [(team === 'home' ? 1 : -1) * 23.5, 16];
+const SWAP_RUN = { v: 6.8, maxD: 24, leaveT: 5 };
+const leavers = []; // 나가는 수비 {A, t0, dx, dz}
+const tp0 = () => nowP();
 function buildTeams(s) {
   const ft = s.half === 0 ? 'home' : 'away', bt = s.half === 0 ? 'away' : 'home';
   const key = ft + s.fl.map((f) => f[0]).join('');
   if (fieldTeamBuilt !== key) {
-    for (const A of fielders) scene.remove(A.p.root);
+    // [motion2] 이닝 교대: 공수 바뀌는 순간(결과 대기 중)이면 나가는 수비는 자기 덕아웃 쪽으로 뛰어 들어가고, 들어오는 수비는 덕아웃 쪽에서 뛰어나옴
+    //   화면 연출만 — sim 위치·시간은 그대로(첫 투구 시각 안 바뀜 = 템포 그대로)
+    const swap = !!fieldTeamBuilt && s.ph === 'result' && fielders.length && !window.__noSwapRun;
+    for (const A of leavers) scene.remove(A.p.root); leavers.length = 0;
+    if (swap) { const D = DUGOUT_XZ(fieldTeamBuilt.startsWith('home') ? 'home' : 'away'); for (const A of fielders) leavers.push({ A, t0: tp0(), dx: D[0], dz: D[1] }); }
+    else for (const A of fielders) scene.remove(A.p.root);
     if (fieldTeamBuilt && fielders.length) teamCache.set('f' + fieldTeamBuilt, fielders); // [qa]
     const nums = { P: 18, C: 22, '1B': 25, '2B': 4, '3B': 13, SS: 6, LF: 7, CF: 8, RF: 9 };
     const c = cachedTeam('f' + key); // [qa]
     if (c) { fielders = c; for (const A of c) { A.init = false; scene.add(A.p.root); } }
     else fielders = s.fl.map((f, i) => { const A = mkActor({ team: ft, num: nums[f[0]], role: f[0] === 'C' ? 'catcher' : 'fielder', seed: i + (ft === 'home' ? 0 : 50) }); A.pos = f[0]; return A; });
+    for (const A of fielders) A.entry = null;
+    if (swap) {
+      const D = DUGOUT_XZ(ft);
+      s.fl.forEach((f, i) => {
+        const A = fielders[i]; if (!A) return;
+        const dx = D[0] - f[1], dz = D[1] - f[2], d = Math.hypot(dx, dz), L = Math.min(d, SWAP_RUN.maxD);
+        if (L > 2) A.entry = { t0: tp0(), sx: f[1] + dx / d * L, sz: f[2] + dz / d * L, T: L / SWAP_RUN.v };
+      });
+    }
     fieldTeamBuilt = key;
   }
   if (batTeamBuilt !== bt) {
     if (batter) scene.remove(batter.p.root);
     for (const A of runners.values()) parkRunner(A); // [qa]
     runners.clear();
+    for (const g of greet) parkRunner(g.A); greet.length = 0; // [trot]
     for (const A of coaches) scene.remove(A.p.root);
     if (batTeamBuilt && batter) teamCache.set('b' + batTeamBuilt, [batter, ...coaches]); // [qa]
     coaches.length = 0;
@@ -240,7 +264,7 @@ function startLocal(name, o) {
   const game = new Game({ emit: (m) => handleMsg(m), sendTo: (id, m) => handleMsg(m), onGameOver: (sum) => saveLocalCareer(sum, name) });
   myId = 'me'; myName = name; bus.emit('ui:me', { id: myId }); // [audio] 내 타석 오르간(batterUp)용
   game.addPlayer('me', name);
-  const me = game.players.get('me'); me.team = o.team; me.pos = o.pos;
+  const me = game.players.get('me'); me.team = o.team; me.pos = o.pos; me.bats = cfg.bats || 'R'; // [lefty]
   game.applySettings({ mode: o.mode, innings: o.inn, derbyOuts: o.mode === 'derby' ? Math.max(5, o.inn * 3) : 10, diff: o.diff, clubs: o.clubs || [0, 1], pitRot: 'fixed', fieldCtl: o.fld || 'auto', tod: o.tod || 'night', hitEase: o.hitEase ?? 1, rules: o.rules }); // [gameplay] rules: 'real' | 'casual' (ui가 메뉴에서 넘겨줄 것)
   applyClubs(game.set.clubs);
   let last = performance.now();
@@ -268,7 +292,7 @@ function connectWS(code, name, pw = '') {
   const ws = new WebSocket(`${proto}://${location.host}/ws/${code}?name=${encodeURIComponent(name)}&token=${encodeURIComponent(tok)}&pw=${encodeURIComponent(pw)}`);
   let opened = false;
   SM.reset(); // [net] 새 소켓은 통째 스냅샷부터
-  ws.onopen = () => { opened = true; wsRetry = 0; $('conn').classList.add('hide'); };
+  ws.onopen = () => { opened = true; wsRetry = 0; $('conn').classList.add('hide'); ws.send(JSON.stringify({ t: 'bats', v: cfg.bats || 'R' })); }; // [lefty] 내 타석(좌/우/스위치)
   ws.onmessage = (e) => { if (net && net.ws !== ws) return; /* [net] 재접속 뒤 옛 소켓에 남은 메시지 무시 */ lastMsgAt = performance.now(); try { handleMsg(JSON.parse(e.data)); } catch (err) { console.error(err); } };
   ws.onclose = (e) => {
     if (!net || net.ws !== ws) return;
@@ -421,7 +445,7 @@ function onSnap(s) {
     if (!mine) onContact(s.p, s.lh ? s.lh.q : 0.6, s.lh && s.lh.mode === 'bunt');
     fx.trailClear();
     droppedBat.visible = true;
-    droppedBat.position.set(0.9 + Math.random() * 0.4, 0, 0.6 + Math.random() * 0.6); droppedBat.rotation.y = Math.random() * Math.PI;
+    droppedBat.position.set((s.bat && s.bat.h < 0 ? -1 : 1) * (0.9 + Math.random() * 0.4), 0, 0.6 + Math.random() * 0.6); droppedBat.rotation.y = Math.random() * Math.PI; // [lefty]
   }
   if (s.ph === 'pitch') droppedBat.visible = false;
   if (prevS && prevS.bat && s.bat && (prevS.bat.name !== s.bat.name || prevS.bat.id !== s.bat.id || prevS.bat.n !== s.bat.n)) { buntOn = false; if (s.mode !== 'derby') startIntro(s); }
@@ -848,7 +872,12 @@ function updateWorld(dt) {
     // [gameplay] 타구 중엔 공(현재 시각으로 외삽)과 수비수(보간 지연만큼 과거)가 다른 시각이라 공이 수비수 앞 허공에서 잡혔음 → 구간 속도로 지연만큼 앞으로(최대 1.5m) — NI.sample/fl 안에서
     if (IP) { const q = IP.fl(i, pos); if (q) { x = q[0]; z = q[1]; ry = q[2]; } }
     if (i === role.fi && ctl.active) { x = ctl.x; z = ctl.z; ry = ctl.ry; }
-    if (pos === 'P' && pitchPhase) ry = Math.PI;
+    if (A.entry) { // [motion2] 이닝 교대: 덕아웃 쪽에서 자기 자리로 조깅
+      const e = A.entry, k = (tp - e.t0) / e.T;
+      if (k >= 1 || s.ph === 'pitching' || s.ph === 'live' || (i === role.fi && ctl.active)) A.entry = null;
+      else { const tx = x, tz = z; x = lerp(e.sx, tx, k); z = lerp(e.sz, tz, k); if (k < 0.92) ry = Math.atan2(tx - e.sx, tz - e.sz); }
+    }
+    if (pos === 'P' && pitchPhase && !A.entry) ry = Math.PI;
     const sp = place(A, x, z, ry, dt, i === role.fi && ctl.active ? 30 : IP ? 22 : 12);
     const nm = nameOf(ctrlId) || (net?.local && ctrlId === myId ? myName : null);
     setTag(A, nm ? (ctrlId === myId ? `${nm} ★` : nm) : '', ctrlId === myId ? '#ffcf3f' : '#ffffff', ctrlId === myId && (camMode !== 'field' || cfg.fieldCam === 'tps'));
@@ -885,18 +914,19 @@ function updateWorld(dt) {
     if (i === role.fi && tp - pred.jt < 1) jt = tp - pred.jt; // [net] 내가 누른 점프·다이빙은 누른 순간부터 (서버 나이로 다시 시작 안 함)
     if (i === role.fi && tp - pred.dv < 3) dv = tp - pred.dv;
     const diveK = dv >= 0 ? dv / 0.55 : -1, jumpK = jt >= 0 && jt < 0.6 ? jt / 0.6 : -1;
-    let reachW = null, ground = false;
+    let reachW = null, ground = false, groundK = -1, highK = -1;
     if (ballL && ballL.h < 0 && s.ph === 'live') {
       const d = Math.hypot(ballPos.x - A.p.root.position.x, ballPos.z - A.p.root.position.z);
       const incoming = (ballL.vx * (A.p.root.position.x - ballPos.x) + ballL.vz * (A.p.root.position.z - ballPos.z)) > 0;
       if (d < 4.5 && (incoming || d < 1.5)) {
-        if (ballPos.y < 0.6 && ballL.state === 'ground') ground = true;
-        else reachW = ballPos;
+        if (ballPos.y < 0.6 && ballL.state === 'ground') { ground = true; groundK = 0.5 * clamp(1 - (d - 0.6) / 3.2, 0.12, 1); } // [motion2] 공이 다가올수록 숙임(가까우면 포구 자세 = catchLow 'catch')
+        else { reachW = ballPos; if (ballPos.y > 1.75 && ballL.state !== 'ground' && sp < 3.5) { highK = 0.45 * clamp(1 - (d - 0.8) / 3.4, 0, 1); A.highC = tp; } } // [motion2] 높은 공: 글러브를 머리 위로(catchHigh 'catch'), 손 IK 가 공 쪽으로 다듬음
       }
     }
-    if (A.catchT && tp - A.catchT < 0.25 && !reachW) reachW = _u.copy(A.p.root.position).add(_w.set(Math.sin(A.p.root.rotation.y) * 0.5, 1.2, Math.cos(A.p.root.rotation.y) * 0.5));
+    if (A.catchT && tp - A.catchT < 0.5 && A.highC && A.catchT - A.highC < 0.3 && !reachW) highK = 0.45 + 0.55 * (tp - A.catchT) / 0.5; // [motion2] 높은 공 잡은 뒤 가슴으로 내림
+    else if (A.catchT && tp - A.catchT < 0.25 && !reachW) reachW = _u.copy(A.p.root.position).add(_w.set(Math.sin(A.p.root.rotation.y) * 0.5, 1.2, Math.cos(A.p.root.rotation.y) * 0.5));
     const knees = (pos === 'LF' || pos === 'CF' || pos === 'RF') && (s.ph === 'pitch' || (s.ph === 'pitching' && s.p && t < s.p.t0 - 0.9));
-    A.a.fielder(dt, { speed: sp, ready, knees, splitK, hasBall: hasBall(i), throwK, diveK, jumpK, ballW, reachW, ground, reachWeight: 1 });
+    A.a.fielder(dt, { speed: sp, ready, knees, splitK, hasBall: hasBall(i), throwK, diveK, jumpK, ballW, reachW, ground, groundK, highK, reachWeight: 1 });
   });
   // 타자
   // [motion] 맞힌 순간(phase → live) 타자가 바로 주자로 바뀌어 스윙이 컨택 프레임에서 끊기던 것 → 팔로스루(0.34초)까지 타자를 보여 주고 홈의 주자는 그동안 숨김
@@ -906,7 +936,9 @@ function updateWorld(dt) {
   if (batter) {
     batter.p.root.visible = showBatter && !(camMode === 'bat' && false);
     if (showBatter) {
-      place(batter, 0.95, 0.05, -Math.PI / 2, dt, 100);
+      const bh = s.bat && s.bat.h < 0 ? -1 : 1; // [lefty] 좌타자: 1루 쪽(-x)에서 반대 방향 + 거울 클립·배트·헬멧 (카메라는 타자 x 부호로 자동 미러)
+      if (batter.p.setHand) batter.p.setHand(bh); else batter.p.root.scale.x = bh; // 옛 몸은 통째 거울
+      place(batter, 0.95 * bh, 0.05, -Math.PI / 2 * bh, dt, 100);
       const nm = nameOf(s.bat && s.bat.id);
       setTag(batter, nm && s.bat.id !== myId ? nm : '', '#ffffff');
       let swingAt = null, contactL = null, loadK = 0;
@@ -970,10 +1002,16 @@ function updateWorld(dt) {
     if (A.slideT) { slideK = (tp - A.slideT) / 0.6; if (slideK > 1.6 || (sp < 0.3 && slideK > 1)) { A.slideT = 0; slideK = -1; } }
     const nm = nameOf(pid);
     setTag(A, nm || '', pid === myId ? '#ffcf3f' : '#fff');
-    A.a.runner(dt, { speed: sp, slideK, lead: onBase && (s.ph === 'pitch' || s.ph === 'pitching'), cheer: !!(flags & 2), lookW: onBase ? _v.set(0, 1.2, 15) : null });
+    A.a.runner(dt, { speed: sp, slideK, lead: onBase && (s.ph === 'pitch' || s.ph === 'pitching'), cheer: !!(flags & 2) && !(b > 0 && b < 4), lookW: onBase ? _v.set(0, 1.2, 15) : null }); // [trot] 트롯 중엔 뛰는 동작(전: 느려지면 베이스 사이에서도 만세)
     A.p.root.visible = !(showBatter && (b === 0 || (swingHold && b < 0.3))); // [motion] swingHold
+    A.lastB = b; A.trot = !!(flags & 2); // [trot]
   }
-  for (const [k, A] of runners) if (!live.has(k)) { parkRunner(A); runners.delete(k); }
+  for (const [k, A] of runners) if (!live.has(k)) {
+    if (A.trot && s.ph === 'result') { if (A.p.root.position.length() > 6) A.init = false; greet.push({ A, t0: tp, i: greet.length }); runners.delete(k); continue; } // [trot] 홈 밟음 → 하이파이브 대기 (리플레이 중에 들어왔으면 그 자리로 바로)
+    parkRunner(A); runners.delete(k);
+  }
+  updateGreet(s, tp, dt);
+  updateLeavers(tp, dt);
   // 심판/코치
   for (const U of umps) {
     let call = null;
@@ -984,6 +1022,45 @@ function updateWorld(dt) {
   for (const C of coaches) C.a.idle(dt);
   updateCelebration(dt);
   updateBall(dt, t, role, pitchPhase);
+}
+// [trot] 홈런 뒤 홈 옆 하이파이브: 먼저 들어온 주자들은 1루 쪽 홈 뒤에 줄 서서 3루 쪽(들어오는 타자)을 보고 만세,
+//        마지막 주자(타자)가 들어오면 타자 쪽으로 돌아서 차례로 오른손을 맞댐(손 IK). 결과 시간이 끝나면(다음 타석) 치움
+const _gv = new THREE.Vector3();
+function updateGreet(s, tp, dt) {
+  if (!greet.length) return;
+  if (s.ph !== 'result') { for (const g of greet) parkRunner(g.A); greet.length = 0; return; }
+  const left = (s.rn || []).some((r) => r[5] & 2);
+  const last = left ? null : greet[greet.length - 1], n = greet.length;
+  for (const g of greet) {
+    const A = g.A, isB = g === last, j = g.i; // 줄 번호
+    const sx = isB ? -2.3 : -3.3 - j * 0.85, sz = isB ? -0.2 : -0.7 - j * 0.12; // 포수·주심(홈 뒤)을 피해 1루 쪽
+    const fx = last && !isB ? last.A.p.root.position.x : isB ? -3 : 7, fz = last && !isB ? last.A.p.root.position.z : isB ? -1 : 7;
+    const r = A.p.root.position, ry = Math.atan2(fx - r.x, fz - r.z);
+    const sp = place(A, sx, sz, tp - g.t0 < 0.15 ? Math.atan2(sx - r.x, sz - r.z) : ry, dt, 3.2);
+    A.p.root.visible = true;
+    if (last && A.p.char && n > 1) {
+      const e = tp - last.t0 - 0.35; // 타자가 멈춰 선 뒤부터 한 명씩 0.45초
+      const k = isB ? Math.floor(e / 0.45) : j, ek = e - k * 0.45;
+      const mate = isB ? greet[k] : last;
+      if (mate && mate !== g && ek >= 0 && ek < 0.4 && e >= 0) {
+        const q = mate.A.p.root.position;
+        A.p.char.reach('R', _gv.set((r.x + q.x) / 2, 2.0 + Math.sin(ek / 0.4 * Math.PI) * 0.12, (r.z + q.z) / 2), Math.sin(Math.min(1, ek / 0.4) * Math.PI));
+      }
+    }
+    A.a.runner(dt, { speed: sp, slideK: -1, lead: false, cheer: sp < 0.5, lookW: null });
+  }
+}
+// [motion2] 이닝 교대로 나가는 수비: 덕아웃 앞까지 조깅(6.8m/s), 도착하거나 5초 지나면 치움(외야수는 도중에 — 그땐 이미 타석 시점이라 멀리 작게 보임)
+function updateLeavers(tp, dt) {
+  for (let i = leavers.length - 1; i >= 0; i--) {
+    const L = leavers[i], A = L.A, r = A.p.root.position;
+    const dx = L.dx - r.x, dz = L.dz - r.z, d = Math.hypot(dx, dz);
+    if (d < 1.2 || tp - L.t0 > SWAP_RUN.leaveT || fielders.includes(A)) { if (!fielders.includes(A)) scene.remove(A.p.root); leavers.splice(i, 1); continue; }
+    const st = Math.min(d, SWAP_RUN.v * Math.min(1, (tp - L.t0) / 0.5 + 0.3) * dt);
+    const sp = place(A, r.x + dx / d * st, r.z + dz / d * st, Math.atan2(dx, dz), dt, 40);
+    setTag(A, '', '#fff');
+    A.a.fielder(dt, { speed: sp, ready: false, hasBall: false, throwK: -1, diveK: -1, jumpK: -1, ballW: null, reachW: null, ground: false });
+  }
 }
 // ── 끝내기 세리머니: 덕아웃에서 동료들이 뛰어나와 홈 근처에서 방방 뛰고 꽃가루 ──
 let celeb = null;
@@ -1258,7 +1335,7 @@ let camMode = ''; // [cam] 이번 프레임 카메라 모드 (HUD·입력이 읽
 const camRig = createCamRig(camera, { // [cam]
   get S() { return S; }, get screen() { return screen; }, get fielders() { return fielders; }, get batter() { return batter; }, umps,
   ballPos, ballMesh, landRing, get ballL() { return ballL; }, get lastContactT() { return lastContactT; },
-  get hrCine() { return hrCine; }, get hrCineStart() { return hrCineStart; }, get rpInfo() { return rpInfo; }, get myId() { return myId; },
+  get hrCine() { return hrCine; }, get greetN() { return greet.length; }, /* [trot] */ get hrCineStart() { return hrCineStart; }, get rpInfo() { return rpInfo; }, get myId() { return myId; },
   introStep, getRole, recBase, nowP,
 });
 window.__camRig = camRig; // [cam] qa: 데드존 여부(direct)·모드
