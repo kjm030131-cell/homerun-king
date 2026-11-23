@@ -45,8 +45,8 @@ export function initAudio() {
   if (inited) return; inited = true;
   installUnlock();
   loadSamples();
-  whenReady(() => setTimeout(() => crowd.start(), 0));
-  caster = new Caster((text, pri) => bus.emit('caster:line', { text, pri }), (k) => crowd.setDuck(k));
+  whenReady((a) => setTimeout(() => { S.warmBat(a); crowd.start(); }, 0)); // [sound] 타격음 파형 미리 + 관중 목소리 조금씩
+  caster = new Caster((text, pri, who) => bus.emit('caster:line', { text, pri, who }), (k) => crowd.setDuck(k));
 
   // ── 투구 ──
   on('windup', (d) => { d = { ...d, inn: game.inn, innings: game.innings, mode: game.mode }; lastSitu = situation(d); crowd.prePitch(tension(lastSitu)); caster.situ(d); });

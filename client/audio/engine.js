@@ -35,9 +35,18 @@ function applyVols() {
   E.master.gain.setTargetAtTime(curve(vols.master) * 1.1, t, 0.03);
   for (const g of ['sfx', 'crowd', 'cast']) {
     const G = E.groups[g]; if (!G) continue;
-    G.dry.gain.setTargetAtTime(curve(vols[g] ?? 100) * 1.25, t, 0.03);
-    G.wet.gain.setTargetAtTime(curve(vols[g] ?? 100) * 1.25, t, 0.03);
+    const k = curve(vols[g] ?? 100) * GROUP_TRIM[g];
+    G.dry.gain.setTargetAtTime(k, t, 0.03);
+    G.wet.gain.setTargetAtTime(k, t, 0.03);
   }
+}
+// [sound 11-23] 그룹 기본 비율: 관중이 1.25 로 타격음·심판과 같은 크기라 리미터를 계속 눌러 다른 소리까지 작아졌음(= '소리가 안 나는' 느낌) → 관중은 배경 크기로
+const GROUP_TRIM = { sfx: 1.25, crowd: 0.5, cast: 1.1 };
+// 큰 효과음(타격·심판 콜) 순간 관중을 잠깐 낮춰 또렷하게 (방송 믹싱의 사이드체인 덕킹)
+export function duck(g = 'crowd', amt = 0.5, dur = 0.35) {
+  const G = E.ctx && E.groups[g]; if (!G) return;
+  const t = E.ctx.currentTime, k = curve(vols[g] ?? 100) * GROUP_TRIM[g];
+  for (const n of [G.dry.gain, G.wet.gain]) { n.cancelScheduledValues(t); n.setValueAtTime(n.value, t); n.setTargetAtTime(k * amt, t, 0.012); n.setTargetAtTime(k, t + dur, 0.25); }
 }
 // TTS 처럼 WebAudio 밖에서 나는 소리용 (0~1)
 export function linVol(k) { return cap(vols.master) * cap(vols[k] ?? 100); }
@@ -80,7 +89,7 @@ export function ctx() {
   try { a = new (window.AudioContext || window.webkitAudioContext)({ latencyHint: 'interactive' }); } catch { return null; }
   E.ctx = a;
   E.limiter = a.createDynamicsCompressor();
-  E.limiter.threshold.value = -8; E.limiter.knee.value = 6; E.limiter.ratio.value = 10; E.limiter.attack.value = 0.002; E.limiter.release.value = 0.22;
+  E.limiter.threshold.value = -4; E.limiter.knee.value = 8; E.limiter.ratio.value = 6; E.limiter.attack.value = 0.001; E.limiter.release.value = 0.15; // [sound] 늘 눌리던 리미터를 큰 순간만 잡게
   E.master = a.createGain();
   E.master.connect(E.limiter).connect(a.destination);
   E.verb = a.createConvolver(); E.verb.buffer = mkIR(a);
