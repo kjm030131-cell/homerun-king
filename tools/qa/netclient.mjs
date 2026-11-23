@@ -217,7 +217,7 @@ export function makeClient({ kind, sim, i, now, send, truthAt, rnd, gauss, srvNo
         const e = Math.hypot(ballL.x - bt[0], ballL.y - bt[1], ballL.z - bt[2]);
         stat.bN++; stat.bE2 += e * e; stat.bErrs.push(e);
         const jd = Math.hypot((ballL.x - px) - (bt[0] - bp[0]), (ballL.y - py) - (bt[1] - bp[1]), (ballL.z - pz) - (bt[2] - bp[2]));
-        if (jd > 0.3) { stat.bJump++; if (process.env.NBDIAG) { const k = 'ball:' + ballL.state + ':' + (jd > 1 ? '>1' : '<1') + ':v' + Math.round(Math.hypot(ballL.vx, ballL.vy, ballL.vz) / 10) * 10; stat.diag[k] = (stat.diag[k] || 0) + 1; } }
+        if (jd > 0.3) { if (process.env.JDBG) console.log('bjump', C.i, now().toFixed(3), ballL.state, jd.toFixed(2), 'err', e.toFixed(2), 'v', Math.hypot(ballL.vx, ballL.vy, ballL.vz).toFixed(1), 'y', ballL.y.toFixed(2), 'truth', bt.map((v) => v.toFixed(2)).join(','), 'bp', bp.map((v) => v.toFixed(2)).join(','), 'scr', ballL.x.toFixed(2), ballL.y.toFixed(2), ballL.z.toFixed(2)); stat.bJump++; if (process.env.NBDIAG) { const k = 'ball:' + ballL.state + ':' + (jd > 1 ? '>1' : '<1') + ':v' + Math.round(Math.hypot(ballL.vx, ballL.vy, ballL.vz) / 10) * 10; stat.diag[k] = (stat.diag[k] || 0) + 1; } }
       }
     }
     stat.frameMs.push(hr() - f0);

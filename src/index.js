@@ -31,7 +31,7 @@ export default {
 };
 
 const TICK = 1000 / 60;
-const SNAP_EVERY = 2;
+const STEP = 1 / 60, SNAP_DT = 1 / 30; // [net] 시뮬 고정 스텝 · 스냅샷 간격(게임 시각)
 // [net] 스냅샷 델타: 매번 통째로(평균 1.5KB, 30Hz × 사람 수) 보내던 것을 '지난 브로드캐스트와 달라진 키'만 보냄.
 //  - 키 단위 JSON 문자열 비교 → 같으면 뺌, 없어진 키는 x:[키…]. 받는 쪽(client/net/snap.js mergeSnap)이 지난 스냅샷에 덮어씀.
 //  - d:1 = 델타. 3초마다·누가 새로 접속하면 다음 한 번은 통째로(k:1) → 어긋나도 3초 안에 저절로 맞음.
@@ -168,14 +168,25 @@ export class Room {
   startLoop() {
     clearTimeout(this.idleT); this.idleT = null;
     if (this.timer) return;
-    let last = Date.now();
+    // [net] 타이머가 늦게·몰려 와도(DO setInterval 은 정확하지 않음) 게임 시간은 벽시계를 따라 1/60초 고정 스텝으로(밀린 만큼 최대 6스텝),
+    //       스냅샷은 '호출 2번마다'가 아니라 게임 시각 1/30초마다 — 전엔 타이머가 밀리면 틱 dt 가 커지고 스냅샷도 그만큼 드물어졌음
+    //       (netbench --srvjit=8: 28 → 23 스냅샷/초, 보간 지연 +10ms). 고정 스텝 = 테스트·AI 검사와 같은 dt 라 판정도 그대로 재현됨.
+    let last = Date.now(), acc = 0;
+    this.nextSnap = this.game.now;
     this.timer = setInterval(() => {
       const t = Date.now();
-      const dt = Math.min(0.1, (t - last) / 1000);
+      acc += Math.min(0.1, (t - last) / 1000);
       last = t;
-      try { this.game.tick(dt); } catch (err) { console.error('tick', err); }
-      if (++this.n % SNAP_EVERY === 0 && this.socks.size) this.broadcastRaw(packSnap(this.snapSt, this.game.snapshot(true))); // true: 게임 이벤트(ev)를 실어 보내고 비움 · [net] 변한 키만
-      if (this.n % 60 === 0) this.report();
+      for (let k = 0; acc > STEP * 0.5 && k < 6; k++) {
+        acc -= STEP;
+        try { this.game.tick(STEP); } catch (err) { console.error('tick', err); }
+      }
+      if (acc > STEP * 0.5) acc = 0; // 0.1초 넘게 밀린 건 버림(따라잡느라 몰아서 돌리지 않게)
+      if (this.game.now + 1e-6 >= this.nextSnap || this.game.now < this.nextSnap - 1) {
+        this.nextSnap = Math.max(this.nextSnap + SNAP_DT, this.game.now - STEP);
+        if (this.socks.size) this.broadcastRaw(packSnap(this.snapSt, this.game.snapshot(true))); // true: 게임 이벤트(ev)를 실어 보내고 비움 · [net] 변한 키만
+      }
+      if (++this.n % 60 === 0) this.report();
     }, TICK);
   }
 
