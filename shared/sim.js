@@ -908,7 +908,9 @@ export class Game {
     if (f.pos === '1B' && this.mode === 'game' && this.runners.some((r) => r.b === 1 && !r.out)) return [-BASES[1][1] + 0.7, BASES[1][1] + 0.6];
     return this.spotOf(f.pos);
   }
-  fieldersHome() { return this.fielders.every((f) => { const hs = this.standSpot(f); return dist2(f.x, f.z, hs[0], hs[1]) < 3; }); }
+  // 투수·포수는 투구에 직접 관여 → 0.4m 안까지(예전 3m 라 2~3m 떨어진 채 투구 시작: 투구의 11%), 나머지 야수는 3m
+  fieldersHome() { return this.fielders.every((f) => { const hs = this.standSpot(f); return dist2(f.x, f.z, hs[0], hs[1]) < (f.pos === 'P' || f.pos === 'C' ? 0.4 : 3); }); }
+  snapBattery() { for (const f of this.fielders) if (f.pos === 'P' || f.pos === 'C') { const hs = this.spotOf(f.pos); f.x = hs[0]; f.z = hs[1]; f.mv = 0; f.ry = f.pos === 'C' ? 0 : Math.atan2(-hs[0], -hs[1]); } }
 
   enterPitch() {
     this.phase = 'pitch';
@@ -975,6 +977,7 @@ export class Game {
   }
 
   throwPitch(type, tx, ty, power, human, errOverride) {
+    if (this.mode === 'game') this.snapBattery(); // [11-23] 투수·포수는 항상 투구 위치에서 (남은 오차 0.4m 이하만 맞춤)
     const P = PITCHES[type];
     const st = this.stamina();
     const tired = clamp((50 - st.sta) / 50, 0, 1);
@@ -1807,7 +1810,7 @@ export class Game {
       case 'pitch':
         if (this.backUntil && this.mode !== 'derby') {
           if (this.fieldersHome()) this.backUntil = 0;
-          else if (this.now >= this.backUntil) { this.backUntil = 0; } // 시간 다 되면 기다림만 그만 (순간이동 없음 — 투구 중에도 마저 걸어감)
+          else if (this.now >= this.backUntil) { this.backUntil = 0; this.snapBattery(); } // 시간 다 되면 기다림 그만 — 투수·포수만 제자리(투구 위치), 야수는 투구 중에도 마저 걸어감
           else { // 수비수가 자리로 돌아오는 동안은 투구를 기다림 (사람 투구는 예약, CPU 투구·견제는 미룸)
             this.walkBack(dt, true);
             this.pitchReady = Math.max(this.pitchReady || 0, this.now + 0.1);
