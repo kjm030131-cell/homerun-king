@@ -1011,7 +1011,7 @@ function updateWorld(dt) {
       if (contactL && batter.tr && swingInfo[s.p.id]) batter.tr = swingTrack(contactL);
       const bunt = !!s.bs || (role.batter && buntOn);
       const aimY = s.p && s.ph === 'pitching' && t > s.p.t0 ? s.p.ty - 0.8 : role.batter ? (aimPoint() || [0, 0.8])[1] - 0.8 : 0;
-      batter.a.batter(dt, { swingK, loadK, bunt, track: batter.tr, aimY, lookW: _v.set(0, 1.6, 18), intro: !!(intro && camMode === 'intro'), who: s.bat && (s.bat.id || s.bat.name), batOff: role.batter && motion && motion.active() ? motion.batOff() : null, batQ: role.batter && motion && motion.active() ? motion.batQ() : null });
+      batter.a.batter(dt, { swingK, loadK, bunt, track: batter.tr, aimY, lookW: _v.set(0, 1.6, 18), intro: !!(intro && camMode === 'intro'), who: s.bat && (s.bat.id || s.bat.name), batOff: role.batter && motion && motion.active() ? motion.batOff() : null, batQ: role.batter && motion && motion.active() ? motion.batQ() : null, pose: role.batter && motion && motion.active() ? motion.poseNow() : null });
       batter.p.bat.visible = true;
       // 스윙 잔상 + 바람 가르는 소리
       if (!bunt && swingK >= 0.3 && swingK <= 0.78) {
