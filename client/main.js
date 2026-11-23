@@ -276,7 +276,7 @@ function startLocal(name, o) {
   };
   const iv = setInterval(tickFn, 1000 / 60);
   net = { send: (m) => game.handle('me', m), close: () => clearInterval(iv), local: true, game };
-  window.__hr = { game, getRole: () => getRole(), cam: () => camMode, S: () => S, net: () => net, rp: replay, lct: () => lastContactT, scene, tick: tickFn, renderer, simNow, camera, ball: ballMesh /* [cam] qa */ };
+  window.__hr = { game, getRole: () => getRole(), cam: () => camMode, S: () => S, net: () => net, rp: replay, lct: () => lastContactT, scene, tick: tickFn, renderer, simNow, camera, ball: ballMesh /* [cam] qa */, actors: () => ({ batter, fielders }) /* [anim] qa: 모션 끊김 측정 */ };
   roomCode = null;
   game.start();
   lobby = game.lobbyState();
@@ -943,8 +943,10 @@ function updateWorld(dt) {
       setTag(batter, nm && s.bat.id !== myId ? nm : '', '#ffffff');
       let swingAt = null, contactL = null, loadK = 0;
       if (s.p && s.ph !== 'pitch') {
-        loadK = clamp((t - (s.p.t0 - 0.45)) / 0.4, 0, 1);
-        if (t > s.p.arrive + 0.3 && !s.p.swingAt && !swungLocal[s.p.id]) loadK = clamp(1 - (t - s.p.arrive - 0.3) / 0.4, 0, 1);
+        // [anim 11-23] 준비 동작이 투구 비행 내내 이어짐(예전엔 0.4초 만에 끝나고 0.6초 동안 굳어 있었음):
+        //  와인드업 끝 ~ 공 도착 0.1초 전까지 load(0.25) → 출발 직전(0.28·1.12 = 0.31)까지 천천히, 안 치면 0.3초 뒤 풀어줌
+        { const a = s.p.t0 - 0.45, b = Math.max(a + 0.5, s.p.arrive - 0.1), u = clamp((t - a) / (b - a), 0, 1); loadK = u < 0.55 ? (u / 0.55) * (2 - u / 0.55) : 1 + 0.12 * (u - 0.55) / 0.45; }
+        if (t > s.p.arrive + 0.3 && !s.p.swingAt && !swungLocal[s.p.id]) loadK = clamp(1 - (t - s.p.arrive - 0.3) / 0.4, 0, 1) * 1.12;
         swingAt = role.batter && swungLocal[s.p.id] ? swungLocal[s.p.id] : s.p.swingAt;
         const info = swingInfo[s.p.id];
         const tgt = info ? info.a : [s.p.tx, s.p.ty];
@@ -952,8 +954,12 @@ function updateWorld(dt) {
       }
       let swingK = -1;
       if (swingAt != null) {
-        if (t >= swingAt - 0.13) swingK = t < swingAt ? 0.3 + 0.2 * (t - (swingAt - 0.13)) / 0.13 : Math.min(1, 0.5 + (t - swingAt) / 0.32 * 0.5);
-      }
+        // [anim 11-23] 스윙을 처음 본 시각 기준: 미리 알았으면(0.13초 이상 전) 원래 시간표, 클릭·스냅샷으로 늦게 알았으면
+        //  지금 자세(준비 ≈ K 0.31)에서 임팩트(0.5)까지 0.05초에 휘두름 — 예전엔 K 0.25 → 0.5 로 한 프레임에 튀어 스윙 앞부분(0.35초 분량)이 사라졌음
+        if (batter.swId !== s.p.id) { batter.swId = s.p.id; batter.swSeen = t; batter.swLate = t > swingAt - 0.13; }
+        if (!batter.swLate) { if (t >= swingAt - 0.13) swingK = t < swingAt ? 0.3 + 0.2 * (t - (swingAt - 0.13)) / 0.13 : Math.min(1, 0.5 + (t - swingAt) / 0.32 * 0.5); }
+        else { const e = t - batter.swSeen, k0 = 0.25 * clamp(loadK, 0, 1.12); swingK = e < 0.05 ? k0 + (0.5 - k0) * (e / 0.05) : Math.min(1, 0.5 + (e - 0.05) / 0.32 * 0.5); }
+      } else batter.swId = null;
       if (!batter.trK || batter.trPid !== (s.p && s.p.id)) { batter.trPid = s.p && s.p.id; batter.tr = contactL ? swingTrack(contactL) : null; }
       if (contactL && batter.tr && swingInfo[s.p.id]) batter.tr = swingTrack(contactL);
       const bunt = !!s.bs || (role.batter && buntOn);

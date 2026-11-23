@@ -317,9 +317,9 @@ export class ClipAnimator {
     if (!swinging || c.swingK >= 1) this._batReact();
     const sw0 = this._m('swing');
     if (c.bunt && !this.shot) C.play(this._m('buntStance'), { fade: 0.25 });
-    else if (swinging && (c.swingK < 1 || !this.shot)) { this._cut(); C.scrubK(this.swClip || sw0, c.swingK, { fade: this.swClip && this.swClip !== sw0 ? 0.1 : 0.06 }); }
+    else if (swinging && (c.swingK < 1 || !this.shot)) { this._cut(); C.scrubK(this.swClip || sw0, c.swingK, { fade: this.swClip && this.swClip !== sw0 ? 0.08 : 0.05 }); }
     else if (this._shotOn()) { /* 입장·반응 */ }
-    else if (c.loadK > 0.02) C.scrubK(sw0, 0.25 * clamp(c.loadK, 0, 1), { fade: 0.2 });
+    else if (c.loadK > 0.02) C.scrubK(sw0, 0.25 * clamp(c.loadK, 0, 1.12), { fade: 0.25 }); // [anim] 1.12 = 출발(launch) 직전까지 스트라이드
     else C.play(this._m(this.stance), { fade: 0.35, speed: this.stSpeed });
     if (c.lookW && !(swinging) && !this.shot) C.look(c.lookW, 0.4);
     C.update(dt);
