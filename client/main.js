@@ -740,11 +740,16 @@ function toggleBunt() {
 // ═════════════ 내 수비수 이동 ═════════════
 const ctl = { active: false, x: 0, z: 0, ry: 0, lastIn: 0, lastSend: 0, idx: -1, moving: false };
 const touchMove = { x: 0, y: 0 };
+// [11-23] 이동 기준 방향 고정: 키를 누르고 있는 동안은 '누르기 시작했을 때' 카메라 방향 기준 (3인칭 카메라가 돌아도 같은 키 = 같은 방향, 빙글빙글 헤매던 것)
+const moveBasis = { on: false, x: 0, z: 1, t: 0 };
 function moveDir() {
   let fw = (keys.w || keys.arrowup ? 1 : 0) - (keys.s || keys.arrowdown ? 1 : 0) + touchMove.y;
   let rt = (keys.d || keys.arrowright ? 1 : 0) - (keys.a || keys.arrowleft ? 1 : 0) + touchMove.x;
-  camera.getWorldDirection(tmpV); tmpV.y = 0; tmpV.normalize();
-  const fx_ = tmpV.x, fz = tmpV.z, rx = -fz, rz = fx_;
+  const pressing = Math.abs(fw) > 0.1 || Math.abs(rt) > 0.1;
+  if (!pressing) moveBasis.on = false;
+  else if (!moveBasis.on || nowP() - moveBasis.t > 2.5) { camera.getWorldDirection(tmpV); tmpV.y = 0; tmpV.normalize(); moveBasis.x = tmpV.x; moveBasis.z = tmpV.z; moveBasis.on = true; moveBasis.t = nowP(); }
+  else if (cfg.fieldCam !== 'tps') { camera.getWorldDirection(tmpV); tmpV.y = 0; tmpV.normalize(); moveBasis.x = tmpV.x; moveBasis.z = tmpV.z; } // 중계 시점은 화면 방향이 거의 안 변해서 그대로 따라감
+  const fx_ = moveBasis.x, fz = moveBasis.z, rx = -fz, rz = fx_;
   let mx = fx_ * fw + rx * rt, mz = fz * fw + rz * rt; // D = 화면 오른쪽
   const l = Math.hypot(mx, mz);
   if (l < 0.01) { const f = S && fielders[getRole().fi]; return f ? [Math.sin(f.p.root.rotation.y), Math.cos(f.p.root.rotation.y)] : [0, 1]; }
@@ -771,9 +776,17 @@ function updateControl(dt) {
   if ((Math.abs(fw) > 0.1 || Math.abs(rt) > 0.1) && !(diveAge >= 0 && diveAge < 1.2)) {
     if (!ctl.active) { ctl.x = f[1]; ctl.z = f[2]; ctl.active = true; }
     ctl.lastIn = t;
-    const [mx, mz] = (() => { const d = moveDir(); return d; })();
+    let [mx, mz] = moveDir();
     const mag = Math.min(1, Math.hypot(fw, rt));
-    const spd = (keys.shift ? SPRINT_SPEED : FIELD_SPEED) * mag;
+    let spd = (keys.shift ? SPRINT_SPEED : FIELD_SPEED) * mag;
+    // [11-23] 포구 보조: 공 낙구 지점(주황 원) 8m 안에서 대충 그쪽(±70°)으로 가면 방향을 끌어주고, 다 오면 지나치지 않게 멈춤
+    if (landRing.visible && cfg.assist !== 0) {
+      const tx = landRing.position.x - ctl.x, tz = landRing.position.z - ctl.z, d = Math.hypot(tx, tz);
+      if (d < 8 && d > 0.05) {
+        const ux = tx / d, uz = tz / d, dot = ux * mx + uz * mz;
+        if (dot > 0.35) { const w = 0.55 * clamp((8 - d) / 6, 0, 1); let nx = mx + (ux - mx) * w, nz = mz + (uz - mz) * w; const nl = Math.hypot(nx, nz) || 1; mx = nx / nl; mz = nz / nl; if (d < 1.2) spd *= clamp(d / 1.2, 0.15, 1); }
+      }
+    }
     ctl.x += mx * spd * dt; ctl.z += mz * spd * dt;
     ctl.ry = Math.atan2(mx, mz);
     ctl.moving = true;
