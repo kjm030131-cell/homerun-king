@@ -241,7 +241,7 @@ export function evalPCI(mode, dt, ax, ay, pitchV = 40, ease = 1, hq = 0.85, pull
   if (!J.contact) return null;
   const P = PCI[mode] || PCI.contact;
   let q = pciQ(mode, dt, J, ease);
-  q = 1 - (1 - q) * hq; // 모드별 후하게 (같은 실수라도 타구가 덜 죽음)
+  q = Math.max(0, 1 - (1 - q) * hq); // 모드별 보정: hq<1 후하게(같은 실수라도 타구가 덜 죽음), hq>1 빗맞은 공이 더 약하게 (11-23 난이도)
   // 파울: 타이밍 끝자락이거나 커서 가장자리에 걸치면 자주 파울 (실제처럼 2스트라이크 이후 버티기)
   const pf = (J.tq < 0.25 ? 0.55 * (1 - J.tq / 0.25) : 0) + (J.n > 0.8 ? 0.5 * (J.n - 0.8) / 0.2 : 0) + 0.12;
   if (Math.random() < pf) return { v: rand(14, 26), launch: rand(20, 70), spray: hand * (dt < 0 ? 1 : -1) * rand(55, 125), q: q * 0.5, foul: true };
