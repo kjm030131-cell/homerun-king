@@ -140,7 +140,7 @@ h1{font-size:26px;font-weight:900;line-height:1.2}
   let fbT = 0;
   function fb(id, txt, col, v) { const e = $(id); e.textContent = txt; e.style.color = col || '#e9f0fb'; e.classList.add('pop'); setTimeout(() => e.classList.remove('pop'), 160); clearTimeout(fbT); fbT = setTimeout(() => { e.textContent = ''; }, 2200); if (v) vib(v); }
   function onAck(m) {
-    if (m.k === 'swing') { if (m.lag != null) $('spdL').textContent = `PC까지 ${m.lag}ms (판정은 보정됨)`; if (m.r === 'early') fb('bFb', '투수가 던지기 전이야', '#ffb36b'); else if (m.r === 'skip') fb('bFb', '지금은 칠 공이 없어', '#8ea3bf'); else if (m.r === 'nomo') fb('bFb', '일반 모드 경기야 (키보드·마우스)', '#8ea3bf'); }
+    if (m.k === 'swing') { if (m.lag != null) $('spdL').textContent = `지연 ${m.lag}ms · 자동 보정 ${m.auto > 0 ? '+' : ''}${m.auto}ms`; if (m.r === 'early') fb('bFb', '투수가 던지기 전이야', '#ffb36b'); else if (m.r === 'skip') fb('bFb', '지금은 칠 공이 없어', '#8ea3bf'); else if (m.r === 'nomo') fb('bFb', '일반 모드 경기야 (키보드·마우스)', '#8ea3bf'); }
     if (m.k === 'pitch') { if (m.r === 'ok') fb('pFb', `투구! 세기 ${m.lv}%`, m.lv > 100 ? '#ff6b6b' : m.lv >= 84 ? '#4fd18b' : '#ffcf3f', 40); else fb('pFb', '지금은 던질 수 없어', '#8ea3bf'); }
   }
 

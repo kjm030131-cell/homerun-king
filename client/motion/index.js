@@ -28,6 +28,7 @@ export function createMotion(api) {
   const M = {
     pad: null, cam: null, code: store.get('padCode', null) || newPadCode(),
     calib: store.get('motionCal', 0), // 타이밍 보정(ms, +면 더 늦게 친 걸로)
+    auto: store.get('motionAuto', 0), // [11-23] 자동 보정(ms): 스윙마다 내 평균 타이밍 쪽으로 조금씩
     camLag: 90, // 웹캠 캡처 지연(ms) 기본값
     aim: null, grip: false, lastHS: '', hsT: 0, autoSent: null, log: [],
   };
@@ -40,7 +41,8 @@ export function createMotion(api) {
   function swing(atLocalMs, strong, src) {
     const S = api.S(), role = api.role();
     if (!S || !S.mo || !role.batter || S.ph !== 'pitching' || !S.p) return S && !S.mo ? 'nomo' : 'skip';
-    const lagMs = performance.now() - atLocalMs - M.calib + (src === 'cam' ? M.camLag : 0); // 보정 +면 더 늦게 친 걸로
+    // 각속도 정점은 '맞혔다고 느끼는 순간'보다 늦음 → 기본 80ms 앞당김 + 자동 보정 + 수동 보정
+    const lagMs = performance.now() - atLocalMs - M.calib - M.auto + (src === 'cam' ? M.camLag : 80);
     const t = api.simNow() - lagMs / 1000;
     if (t < S.p.t0 - 0.05) return 'early'; // 공 놓기 전 동작(준비 동작)은 무시
     const p = S.p, sd = src === 'cam' ? 0.07 : 0.055;
@@ -48,6 +50,9 @@ export function createMotion(api) {
     api.swing(strong ? 'power' : 'contact', { t, aim });
     M.log.push({ src, lag: Math.round(lagMs), dt: Math.round((t - p.arrive) * 1000) }); if (M.log.length > 20) M.log.shift();
     M.lastLag = Math.round(lagMs);
+    // 자동 보정: 공 근처(±250ms)에서 휘두른 스윙만, 어긋난 만큼의 30%씩 반영 (5~6번이면 내 타이밍에 맞춰짐)
+    const dtMs = (t - p.arrive) * 1000;
+    if (Math.abs(dtMs) < 250) { M.auto = Math.max(-220, Math.min(220, M.auto - dtMs * 0.3)); store.set('motionAuto', Math.round(M.auto)); }
     return 'ok';
   }
   // ── 투구 ──
@@ -64,8 +69,8 @@ export function createMotion(api) {
   function onPad(m) {
     if (m.t === 'sws') { // 휘두르기 시작: 정점(=임팩트)은 보통 시작 뒤 ~60ms → 그 시각으로 화면 스윙만 먼저
       const S = api.S(), role = api.role();
-      if (S && S.mo && role.batter && S.ph === 'pitching' && S.p) { const lag = performance.now() - M.pad.toLocal(m.at) - M.calib; const t = api.simNow() - lag / 1000 + 0.06; if (t >= S.p.t0) api.preSwing(t); }
-    } else if (m.t === 'swing') { const r = swing(M.pad.toLocal(m.at), m.mode === 'power', 'pad'); M.pad.send({ t: 'ack', k: 'swing', r, lag: r === 'ok' ? M.lastLag : null }); }
+      if (S && S.mo && role.batter && S.ph === 'pitching' && S.p) { const lag = performance.now() - M.pad.toLocal(m.at) - M.calib - M.auto + 80; const t = api.simNow() - lag / 1000 + 0.06; if (t >= S.p.t0) api.preSwing(t); }
+    } else if (m.t === 'swing') { const r = swing(M.pad.toLocal(m.at), m.mode === 'power', 'pad'); M.pad.send({ t: 'ack', k: 'swing', r, lag: r === 'ok' ? M.lastLag : null, auto: Math.round(M.auto) }); }
     else if (m.t === 'grip') { M.grip = !!m.on; if (!m.on) { M.aim = null; api.setAim(null); } }
     else if (m.t === 'aim') { M.aim = [clamp(+m.x || 0, -1.6, 1.6), clamp(+m.y || 0, -1.6, 1.6)]; }
     else if (m.t === 'type') { if (TYPES_KO[m.v]) api.setType(m.v); M.hsT = 0; }
@@ -110,7 +115,7 @@ export function createMotion(api) {
     setText('mPadSt', padTxt); cls('mPadSt', 'ok', !!(P && P.pads));
     if (M.cam) { setText('mCamSt', M.cam.on ? '웹캠 켜짐 · 옆으로 서서 휘둘러봐' : M.cam.err || '꺼짐'); setText('mCamBtn', M.cam.on ? '웹캠 끄기' : '웹캠 켜기'); cls('mCamSt', 'ok', M.cam.on); }
     show('mCamView', !!(M.cam && M.cam.on));
-    setText('mCalV', (M.calib > 0 ? '+' : '') + M.calib + 'ms');
+    setText('mCalV', (M.calib > 0 ? '+' : '') + M.calib + 'ms' + (M.auto ? ` (자동 ${M.auto > 0 ? '+' : ''}${Math.round(M.auto)})` : ''));
     const on = M.connected(); setText('mPlaySt', on ? '준비 끝 · 플레이 볼을 눌러!' : '핸드폰을 연결하거나 웹캠을 켜면 시작할 수 있어'); cls('mPlaySt', 'ok', on);
   }
 
