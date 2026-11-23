@@ -70,6 +70,7 @@ const STEP = String(function step(arg) {
       const { e, d } = window.__mev.shift();
       if (e === 'batterUp') { W.bu = t; W.n++; if (W.n >= 2) { sched('motion-enter-a', t + 0.9, { pos: [-1.2, 1.4, 4.2], look: [1.6, 0.9, 0], fov: 42 }, 'Walk_In/Step_In 시작'); sched('motion-enter-b', t + 2.2, { pos: [-1.2, 1.4, 4.2], look: [1.3, 0.9, 0], fov: 42 }, '입장 중간'); } }
       if (e === 'windup' && W.bu && t - W.bu > 3.2 && W.n >= 2) sched('motion-stance', t + 0.05, batCam, '타석 대기');
+      if (e === 'windup' && s.bat && s.bat.h < 0) { sched('next-lefty-stance', t + 0.05, { pos: [1.8, 1.35, 3.6], look: [-1.1, 0.95, 0.1], fov: 42 }, '[lefty] 좌타 대기(헬멧 귀가리개 오른쪽)'); sched('next-lefty-catcher', t + 1.0, { pos: [0.3, 1.9, -5.5], look: [0, 1.0, 6], fov: 40 }, '[lefty] 포수 뒤: 좌타석'); }
       if (e === 'windup') { const r = (d.on || []).some((x) => x); sched(r ? 'motion-pitch-stretch-peak' : 'motion-pitch-peak', t + 1.32, { pos: [6.5, 1.1, 18.2], look: [0, 1.1, 18.2], fov: 35 }, '레그킥 정점 멈춤'); sched(r ? 'motion-pitch-stretch-release' : 'motion-pitch-release', t + 1.85, { pos: [6.5, 1.1, 18.0], look: [0, 1.2, 17.6], fov: 35 }, '릴리스 = 와인드업 + 1.85초'); }
       if (e === 'release') sched('motion-catcher', t + d.T - 0.03, { pos: [-2.6, 0.8, -0.9], look: [0, 0.6, -0.8], fov: 40 }, '포수 받기');
       if (e === 'strikeCall') { sched(d.k ? 'motion-ump-k' : 'motion-ump-strike', t + (d.k ? 0.8 : 0.55), { pos: [3.2, 1.3, -3.4], look: [0, 1.0, -1.4], fov: 40 }, d.k ? '삼진 콜' : '스트라이크 콜'); }
@@ -90,8 +91,9 @@ const STEP = String(function step(arg) {
     // 스윙: 컨택 순간(swingAt) — 클립별로 한 장씩
     if (s.p && s.p.swingAt && t >= s.p.swingAt && t - s.p.swingAt < 0.06 && !W.swings[s.p.id]) {
       W.swings[s.p.id] = 1;
-      const b = near(0.95, 0.05); const nm = b ? cur(b) : '?';
+      const b = near(0.95 * (s.bat && s.bat.h < 0 ? -1 : 1), 0.05); const nm = b ? cur(b) : '?';
       if (s.ph === 'live') sched('motion-swing-follow', t + 0.22, { pos: [0.9, 1.3, 4.6], look: [0.6, 1.0, 0.0], fov: 40 }, '타격 후 팔로스루(주자로 바뀌기 전)');
+      if (s.bat && s.bat.h < 0 && !has('next-lefty-swing-' + nm)) return { name: 'next-lefty-swing-' + nm, cam: { pos: [-0.9, 1.3, 4.6], look: [-0.6, 1.0, 0.0], fov: 40 }, why: '[lefty] 좌타 스윙 컨택 프레임', t, clip: nm };
       if (nm && !has('motion-swing-' + nm)) return { name: 'motion-swing-' + nm, cam: { pos: [0.9, 1.3, 4.6], look: [0.6, 1.0, 0.0], fov: 40 }, why: '스윙 컨택 프레임 = sim 스윙 시각', t, clip: nm };
     }
     // 서성임(mill)

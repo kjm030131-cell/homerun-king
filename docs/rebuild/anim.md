@@ -126,6 +126,14 @@
 | (선택) `jogOut` | **Jogging** (In Place) | Slow Jog | 이닝 교대용(넣으면 `clips.js` 에 `jogOut: { loop: true, lockXZ: true, speed: 3, optional: true, fallback: 'run' }` 추가 후 actor `_loco` 에서 6.8m/s 미만에 사용) |
 | (선택) `highFive` | **High Five** | Clapping | 홈런 뒤 홈 옆 하이파이브(지금은 손 IK) |
 
+### 11-23 [lefty] 좌타자 화면
+- 타석: 루트 x = 0.95·h, 방향 ry = −90°·h (main.js). 카메라는 타자 x 부호로 자동 미러(camera.js `side()` 그대로 — 확인함).
+- 클립: `procedural.js mirrorName` — 타자 클립 11개(batStance·2·3, swing·powerSwing·swing2, buntStance, batStepIn/WalkIn/WalkOut, batStrike)를 처음 쓸 때 '<이름>_L' 로 거울(30fps 샘플, 바인드 대비 월드 회전 차이를 짝 뼈에 (x,−y,−z,w)로, 엉덩이 x 반전). 마커·kmap 그대로라 스윙 컨택 = swingK 0.5 동일. ClipAnimator `_m(이름)`.
+- 배트: 같은 배트를 캐릭터 공간 x 거울로 왼손 뼈에(`CharPlayer.batL`), `setHand(h)` 로 바꿈. 헬멧: 내용을 거울 그룹에 넣어 좌타면 x −1 → 귀가리개 오른쪽 귀(투수 쪽).
+- 옛 몸(?legacy)은 루트 x 배율 −1(통째 거울, 등번호 글씨도 뒤집힘 — 대체 경로라 그대로).
+- 주자로 나간 뒤 헬멧은 우타 모양(주자 스냅샷에 타석 정보 없음).
+- 확인: `node tools/qa/motionshots.mjs --only=next-lefty` → `next-lefty-stance|catcher|swing-*.png`.
+
 ## 1. 구조
 
 | 파일 | 하는 일 |

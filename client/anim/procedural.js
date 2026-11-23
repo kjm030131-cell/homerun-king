@@ -123,3 +123,64 @@ export function buildProcClips(lib, T, names = PROC_NAMES) {
   if (P) P.mixer.uncacheRoot(P.model);
   return out;
 }
+
+// ── [lefty] 좌타자 클립: 우타 클립을 캐릭터 좌우(로컬 x)로 거울 ──
+//   프레임마다 뼈 월드 회전 G 를 바인드 대비 차이 D = G·B⁻¹ 로 보고, 짝 뼈(Left↔Right)에 거울 차이 (x, −y, −z, w)·B짝 을 입힌 뒤 로컬로 되돌림.
+//   좌우 뼈 축 규약이 달라도(Mixamo 는 좌우 축이 비대칭) 바인드 대비 차이로 계산하므로 맞음. 엉덩이 위치는 x 반전.
+//   게임은 좌타자 루트를 x −0.95·반대 방향(ry +90°)으로 두므로 '로컬 x 거울 + 180° 회전' = 홈플레이트 기준 좌우 거울.
+//   처음 필요할 때 클립마다 한 번(30fps 샘플, 수 ms) → 이름 '<클립>_L' 로 라이브러리에 등록, 모든 선수 공유.
+export const MIRROR_CLIPS = ['batStance', 'batStance2', 'batStance3', 'swing', 'powerSwing', 'swing2', 'buntStance', 'batStepIn', 'batWalkIn', 'batWalkOut', 'batStrike'];
+const partner = (n) => (n.startsWith('Left') ? 'Right' + n.slice(4) : n.startsWith('Right') ? 'Left' + n.slice(5) : n);
+const MP = new WeakMap();
+function mirrorClip(lib, e) {
+  let M = MP.get(lib);
+  if (!M) {
+    const P = makeProbe(lib), B = {};
+    for (const n of P.names) { const r = lib.rest.get(n); const q = new THREE.Quaternion(); if (r) r.decompose(_a, q, _b); B[n] = q; }
+    P.model.updateMatrixWorld(true);
+    M = { P, B, Pa: P.b.Hips.parent.getWorldQuaternion(new THREE.Quaternion()) }; MP.set(lib, M);
+  }
+  const { P, B, Pa } = M, names = P.names, dur = e.clip.duration;
+  const N = Math.max(1, Math.ceil(dur * 30)), times = [], vals = {}, hv = [], G = {}, Gp = {}, prev = {};
+  for (const n of names) vals[n] = [];
+  const act = P.mixer.clipAction(e.clip); act.reset(); act.play(); act.timeScale = 0;
+  const inv = new THREE.Quaternion(), D = new THREE.Quaternion(), L = new THREE.Quaternion(), hw = new THREE.Vector3();
+  for (const n of names) { G[n] = new THREE.Quaternion(); Gp[n] = new THREE.Quaternion(); }
+  for (let i = 0; i <= N; i++) {
+    const t = Math.min(dur, (i / N) * dur); times.push(t);
+    act.time = Math.min(t, dur - 1e-4); P.mixer.update(0); P.model.updateMatrixWorld(true);
+    for (const n of names) P.b[n].getWorldQuaternion(G[n]);
+    for (const n of names) {
+      const m = partner(n); if (!B[m] || !G[n]) continue;
+      D.copy(G[n]).multiply(inv.copy(B[n]).invert());
+      D.set(D.x, -D.y, -D.z, D.w);
+      Gp[m].copy(D).multiply(B[m]);
+    }
+    for (const n of names) {
+      const par = P.b[n].parent;
+      L.copy(par && par.isBone && Gp[par.name] ? inv.copy(Gp[par.name]).invert() : inv.copy(Pa).invert()).multiply(Gp[n]);
+      if (prev[n] && prev[n].dot(L) < 0) L.set(-L.x, -L.y, -L.z, -L.w);
+      (prev[n] || (prev[n] = new THREE.Quaternion())).copy(L);
+      vals[n].push(L.x, L.y, L.z, L.w);
+    }
+    P.b.Hips.getWorldPosition(hw); hw.x = -hw.x; P.b.Hips.parent.worldToLocal(hw); hv.push(hw.x, hw.y, hw.z);
+  }
+  act.stop(); P.mixer.uncacheClip(e.clip);
+  const tracks = names.map((n) => new THREE.QuaternionKeyframeTrack(n + '.quaternion', times, vals[n]));
+  tracks.push(new THREE.VectorKeyframeTrack('Hips.position', times, hv));
+  const clip = new THREE.AnimationClip(e.name + '_L', dur, tracks); clip.optimize();
+  return clip;
+}
+// 좌타 클립 이름 (없으면 만들어 등록). 실패하면 원래 이름
+export function mirrorName(lib, CLIPS, name) {
+  const nm = name + '_L';
+  if (lib.clips.has(nm)) return nm;
+  const e = lib.clips.get(name); if (!e || !MIRROR_CLIPS.includes(name)) return name;
+  try {
+    const cfg = { ...e.cfg, optional: true, fallback: e.cfg.fallback && MIRROR_CLIPS.includes(e.cfg.fallback) ? e.cfg.fallback + '_L' : e.cfg.fallback };
+    CLIPS[nm] = cfg;
+    const m = { name: nm, clip: mirrorClip(lib, e), cfg, markers: { ...e.markers }, index: lib.clipList.length, mirror: true };
+    lib.clipList.push(m); lib.clips.set(nm, m);
+    return nm;
+  } catch (err) { console.warn('[anim] 좌타 클립', name, err.message); return name; }
+}

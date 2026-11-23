@@ -1,7 +1,7 @@
 // 사람 타자 PCI + 타이밍 위주 타격 (docs/rebuild/gameplay.md 5절) · 바운드/경계 (6절)
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { Game, inZone, PCI, pciJudge, evalSwing, integrate, surface, standR, FOUL, WALL_FOUL } from '../shared/sim.js';
+import { Game, inZone, PCI, pciJudge, evalSwing, integrate, surface, standR, FOUL, WALL_FOUL, handOf, cpuBats } from '../shared/sim.js';
 
 // 결정적 난수 (사람 흉내 테스트가 CI에서 운에 따라 깨지지 않게)
 const seeded = (s) => () => { s |= 0; s = (s + 0x6D2B79F5) | 0; let t = Math.imul(s ^ (s >>> 15), 1 | s); t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t; return ((t ^ (t >>> 14)) >>> 0) / 4294967296; };
@@ -39,6 +39,22 @@ test('공이 커서 아래쪽 → 땅볼, 가운데 → 라인드라이브, 위�
   assert.ok(avg(-RY * 0.8)[0] > 24, `커서가 공 아래(공은 커서 위쪽): ${avg(-RY * 0.8)[0].toFixed(1)}°`);
   assert.ok(avg(0, -PCI.contact.W * 0.6)[1] > 15, '빠르면 당겨서 좌측(+)');
   assert.ok(avg(0, PCI.contact.W * 0.6)[1] < -10, '늦으면 밀어서 우측(-)');
+});
+
+// [lefty] 좌타자: 판정은 같고 방향만 거울 — 빠르면 당겨서 우측(-), 늦으면 밀어서 좌측(+). CPU 타자 분포도 반전
+test('좌타자: 당겨치기/밀어치기 방향 반전 + 타석·몸에 맞는 공 쪽 + 스위치는 투수 반대', () => {
+  const avg = (hand, dt, human = true) => { let sp = 0, n = 0; for (let i = 0; i < 800; i++) { const r = evalSwing('contact', dt, 0, 0, 40, 1, human, 1, 0, hand); if (r && !r.foul && !r.bunt) { sp += r.spray; n++; } } return sp / n; };
+  const W = PCI.contact.W;
+  assert.ok(avg(-1, -W * 0.6) < -15, `좌타 빠름 → 우측(-): ${avg(-1, -W * 0.6).toFixed(1)}`);
+  assert.ok(avg(-1, W * 0.6) > 10, `좌타 늦음 → 좌측(+): ${avg(-1, W * 0.6).toFixed(1)}`);
+  assert.ok(avg(-1, -0.03, false) < -5 && avg(1, -0.03, false) > 5, 'CPU 타자도 반전');
+  assert.equal(handOf('R'), 1); assert.equal(handOf('L'), -1); assert.equal(handOf('S'), -1); assert.equal(handOf(undefined), 1);
+  // 경기: 사람 타자 좌타 설정 → s.bat.h = -1, CPU 타자는 구단·타순으로 정해진 값
+  const g = new Game({}); g.addPlayer('me', 'me'); g.players.get('me').team = 'away'; g.applySettings({ innings: 1 });
+  g.handle('me', { t: 'bats', v: 'L' }); g.start();
+  assert.equal(g.batter.id, 'me'); assert.equal(g.snapshot().bat.h, -1);
+  let L = 0; for (let s = 1; s <= 9; s++) if (handOf(cpuBats(3, 'home', s)) < 0) L++;
+  assert.ok(L >= 1 && L <= 5, `CPU 좌타 ${L}/9`);
 });
 
 // 보통 사람 흉내(옛 '초보 흉내' 테스트와 같은 오차): 타이밍 σ 100ms(변화구 ×1.25), 커서 오차 σ 14cm(변화구 세로 ×1.25), 존 안 78%/밖 30% 스윙(2스트 90%/42%), 강타 25%

@@ -33,6 +33,7 @@ const nowP = () => performance.now() / 1000;
 // [ui] 설정·localStorage·TOUCH 는 client/ui/settings.js 로 옮김 (cfg/store 는 위 import)
 // [cam] fcam(수비 3인칭 드래그 상태)는 client/game/camera.js
 setVolume(cfg.vol / 100);
+bus.on('ui:bats', (v) => { if (net) net.send({ t: 'bats', v }); }); // [lefty] 설정에서 바꾸면 다음 타석부터
 initAudio(); // [audio]
 
 // ═════════════ 렌더러 ═════════════
@@ -263,7 +264,7 @@ function startLocal(name, o) {
   const game = new Game({ emit: (m) => handleMsg(m), sendTo: (id, m) => handleMsg(m), onGameOver: (sum) => saveLocalCareer(sum, name) });
   myId = 'me'; myName = name; bus.emit('ui:me', { id: myId }); // [audio] 내 타석 오르간(batterUp)용
   game.addPlayer('me', name);
-  const me = game.players.get('me'); me.team = o.team; me.pos = o.pos;
+  const me = game.players.get('me'); me.team = o.team; me.pos = o.pos; me.bats = cfg.bats || 'R'; // [lefty]
   game.applySettings({ mode: o.mode, innings: o.inn, derbyOuts: o.mode === 'derby' ? Math.max(5, o.inn * 3) : 10, diff: o.diff, clubs: o.clubs || [0, 1], pitRot: 'fixed', fieldCtl: o.fld || 'auto', tod: o.tod || 'night', hitEase: o.hitEase ?? 1, rules: o.rules }); // [gameplay] rules: 'real' | 'casual' (ui가 메뉴에서 넘겨줄 것)
   applyClubs(game.set.clubs);
   let last = performance.now();
@@ -291,7 +292,7 @@ function connectWS(code, name, pw = '') {
   const ws = new WebSocket(`${proto}://${location.host}/ws/${code}?name=${encodeURIComponent(name)}&token=${encodeURIComponent(tok)}&pw=${encodeURIComponent(pw)}`);
   let opened = false;
   SM.reset(); // [net] 새 소켓은 통째 스냅샷부터
-  ws.onopen = () => { opened = true; wsRetry = 0; $('conn').classList.add('hide'); };
+  ws.onopen = () => { opened = true; wsRetry = 0; $('conn').classList.add('hide'); ws.send(JSON.stringify({ t: 'bats', v: cfg.bats || 'R' })); }; // [lefty] 내 타석(좌/우/스위치)
   ws.onmessage = (e) => { if (net && net.ws !== ws) return; /* [net] 재접속 뒤 옛 소켓에 남은 메시지 무시 */ lastMsgAt = performance.now(); try { handleMsg(JSON.parse(e.data)); } catch (err) { console.error(err); } };
   ws.onclose = (e) => {
     if (!net || net.ws !== ws) return;
@@ -444,7 +445,7 @@ function onSnap(s) {
     if (!mine) onContact(s.p, s.lh ? s.lh.q : 0.6, s.lh && s.lh.mode === 'bunt');
     fx.trailClear();
     droppedBat.visible = true;
-    droppedBat.position.set(0.9 + Math.random() * 0.4, 0, 0.6 + Math.random() * 0.6); droppedBat.rotation.y = Math.random() * Math.PI;
+    droppedBat.position.set((s.bat && s.bat.h < 0 ? -1 : 1) * (0.9 + Math.random() * 0.4), 0, 0.6 + Math.random() * 0.6); droppedBat.rotation.y = Math.random() * Math.PI; // [lefty]
   }
   if (s.ph === 'pitch') droppedBat.visible = false;
   if (prevS && prevS.bat && s.bat && (prevS.bat.name !== s.bat.name || prevS.bat.id !== s.bat.id || prevS.bat.n !== s.bat.n)) { buntOn = false; if (s.mode !== 'derby') startIntro(s); }
@@ -935,7 +936,9 @@ function updateWorld(dt) {
   if (batter) {
     batter.p.root.visible = showBatter && !(camMode === 'bat' && false);
     if (showBatter) {
-      place(batter, 0.95, 0.05, -Math.PI / 2, dt, 100);
+      const bh = s.bat && s.bat.h < 0 ? -1 : 1; // [lefty] 좌타자: 1루 쪽(-x)에서 반대 방향 + 거울 클립·배트·헬멧 (카메라는 타자 x 부호로 자동 미러)
+      if (batter.p.setHand) batter.p.setHand(bh); else batter.p.root.scale.x = bh; // 옛 몸은 통째 거울
+      place(batter, 0.95 * bh, 0.05, -Math.PI / 2 * bh, dt, 100);
       const nm = nameOf(s.bat && s.bat.id);
       setTag(batter, nm && s.bat.id !== myId ? nm : '', '#ffffff');
       let swingAt = null, contactL = null, loadK = 0;
