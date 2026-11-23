@@ -1244,15 +1244,18 @@ function deadzoneCam(dt) {
   tLook.set(P.x + Math.sin(DZ.yaw) * Math.cos(DZ.pitch) * 30, P.y + Math.sin(DZ.pitch) * 30, P.z + Math.cos(DZ.yaw) * Math.cos(DZ.pitch) * 30);
   return DZ.fov;
 }
-let camDirect = false;
+let camDirect = false, titleCamSeen = false;
 function updateCamera(dt, time) {
   let k = 4, fov = 55;
   camDirect = false;
   const tp = nowP();
   if (screen === 'title' || screen === 'room' || screen === 'browser' || !S || !S.fl) {
-    const a = time * 0.05;
-    tPos.set(Math.sin(a) * 175, 46 + Math.sin(time * 0.13) * 8, Math.cos(a) * 165 + 50);
-    tLook.set(0, 4, 52); k = 1.5; camMode = 'title';
+    // [ui] 메뉴 배경: 경기장 안쪽을 낮게 도는 중계 드론 컷 (예전엔 관중석 지붕 뒤로 지나가 검은 판이 화면을 덮었음)
+    const a = time * 0.045 + 0.9;
+    tPos.set(Math.sin(a) * 52, 21 + Math.sin(time * 0.11) * 4, 50 - Math.cos(a) * 56);
+    tLook.set(Math.sin(a + 1.2) * 8, 3, 50); k = 1.5;
+    if (camMode !== 'title' && !titleCamSeen) { camDirect = true; titleCamSeen = true; } // 첫 화면은 바로 그 자리에서 시작
+    camMode = 'title';
   } else {
     const role = getRole();
     const ph = S.ph;

@@ -1,6 +1,6 @@
 // [ui] 화면 흐름: 타이틀 → 모드 선택(리얼/캐주얼) → 로비(혼자·방 만들기·방 목록·코드 참가) → 대기실 → 경기(HUD) → 결과
 // main.js는 createUI(ctx) 하나만 부르고, 게임 상태는 ctx 게터로만 읽는다. UI는 게임 상태를 바꾸지 않고 서버/Game에 메시지만 보낸다.
-import { $, esc, show, isShown, segVal, setSeg, bindSegs } from './dom.js';
+import { $, esc, show, isShown, segVal, setSeg, bindSegs, replay } from './dom.js';
 import { cfg, store, bindSettings, fillSettings, emitVolume, TOUCH } from './settings.js';
 import { banner, feedback, toast, castLine, stopSpeech, clearBanner, gradeFeedback } from './announce.js';
 import { RULES } from '../../shared/rules.js';
@@ -37,8 +37,18 @@ export function createUI(ctx) {
   if (OFFLINE) document.querySelectorAll('.mp').forEach((e) => e.classList.add('hide'));
 
   // ── 화면 전환 ──
+  // [ui] 화면 전환 연출: 중계 화면 전환처럼 비스듬한 띠(남색·실밥 빨강·분필)가 쓸고 지나가며 새 화면이 드러남
+  //  setScreen 은 동기 그대로(상태는 즉시 바뀜) — 띠가 이미 화면을 덮은 상태에서 시작해 걷히기만 하므로 로직 영향 없음
+  function wipe(kind) {
+    const w = $('wipe'); if (!w || matchMedia('(prefers-reduced-motion: reduce)').matches) return;
+    w.className = ''; void w.offsetWidth; w.className = 'go ' + kind;
+    clearTimeout(w._t); w._t = setTimeout(() => { w.className = ''; }, kind === 'game' ? 1300 : 800);
+  }
+  function enter(id) { const e = $(id); if (!e) return; e.classList.remove('enter'); void e.offsetWidth; e.classList.add('enter'); }
   function setScreen(sc) {
     if (sc === 'browser') sc = 'lobby';
+    const prev = screen;
+    if (prev !== sc && prev && sc !== 'over' && !(prev === 'over' && sc === 'game')) { wipe(sc === 'game' ? 'game' : 'menu'); if (SCREENS.includes(sc)) enter(sc); }
     screen = sc;
     for (const id of SCREENS) show(id, sc === id);
     show('hud', sc === 'game' || sc === 'over'); show('over', sc === 'over');
@@ -50,6 +60,7 @@ export function createUI(ctx) {
     ctx.onScreen(sc);
     bus.emit('ui:screen', { name: sc }); // [ui] 사운드 파트용
   }
+  requestAnimationFrame(() => enter('title'));
   const ui = {
     get screen() { return screen; }, setScreen,
     get quickOpen() { return quickOpen; },
@@ -110,26 +121,62 @@ export function createUI(ctx) {
     for (const [k, id] of [['me', 'oClubMe'], ['op', 'oClubOp']]) { const b = $(id); b.querySelector('img').src = emblemURL(soloClub[k], 72); b.querySelector('span').textContent = clubOf(soloClub[k]).name; }
   }
   document.querySelectorAll('[data-solo]').forEach((b) => (b.onclick = () => openClubPicker({ solo: b.dataset.solo })));
-  $('bSolo').onclick = () => { if (!getName()) return; ctx.unlockAudio(); paintSoloClubs(); setSeg('oRules', cfg.rules); oDefaults(cfg.rules); setSeg('oHit', store.get('hitEase', cfg.rules === 'casual' ? 0 : 1)); setSeg('oTod', store.get('tod', 'night')); openModal('soloM'); };
-  $('oMode').addEventListener('change', (e) => { $('oInnLbl').textContent = e.detail === 'derby' ? '아웃 수 (×3)' : '이닝'; show('oInnWrap', e.detail !== 'practice'); });
+  // [ui] 지난번 혼자 하기 설정 기억 (규칙은 모드 선택 화면 값을 따름)
+  const oMode = (m) => { $('oInnLbl').textContent = m === 'derby' ? '아웃 수 (×3)' : '이닝'; show('oInnWrap', m !== 'practice'); };
+  const oLoad = () => {
+    const o = store.get('solo', null);
+    setSeg('oRules', cfg.rules); oDefaults(cfg.rules);
+    setSeg('oHit', store.get('hitEase', cfg.rules === 'casual' ? 0 : 1)); setSeg('oTod', store.get('tod', 'night'));
+    if (o) {
+      if (o.mode) setSeg('oMode', o.mode);
+      if (o.inn && o.rules === cfg.rules) setSeg('oInn', o.inn);
+      if (o.diff != null) setSeg('oDiff', o.diff);
+      if (o.team) setSeg('oTeam', o.team);
+      if (o.fld) setSeg('oFld', o.fld);
+      if (o.pos) $('oPos').value = o.pos;
+    }
+    oMode(segVal('oMode'));
+    paintPreset();
+  };
+  // 빠른 설정: 누르면 해당 값으로 맞춤 (그대로 '플레이 볼' 누르면 됨)
+  const PRESETS = { quick: { mode: 'game', inn: 3 }, full: { mode: 'game', inn: 9 }, derby: { mode: 'derby', inn: 3 }, practice: { mode: 'practice' } };
+  function paintPreset() {
+    const m = segVal('oMode'), inn = +segVal('oInn');
+    document.querySelectorAll('#oPresets button').forEach((b) => { const p = PRESETS[b.dataset.p]; b.classList.toggle('on', p.mode === m && (p.inn == null || p.inn === inn)); });
+  }
+  document.querySelectorAll('#oPresets button').forEach((b) => (b.onclick = () => {
+    const p = PRESETS[b.dataset.p]; setSeg('oMode', p.mode); if (p.inn) setSeg('oInn', p.inn); oMode(p.mode); paintPreset();
+    replay(b, 'tap');
+  }));
+  for (const id of ['oMode', 'oInn']) $(id).addEventListener('click', () => setTimeout(paintPreset, 0));
+  $('bSolo').onclick = () => { if (!getName()) return; ctx.unlockAudio(); paintSoloClubs(); oLoad(); openModal('soloM'); };
+  $('oMode').addEventListener('change', (e) => oMode(e.detail));
   const oDefaults = (r) => { setSeg('oHit', r === 'casual' ? 0 : 1); setSeg('oInn', RULES[r].innings); };
   $('oRules').addEventListener('change', (e) => oDefaults(e.detail));
   $('oGo').onclick = () => {
     if (!ctx.myName && !getName()) return;
     closeModal('soloM'); ctx.unlockAudio(); showErr('');
     store.set('tod', segVal('oTod')); store.set('hitEase', +segVal('oHit'));
+    store.set('solo', { rules: segVal('oRules'), mode: segVal('oMode'), inn: +segVal('oInn'), diff: +segVal('oDiff'), team: segVal('oTeam'), fld: segVal('oFld'), pos: $('oPos').value });
     const rules = soloRules = segVal('oRules') || cfg.rules;
     ctx.startLocal(ctx.myName, { rules, fld: segVal('oFld'), hitEase: +segVal('oHit'), tod: segVal('oTod'), mode: segVal('oMode'), inn: +segVal('oInn'), diff: +segVal('oDiff'), team: segVal('oTeam'), pos: $('oPos').value, clubs: segVal('oTeam') === 'away' ? [soloClub.me, soloClub.op] : [soloClub.op, soloClub.me] });
     setScreen('game');
   };
 
   // ── 방 만들기 ──
-  $('bCreate').onclick = () => { if (!getName()) return; ctx.unlockAudio(); setSeg('cRules', cfg.rules); cDefaults(cfg.rules); $('cName').value = `${ctx.myName}의 방`; openModal('createM'); };
+  $('bCreate').onclick = () => { if (!getName()) return; ctx.unlockAudio(); setSeg('cRules', cfg.rules); cDefaults(cfg.rules); $('cName').value = `${ctx.myName}의 방`; setTimeout(cPaint, 0); openModal('createM'); };
   // 규칙을 바꾸면 그 모드 기본값으로 (이닝은 shared/rules.js RULES.innings — 리얼 9, 캐주얼 3)
   const cDefaults = (r) => { setSeg('cHit', r === 'casual' ? 0 : 1); if (segVal('cMode') === 'game') $('cInn').value = String(RULES[r].innings); };
   $('cRules').addEventListener('change', (e) => cDefaults(e.detail));
   $('cMode').addEventListener('change', (e) => { $('cInn').value = e.detail === 'derby' ? '10' : '3'; });
   $('cSize').addEventListener('change', (e) => show('cMaxWrap', e.detail === '0'));
+  // [ui] 방 만들기 빠른 설정
+  const CPRE = { quick: { mode: 'game', inn: '3', size: '2' }, full: { mode: 'game', inn: '9', size: '3' }, duel: { mode: 'game', inn: '3', size: '1' }, derby: { mode: 'derby', inn: '10', size: '0' } };
+  const cPaint = () => document.querySelectorAll('#cPresets button').forEach((b) => { const p = CPRE[b.dataset.p]; b.classList.toggle('on', p.mode === segVal('cMode') && p.inn === $('cInn').value && p.size === segVal('cSize')); });
+  document.querySelectorAll('#cPresets button').forEach((b) => (b.onclick = () => {
+    const p = CPRE[b.dataset.p]; setSeg('cMode', p.mode); $('cInn').value = p.inn; setSeg('cSize', p.size); show('cMaxWrap', p.size === '0'); cPaint(); replay(b, 'tap');
+  }));
+  for (const id of ['cMode', 'cSize', 'cInn']) $(id).addEventListener(id === 'cInn' ? 'change' : 'click', () => setTimeout(cPaint, 0));
   $('cGo').onclick = async () => {
     closeModal('createM');
     try {

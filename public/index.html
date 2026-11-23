@@ -507,7 +507,118 @@ table.ls tr.sep th{padding-top:18px;border-top:2px solid var(--line2)}
   .help dl{grid-template-columns:1fr}
   .help dt{text-align:left}
 }
+
+.presets.mini{padding:0;grid-template-columns:repeat(4,1fr)}
+.presets.mini button{padding:9px 11px}
+.presets.mini button b{font-size:16px}
+.presets.mini button small{font-size:11px}
+.roomdet{border-top:1px solid var(--line);padding-top:8px}
+.roomdet summary{cursor:pointer;font-size:12.5px;color:var(--steel);font-weight:700;list-style:none;display:flex;gap:10px;align-items:center;padding:4px 0}
+.roomdet summary:before{content:'';width:0;height:0;border:5px solid transparent;border-left:7px solid currentColor;transition:transform .2s var(--ease)}
+.roomdet[open] summary:before{transform:rotate(90deg) translateX(2px)}
+.roomdet summary::-webkit-details-marker{display:none}
+.roomdet .detbody{display:grid;grid-template-columns:1fr 1fr;gap:14px;padding-top:10px;animation:rise .35s var(--ease)}
+@media (max-width:900px){.presets.mini{grid-template-columns:repeat(2,1fr)}}
+
+/* 경기 시작: 스코어버그·매치업이 중계 그래픽처럼 밀려 들어옴 */
+#hud:not(.hide) #bug{animation:slideL .6s var(--ease) .75s both}
+#hud:not(.hide) #matchup{animation:slideL .6s var(--ease) .85s both}
+#hud:not(.hide) #role{animation:slideR .6s var(--ease) .8s both}
+#over:not(.hide) > *{animation:popIn .5s var(--ease) both}
 @media (prefers-reduced-motion:reduce){*{transition:none!important;animation:none!important}}
+
+/* ═══ [ui] 모션 레이어 — 중계 그래픽 전환·등장·버튼 반응 ═══
+   원칙: 상태는 즉시 바뀌고 연출만 덧씌움(로직 무관). 짧고(≤0.6s) 감속 곡선. prefers-reduced-motion 이면 전부 끔 */
+:root{--ease:cubic-bezier(.16,1,.3,1);--ease-in:cubic-bezier(.7,0,.84,0)}
+/* 화면 전환 띠 */
+#wipe{position:fixed;inset:0;z-index:80;pointer-events:none;overflow:hidden;display:none}
+#wipe.go{display:block}
+#wipe i{position:absolute;top:-20%;bottom:-20%;left:-45%;width:190%;transform:skewX(-14deg) translateX(0)}
+#wipe .b1{background:linear-gradient(120deg,var(--ink3),var(--ink) 60%);z-index:3}
+#wipe .b2{background:var(--seam);z-index:2}
+#wipe .b3{background:var(--chalk);z-index:1}
+#wipe.go .b1{animation:wipeBand .6s var(--ease-in) .02s both}
+#wipe.go .b2{animation:wipeBand .6s var(--ease-in) .09s both}
+#wipe.go .b3{animation:wipeBand .6s var(--ease-in) .16s both}
+#wipe.go.game .b1{animation-delay:.55s} #wipe.go.game .b2{animation-delay:.62s} #wipe.go.game .b3{animation-delay:.69s}
+@keyframes wipeBand{0%{transform:skewX(-14deg) translateX(0)}100%{transform:skewX(-14deg) translateX(110%)}}
+#wipe .stamp{position:absolute;left:50%;top:50%;transform:translate(-50%,-50%);display:none;flex-direction:column;align-items:center;gap:4px;z-index:4}
+#wipe.go.game .stamp{display:flex;animation:stamp 1s var(--ease) both}
+#wipe .stamp b{font-family:var(--num);font-style:italic;font-weight:800;font-size:clamp(54px,9vw,120px);letter-spacing:.02em;color:var(--chalk);line-height:.9;text-shadow:0 6px 30px rgba(0,0,0,.5)}
+#wipe .stamp small{font-family:var(--disp);font-size:18px;color:var(--bulb);letter-spacing:.3em}
+@keyframes stamp{0%{opacity:0;transform:translate(-50%,-50%) scale(1.35)}20%{opacity:1;transform:translate(-50%,-50%) scale(1)}52%{opacity:1;transform:translate(-50%,-50%) scale(.98)}66%,100%{opacity:0;transform:translate(-50%,-50%) scale(.96) translateX(80px)}}
+/* 화면 등장: 요소들이 차례로 올라옴 */
+@keyframes rise{from{opacity:0;transform:translateY(18px)}to{opacity:1;transform:none}}
+@keyframes slideL{from{opacity:0;transform:translateX(-40px)}to{opacity:1;transform:none}}
+@keyframes slideR{from{opacity:0;transform:translateX(40px)}to{opacity:1;transform:none}}
+@keyframes fadeIn{from{opacity:0}to{opacity:1}}
+.screen.enter .tbox > *,.screen.enter .topbar > *,.screen.enter .acts-l > *,.screen.enter .rhead > *,.screen.enter .rleft > *,.screen.enter .rfoot{animation:rise .55s var(--ease) both}
+.screen.enter .rooms,.screen.enter .sets{animation:slideR .6s var(--ease) .12s both}
+.screen.enter .tbox > :nth-child(2),.screen.enter .acts-l > :nth-child(2),.screen.enter .rleft > :nth-child(2),.screen.enter .topbar > :nth-child(2){animation-delay:.05s}
+.screen.enter .tbox > :nth-child(3),.screen.enter .acts-l > :nth-child(3),.screen.enter .rleft > :nth-child(3),.screen.enter .topbar > :nth-child(3){animation-delay:.1s}
+.screen.enter .tbox > :nth-child(4),.screen.enter .acts-l > :nth-child(4),.screen.enter .topbar > :nth-child(4){animation-delay:.15s}
+.screen.enter .tbox > :nth-child(5),.screen.enter .topbar > :nth-child(5){animation-delay:.2s}
+.screen.enter .tbox > :nth-child(n+6),.screen.enter .topbar > :nth-child(n+6){animation-delay:.25s}
+.screen.enter .rfoot{animation-delay:.18s}
+/* 타이틀: 로고가 크게 들어오고 실밥이 그어짐 + 주기적으로 빛이 훑음 */
+#title.enter .logo{animation:logoIn .9s var(--ease) both}
+@keyframes logoIn{0%{opacity:0;transform:translateX(-30px) skewX(-8deg);letter-spacing:.02em}100%{opacity:1;transform:none}}
+#title.enter .seams path{stroke-dasharray:520;animation:draw 1s var(--ease) .35s both}
+@keyframes draw{from{stroke-dashoffset:520}to{stroke-dashoffset:0}}
+.logo{position:relative;background:linear-gradient(100deg,var(--chalk) 40%,#fff9d9 50%,var(--chalk) 60%) 0 0/300% 100%;-webkit-background-clip:text;background-clip:text;-webkit-text-fill-color:transparent;text-shadow:none;padding:0 .04em .12em 0;margin-bottom:-.12em;filter:drop-shadow(0 10px 30px rgba(0,0,0,.4));animation:sheen 7s ease-in-out 1.4s infinite}
+@keyframes sheen{0%,70%{background-position:100% 0}100%{background-position:-50% 0}}
+#title.enter .logo{animation:logoIn .9s var(--ease) both,sheen 7s ease-in-out 1.4s infinite}
+/* 모드 선택: 두 판이 양쪽에서 밀려 들어오고 파울라인이 그어짐 */
+#modes.enter .mode.real{animation:slideL .65s var(--ease) both}
+#modes.enter .mode.casual{animation:slideR .65s var(--ease) .06s both}
+#modes.enter .foul{animation:foulDraw .7s var(--ease) .2s both}
+@keyframes foulDraw{from{clip-path:inset(0 0 100% 0)}to{clip-path:inset(0)}}
+#modes.enter .mhead,#modes.enter #mBack{animation:fadeIn .5s ease .3s both}
+.mode .mt,.mode p,.mode ul,.mode .pick{transition:transform .35s var(--ease)}
+.mode:hover .mt{transform:translateX(8px)} .mode:hover .pick{transform:translateX(12px)}
+/* 대기실 팀 카드 */
+.screen.enter .team.away{animation:slideL .55s var(--ease) .05s both}
+.screen.enter .team.home{animation:slideR .55s var(--ease) .05s both}
+.screen.enter .vs{animation:vsIn .6s var(--ease) .25s both}
+@keyframes vsIn{from{opacity:0;transform:scale(2.2)}to{opacity:1;transform:none}}
+/* 모달: 배경 페이드 + 판이 살짝 튀어 오름 */
+.modal:not(.hide){animation:fadeIn .18s ease both}
+.modal:not(.hide) .board{animation:popIn .34s var(--ease) both}
+@keyframes popIn{from{opacity:0;transform:translateY(16px) scale(.96)}to{opacity:1;transform:none}}
+/* 버튼 반응: 누르면 눌림, 주요 버튼엔 빛 훑기 */
+.btn,.chip,.go,.act,.seg button,.clubsel,.ritem,.tlink,.clubgrid button{transition:transform .14s var(--ease),background .15s,border-color .15s,color .15s,filter .15s}
+.btn:active,.chip:active,.clubsel:active,.clubgrid button:active{transform:scale(.96)}
+.go{overflow:hidden}
+.go:after{content:'';position:absolute;top:0;bottom:0;left:-60%;width:40%;background:linear-gradient(100deg,transparent,rgba(255,255,255,.55),transparent);transform:skewX(-14deg);transition:left .5s var(--ease)}
+.go:hover:after{left:130%}
+.go:active{transform:scale(.97)}
+.act{position:relative;overflow:hidden}
+.act:hover{transform:translateX(6px)}
+.act:active{transform:translateX(6px) scale(.985)}
+.act:before{content:'';position:absolute;left:0;top:0;bottom:0;width:0;background:linear-gradient(90deg,rgba(255,255,255,.07),transparent);transition:width .35s var(--ease)}
+.act:hover:before{width:100%}
+.seg button.on{box-shadow:0 2px 10px rgba(0,0,0,.25)}
+.seg button:active{transform:scale(.95)}
+.ritem:hover{transform:translateX(4px)}
+.tap{animation:tap .3s var(--ease)}
+@keyframes tap{0%{transform:scale(.94)}100%{transform:none}}
+/* 혼자 하기 설정판: 빠른 설정 + 2열 + 하단 고정 시작 버튼 */
+.modal .board.setup{width:min(760px,100%);display:flex;flex-direction:column;overflow:hidden}
+.board.setup > header .note{font-size:12px}
+.presets{display:grid;grid-template-columns:repeat(4,1fr);gap:8px;padding:14px 18px 0}
+.presets button{display:flex;flex-direction:column;align-items:flex-start;gap:3px;padding:12px 14px;background:rgba(255,255,255,.04);border:1px solid var(--line);border-bottom:3px solid var(--line2);border-radius:2px;text-align:left;transition:transform .14s var(--ease),background .15s,border-color .15s}
+.presets button b{font-family:var(--disp);font-weight:400;font-size:19px;letter-spacing:-.01em}
+.presets button small{color:var(--steel);font-size:12px}
+.presets button:hover{background:rgba(255,255,255,.08);transform:translateY(-2px)}
+.presets button.on{border-color:var(--mode);background:rgba(255,255,255,.1)}
+.presets button.on b{color:var(--mode)}
+.board.setup .body.grid2{display:grid;grid-template-columns:1fr 1fr;gap:14px 16px;overflow:auto;min-height:0;flex:1}
+.board.setup .full{grid-column:1/-1}
+.board.setup .acts.sticky{margin:0;padding:12px 18px;border-top:1px solid var(--line);background:rgba(9,17,42,.6);justify-content:flex-end}
+.board.setup .acts.sticky .go{flex:0 0 auto;padding:14px 44px;font-size:17px}
+.clubsel .chev{margin-left:auto;font-style:normal;font-size:11.5px;color:var(--steel);font-weight:700}
+@media (max-width:640px){.presets{grid-template-columns:repeat(2,1fr)}.board.setup .body.grid2{grid-template-columns:1fr}.board.setup .acts.sticky .go{flex:1}}
+@media (prefers-reduced-motion:reduce){*,*:before,*:after{animation:none!important;transition:none!important}}
 </style>
 <script type="importmap">
 { "imports": { "three": "https://cdn.jsdelivr.net/npm/three@0.160.0/build/three.module.js", "three/addons/": "https://cdn.jsdelivr.net/npm/three@0.160.0/examples/jsm/" } }
@@ -517,6 +628,7 @@ table.ls tr.sep th{padding-top:18px;border-top:2px solid var(--line2)}
 <canvas id="c"></canvas>
 
 <!-- ═══ 타이틀 ═══ -->
+<div id="wipe" aria-hidden="true"><i class="b1"></i><i class="b2"></i><i class="b3"></i><span class="stamp"><b>PLAY BALL</b><small>홈런왕</small></span></div>
 <section id="title" class="screen">
   <div class="tbox">
     <h1 class="logo">홈런왕</h1>
@@ -599,6 +711,12 @@ table.ls tr.sep th{padding-top:18px;border-top:2px solid var(--line2)}
     <div class="sets board" id="sets">
       <header><h3>경기 설정</h3><span id="hostOnly" class="note">방장만 바꿀 수 있어</span></header>
       <div class="body">
+        <div class="full presets mini" id="sPresets">
+          <button data-p="quick"><b>빠른 경기</b><small>3이닝</small></button>
+          <button data-p="full"><b>정규 경기</b><small>9이닝 · 9인 타순</small></button>
+          <button data-p="duel"><b>맞대결</b><small>1:1 · 타자마다 투수 교대</small></button>
+          <button data-p="derby"><b>홈런 더비</b><small>아웃 10개</small></button>
+        </div>
         <div class="full"><label class="lbl">규칙</label><div class="seg rules" id="sRules"><button data-v="real">리얼 모드</button><button data-v="casual">캐주얼 모드</button></div></div>
         <div class="full"><label class="lbl">경기 종류</label><div class="seg" id="sMode"><button data-v="game">정규 경기</button><button data-v="derby">홈런 더비</button></div></div>
         <div id="sInnWrap" class="full"><label class="lbl">이닝</label><div class="seg" id="sInn"><button data-v="1">1</button><button data-v="2">2</button><button data-v="3">3</button><button data-v="5">5</button><button data-v="7">7</button><button data-v="9">9</button></div></div>
@@ -612,12 +730,13 @@ table.ls tr.sep th{padding-top:18px;border-top:2px solid var(--line2)}
         <div class="full"><label class="lbl">타순</label><div class="seg" id="sLine"><button data-v="humans">사람만 돌아가며</button><button data-v="nine">9인 타순 (빈칸 CPU)</button></div></div>
         <div class="full"><label class="lbl">수비 조작</label><div class="seg" id="sFld"><button data-v="auto">공 따라 자동 전환</button><button data-v="pos">내 포지션만</button></div></div>
         <div class="full"><label class="lbl">시간대</label><div class="seg" id="sTod"><button data-v="night">야간 경기</button><button data-v="day">주간 경기</button></div></div>
-        <h4>방</h4>
+        <details class="full roomdet"><summary>방 정보 <span class="note">이름 · 팀 이름 · 인원 · 공개 · 비밀번호</span></summary><div class="detbody">
         <div class="full"><label class="lbl" for="sName">방 이름</label><input id="sName" class="inp" maxlength="24" placeholder="방 이름" autocomplete="off"></div>
         <div><label class="lbl" for="sTA">원정팀 이름</label><input id="sTA" class="inp" maxlength="8" autocomplete="off"></div><div><label class="lbl" for="sTH">홈팀 이름</label><input id="sTH" class="inp" maxlength="8" autocomplete="off"></div>
         <div id="sMaxWrap"><label class="lbl" for="sMax">최대 인원</label><select id="sMax" class="sel"><option>2</option><option>4</option><option>6</option><option>8</option><option>10</option><option>12</option><option>14</option><option>18</option></select></div>
         <div><label class="lbl">공개</label><div class="seg" id="sPub"><button data-v="1">공개</button><button data-v="0">비공개</button></div></div>
         <div class="full"><label class="lbl" for="sPw">비밀번호 (선택)</label><input id="sPw" class="inp" maxlength="20" placeholder="없으면 비워둬" autocomplete="off"></div>
+        </div></details>
       </div>
     </div>
   </div>
@@ -704,38 +823,51 @@ table.ls tr.sep th{padding-top:18px;border-top:2px solid var(--line2)}
 </section>
 
 <!-- ═══ 창 ═══ -->
-<div id="soloM" class="modal hide"><div class="board">
-  <header><h3>혼자 하기</h3></header>
-  <div class="body col">
-    <div><label class="lbl">규칙</label><div class="seg rules" id="oRules"><button data-v="real">리얼 모드</button><button data-v="casual">캐주얼 모드</button></div></div>
+<div id="soloM" class="modal hide"><div class="board setup">
+  <header><h3>혼자 하기</h3><span class="note">지난번 설정을 기억해</span></header>
+  <div class="presets" id="oPresets">
+    <button data-p="quick"><b>빠른 경기</b><small>3이닝 · 15분</small></button>
+    <button data-p="full"><b>정규 경기</b><small>9이닝 풀게임</small></button>
+    <button data-p="derby"><b>홈런 더비</b><small>아웃 10개까지</small></button>
+    <button data-p="practice"><b>타격 연습</b><small>마음껏 치기</small></button>
+  </div>
+  <div class="body grid2">
+    <div class="full"><label class="lbl">규칙</label><div class="seg rules" id="oRules"><button data-v="real">리얼 모드</button><button data-v="casual">캐주얼 모드</button></div></div>
     <div><label class="lbl">경기 종류</label><div class="seg" id="oMode"><button data-v="game" class="on">CPU 경기</button><button data-v="derby">홈런 더비</button><button data-v="practice">타격 연습</button></div></div>
     <div id="oInnWrap"><label class="lbl" id="oInnLbl">이닝</label><div class="seg" id="oInn"><button data-v="1">1</button><button data-v="3" class="on">3</button><button data-v="5">5</button><button data-v="9">9</button></div></div>
-    <div class="row"><div style="flex:1"><label class="lbl">내 구단</label><button class="clubsel" id="oClubMe" data-solo="me"><img alt=""><span></span></button></div><div style="flex:1"><label class="lbl">상대 구단</label><button class="clubsel" id="oClubOp" data-solo="op"><img alt=""><span></span></button></div></div>
+    <div><label class="lbl">내 구단</label><button class="clubsel" id="oClubMe" data-solo="me"><img alt=""><span></span><i class="chev" aria-hidden="true">바꾸기</i></button></div>
+    <div><label class="lbl">상대 구단</label><button class="clubsel" id="oClubOp" data-solo="op"><img alt=""><span></span><i class="chev" aria-hidden="true">바꾸기</i></button></div>
     <div><label class="lbl">내 팀</label><div class="seg" id="oTeam"><button data-v="away" class="on">원정 (선공)</button><button data-v="home">홈 (후공)</button></div></div>
     <div><label class="lbl" for="oPos">내 포지션</label><select id="oPos" class="sel"><option value="any">자동 (투수부터)</option><option value="P">투수</option><option value="C">포수</option><option value="SS">유격수</option><option value="2B">2루수</option><option value="3B">3루수</option><option value="1B">1루수</option><option value="CF">중견수</option><option value="LF">좌익수</option><option value="RF">우익수</option></select></div>
     <div><label class="lbl">타격 난이도</label><div class="seg" id="oHit"><button data-v="0">쉬움</button><button data-v="1" class="on">보통</button><button data-v="2">어려움</button></div></div>
     <div><label class="lbl">CPU 난이도</label><div class="seg" id="oDiff"><button data-v="0">쉬움</button><button data-v="1" class="on">보통</button><button data-v="2">어려움</button></div></div>
     <div><label class="lbl">수비 조작</label><div class="seg" id="oFld"><button data-v="auto" class="on">공 따라 자동 전환</button><button data-v="pos">내 포지션 고정</button></div></div>
     <div><label class="lbl">시간대</label><div class="seg" id="oTod"><button data-v="night" class="on">야간 경기</button><button data-v="day">주간 경기</button></div></div>
-    <div class="acts"><button id="oGo" class="go">플레이 볼</button><button class="btn" data-close>취소</button></div>
   </div>
+  <div class="acts sticky"><button class="btn" data-close>취소</button><button id="oGo" class="go">플레이 볼</button></div>
 </div></div>
-<div id="createM" class="modal hide"><div class="board">
+<div id="createM" class="modal hide"><div class="board setup">
   <header><h3>방 만들기</h3></header>
-  <div class="body col">
-    <div><label class="lbl">규칙</label><div class="seg rules" id="cRules"><button data-v="real">리얼 모드</button><button data-v="casual">캐주얼 모드</button></div></div>
-    <div><label class="lbl" for="cName">방 이름</label><input id="cName" class="inp" maxlength="24" placeholder="예: 금요일 뒷방 리그" autocomplete="off"></div>
+  <div class="presets" id="cPresets">
+    <button data-p="quick"><b>빠른 경기</b><small>3이닝 · 2:2</small></button>
+    <button data-p="full"><b>정규 경기</b><small>9이닝 · 3:3</small></button>
+    <button data-p="duel"><b>1:1 승부</b><small>3이닝 · 맞대결</small></button>
+    <button data-p="derby"><b>홈런 더비</b><small>아웃 10개 · 여럿이</small></button>
+  </div>
+  <div class="body grid2">
+    <div class="full"><label class="lbl">규칙</label><div class="seg rules" id="cRules"><button data-v="real">리얼 모드</button><button data-v="casual">캐주얼 모드</button></div></div>
+    <div class="full"><label class="lbl" for="cName">방 이름</label><input id="cName" class="inp" maxlength="24" placeholder="예: 금요일 뒷방 리그" autocomplete="off"></div>
     <div><label class="lbl">경기 종류</label><div class="seg" id="cMode"><button data-v="game" class="on">정규 경기</button><button data-v="derby">홈런 더비</button></div></div>
-    <div class="row"><div style="flex:1"><label class="lbl" for="cInn">이닝 / 더비 아웃</label><select id="cInn" class="sel"><option value="1">1</option><option value="2">2</option><option value="3" selected>3</option><option value="5">5</option><option value="9">9</option><option value="10">10</option></select></div>
-      <div style="flex:1" id="cMaxWrap" class="hide"><label class="lbl" for="cMax">최대 인원</label><select id="cMax" class="sel"><option>4</option><option>6</option><option>8</option><option>10</option><option selected>12</option><option>18</option></select></div></div>
+    <div><label class="lbl" for="cInn">이닝 / 더비 아웃</label><select id="cInn" class="sel"><option value="1">1</option><option value="2">2</option><option value="3" selected>3</option><option value="5">5</option><option value="9">9</option><option value="10">10</option></select></div>
+    <div id="cMaxWrap" class="hide"><label class="lbl" for="cMax">최대 인원</label><select id="cMax" class="sel"><option>4</option><option>6</option><option>8</option><option>10</option><option selected>12</option><option>18</option></select></div>
     <div><label class="lbl">팀 인원</label><div class="seg" id="cSize"><button data-v="1">1 : 1</button><button data-v="2" class="on">2 : 2</button><button data-v="3">3 : 3</button><button data-v="0">자유</button></div></div>
-    <div><label class="lbl">시간제</label><div class="seg" id="cTime"><button data-v="0" class="on">끔</button><button data-v="10">10분</button><button data-v="15">15분</button><button data-v="20">20분</button><button data-v="30">30분</button></div></div>
+    <div class="full"><label class="lbl">시간제</label><div class="seg" id="cTime"><button data-v="0" class="on">끔</button><button data-v="10">10분</button><button data-v="15">15분</button><button data-v="20">20분</button><button data-v="30">30분</button></div></div>
     <div><label class="lbl">타격 난이도</label><div class="seg" id="cHit"><button data-v="0">쉬움</button><button data-v="1" class="on">보통</button><button data-v="2">어려움</button></div></div>
     <div><label class="lbl">시간대</label><div class="seg" id="cTod"><button data-v="night" class="on">야간 경기</button><button data-v="day">주간 경기</button></div></div>
     <div><label class="lbl">공개</label><div class="seg" id="cPub"><button data-v="1" class="on">공개</button><button data-v="0">비공개</button></div></div>
     <div><label class="lbl" for="cPw">비밀번호 (선택)</label><input id="cPw" class="inp" maxlength="20" placeholder="없으면 비워둬" autocomplete="off"></div>
-    <div class="acts"><button id="cGo" class="go">방 만들기</button><button class="btn" data-close>취소</button></div>
   </div>
+  <div class="acts sticky"><button class="btn" data-close>취소</button><button id="cGo" class="go">방 만들기</button></div>
 </div></div>
 <div id="clubM" class="modal hide"><div class="board wide">
   <header><h3 id="clubT">구단 고르기</h3><button class="btn sm" data-close>닫기</button></header>

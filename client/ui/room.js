@@ -24,7 +24,15 @@ export function bindRoom(c) {
   $('myBo').onchange = () => c.send({ t: 'bo', bo: +$('myBo').value });
   $('bReady').onclick = () => { const L = c.lobby(), me = L && L.players.find((p) => p.id === c.myId()); c.send({ t: 'ready', on: !(me && me.ready) }); };
   $('bStart').onclick = () => c.send({ t: 'start' });
+  // [ui] 빠른 설정: 여러 값을 한 번에
+  document.querySelectorAll('#sPresets button').forEach((b) => (b.onclick = () => { const p = PRESETS[b.dataset.p]; if (p) { sendSet(p); b.classList.remove('tap'); void b.offsetWidth; b.classList.add('tap'); } }));
 }
+const PRESETS = {
+  quick: { mode: 'game', innings: 3 },
+  full: { mode: 'game', innings: 9, lineup: 'nine' },
+  duel: { mode: 'game', innings: 3, size: 1, pitRot: 'batter' },
+  derby: { mode: 'derby', derbyOuts: 10 },
+};
 
 export function renderRoom(lobby, myId, send) {
   const isHost = lobby.host === myId;
@@ -61,6 +69,8 @@ export function renderRoom(lobby, myId, send) {
   document.querySelectorAll('#sets .seg').forEach((s) => s.classList.toggle('ro', !isHost));
   for (const id of ['sName', 'sTA', 'sTH', 'sMax', 'sPw']) $(id).disabled = !isHost;
   show('hostOnly', !isHost);
+  show('sPresets', isHost);
+  document.querySelectorAll('#sPresets button').forEach((b) => { const p = PRESETS[b.dataset.p]; b.classList.toggle('on', !!p && Object.entries(p).every(([k, v]) => (k === 'mode' ? (st.practice ? 'derby' : st.mode) : st[k]) === v)); });
   if (me) { $('myBo').value = String(me.bo || 0); $('myPos').value = me.pos; $('bReady').textContent = me.ready ? '준비 취소' : '준비'; $('bReady').classList.toggle('on', !!me.ready); }
   show('bReady', !!me && me.team !== 'spec');
   show('bStart', isHost);
