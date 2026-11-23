@@ -24,6 +24,7 @@ import { createBallLook } from './game/ball.js'; // [pitch] 실밥·구종별 �
 import { createCamRig, fcam } from './game/camera.js'; // [cam] 역할별 카메라
 import { createNetInterp, mergeBall, stepBall, rkey } from './net/interp.js'; // [net] 서버 시계·보간 버퍼·외삽·공 합류 (tools/qa/netbench.mjs 로 측정)
 import { createSnapMerger } from './net/snap.js'; // [net] 서버가 바뀐 키만 보냄 → 합치기
+import { createMotion } from './motion/index.js'; // [motion] 핸드폰·웹캠 모션 모드
 import { pitchPred, windupTau, throwOk, jumpOk, diveOk, diveStep } from './net/predict.js'; // [net] 내 조작 즉시 반응(화면 연출만, 판정은 서버)
 
 const $ = (id) => document.getElementById(id);
@@ -276,6 +277,7 @@ function startLocal(name, o) {
   };
   const iv = setInterval(tickFn, 1000 / 60);
   net = { send: (m) => game.handle('me', m), close: () => clearInterval(iv), local: true, game };
+  motion && motion.resetNet(); // [motion]
   window.__hr = { game, getRole: () => getRole(), cam: () => camMode, S: () => S, net: () => net, rp: replay, lct: () => lastContactT, scene, tick: tickFn, renderer, simNow, camera, ball: ballMesh /* [cam] qa */, actors: () => ({ batter, fielders }) /* [anim] qa: 모션 끊김 측정 */ };
   roomCode = null;
   game.start();
@@ -292,7 +294,7 @@ function connectWS(code, name, pw = '') {
   const ws = new WebSocket(`${proto}://${location.host}/ws/${code}?name=${encodeURIComponent(name)}&token=${encodeURIComponent(tok)}&pw=${encodeURIComponent(pw)}`);
   let opened = false;
   SM.reset(); // [net] 새 소켓은 통째 스냅샷부터
-  ws.onopen = () => { opened = true; wsRetry = 0; $('conn').classList.add('hide'); ws.send(JSON.stringify({ t: 'bats', v: cfg.bats || 'R' })); }; // [lefty] 내 타석(좌/우/스위치)
+  ws.onopen = () => { opened = true; wsRetry = 0; motion && motion.resetNet(); $('conn').classList.add('hide'); ws.send(JSON.stringify({ t: 'bats', v: cfg.bats || 'R' })); }; // [lefty] 내 타석(좌/우/스위치)
   ws.onmessage = (e) => { if (net && net.ws !== ws) return; /* [net] 재접속 뒤 옛 소켓에 남은 메시지 무시 */ lastMsgAt = performance.now(); try { handleMsg(JSON.parse(e.data)); } catch (err) { console.error(err); } };
   ws.onclose = (e) => {
     if (!net || net.ws !== ws) return;
@@ -547,6 +549,8 @@ function getRole() {
   r.fi = S.fl.findIndex((f) => f[4] === myId);
   if (r.fi >= 0) { r.pos = S.fl[r.fi][0]; r.pitcher = r.pos === 'P'; }
   r.holding = r.fi >= 0 && !!S.b && S.b[6] === r.fi;
+  // [motion] 모션 모드: 수비는 CPU → 투구 단계의 투수 말고는 수비 조작 없음(카메라도 중계 화면)
+  if (r.fi >= 0 && motion && motion.active() && !(r.pitcher && S.ph !== 'live')) { r.fi = -1; r.pos = null; r.pitcher = false; r.holding = false; }
   return r;
 }
 
@@ -667,13 +671,13 @@ function aimPoint() {
   if (!raycaster.ray.intersectPlane(zonePlane, tmpV)) return null;
   return [clamp(tmpV.x, -0.85, 0.85), clamp(tmpV.y, 0.1, 1.75)];
 }
-function doSwing(mode) {
+function doSwing(mode, opt) {
   if (!S || S.ph !== 'pitching' || !S.p) return;
-  const p = S.p, t = simNow();
+  const p = S.p, t = opt && isFinite(opt.t) ? opt.t : simNow(); // [motion] 핸드폰·웹캠: 실제로 휘두른 순간(지연 뺀 시각)
   if (swungLocal[p.id] || t < p.t0) return;
   if (buntOn || S.bs) mode = 'bunt';
   swungLocal[p.id] = t;
-  let a = aimPoint() || [0, 0.8];
+  let a = (opt && opt.aim) || aimPoint() || [0, 0.8];
   const dt = t - p.arrive;
   if (mode === 'bunt') {
     // 번트: 배트가 공 높이를 자동으로 따라감. 좌우 커서로 방향만 조절
@@ -702,6 +706,24 @@ function doSwing(mode) {
   feedback(R.text, R.col);
 }
 let contactFreeze = null, perfectHit = 0;
+// [motion] 모션 모드 (client/motion) — 입력만 바꿔 끼움: 스윙·투구는 아래 기존 함수 그대로 통과
+let motion = null;
+function initMotion() {
+  try {
+    motion = createMotion({
+      store, S: () => S, role: () => getRole(), simNow: () => simNow(), net: () => net, screen: () => screen, offline: !!window.HR_OFFLINE,
+      swing: (mode, opt) => doSwing(mode, opt),
+      pitch: (aim, lv) => { if (!S || S.ph !== 'pitch') return; if (intro) endIntro(); gauge = { t0: nowP(), aim, type: pitchType }; sendPitch(lv); },
+      setAim: (a) => { if (!a) return; tmpV.set(a[0], a[1], 0).project(camera); const k = cfg.sens / 100 || 1; mouseRaw.set(clamp(tmpV.x / k, -1, 1), clamp(tmpV.y / k, -1, 1)); },
+      aimNow: () => aimPoint() || [0, 0.8],
+      type: () => pitchType, types: () => PITCH_KEYS.slice(0, 6), setType: (k) => { if (PITCH_KEYS.includes(k)) setPitchType(k); },
+      key: (k) => dispatchEvent(new KeyboardEvent('keydown', { key: k, code: /^\d$/.test(k) ? 'Digit' + k : 'Key' + k.toUpperCase() })),
+      canChal: () => canChallenge(), toast: (t) => feedback(t, '#ffcf3f'),
+    });
+    window.__motion = motion; // [qa]
+  } catch (e) { console.error('[motion]', e); }
+}
+setTimeout(initMotion, 0);
 // [ui] 스윙 분석 창은 client/ui/hud.js swingReport
 const swingInfo = {};
 // 투구 게이지
@@ -1523,6 +1545,7 @@ function frameBody(now, manual) {
       else if (fps < 38 && cfg.gq !== 'low' && !document.hidden) { cfg.gq = cfg.gq === 'high' ? 'mid' : 'low'; store.set('gq', cfg.gq); applyQuality(); toast(`화면이 버벅여서 그래픽을 '${cfg.gq === 'mid' ? '중간' : '낮음'}'으로 낮췄어 (설정에서 변경)`); }
     }
   }
+  if (motion) motion.update(); // [motion]
   const inGame = S && S.fl && S.fl.length && (screen === 'game' || screen === 'over');
   if (inGame) {
     updateControl(dt);

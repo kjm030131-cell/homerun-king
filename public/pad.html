@@ -1,0 +1,235 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no,viewport-fit=cover">
+<meta name="theme-color" content="#070d19">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<title>홈런왕 컨트롤러</title>
+<style>
+:root{--gold:#ffcf3f;--green:#4fd18b;--red:#ff6b6b;--ink:#e9f0fb;--sub:#8ea3bf;--line:rgba(255,255,255,.12)}
+*{box-sizing:border-box;margin:0;padding:0;-webkit-tap-highlight-color:transparent}
+html,body{height:100%;background:#070d19;color:var(--ink);font-family:-apple-system,BlinkMacSystemFont,"Apple SD Gothic Neo","Pretendard","Noto Sans KR",sans-serif;overflow:hidden;overscroll-behavior:none;user-select:none;-webkit-user-select:none;touch-action:none}
+body{background:radial-gradient(120% 70% at 50% 0%,#14284a 0%,#070d19 60%)}
+.app{height:100%;display:flex;flex-direction:column;padding:calc(env(safe-area-inset-top) + 12px) 16px calc(env(safe-area-inset-bottom) + 14px)}
+header{display:flex;align-items:center;justify-content:space-between;gap:10px}
+.brand{font-weight:900;letter-spacing:.02em;font-size:17px}
+.brand b{color:var(--gold)}
+.pill{display:flex;align-items:center;gap:6px;font-size:12px;font-weight:700;padding:5px 10px;border-radius:999px;background:rgba(255,255,255,.06);border:1px solid var(--line);color:var(--sub)}
+.pill i{width:7px;height:7px;border-radius:50%;background:#56657a}
+.pill.on{color:#cdf3df;border-color:rgba(79,209,139,.4)}
+.pill.on i{background:var(--green);box-shadow:0 0 8px var(--green)}
+main{flex:1;display:flex;flex-direction:column;justify-content:center;gap:14px;min-height:0}
+.hide{display:none!important}
+h1{font-size:26px;font-weight:900;line-height:1.2}
+.lead{color:var(--sub);font-size:14px;line-height:1.55}
+.code{display:flex;gap:8px;justify-content:center}
+.code input{width:100%;font:900 34px/1 inherit;letter-spacing:.3em;text-align:center;text-transform:uppercase;background:rgba(255,255,255,.06);border:1px solid var(--line);border-radius:12px;color:var(--gold);padding:14px 8px;outline:none;user-select:text;-webkit-user-select:text}
+.go{appearance:none;border:0;border-radius:14px;background:var(--gold);color:#1a1300;font:900 18px/1 inherit;padding:18px;width:100%}
+.go:active{transform:scale(.98)}
+.btn{appearance:none;border:1px solid var(--line);border-radius:12px;background:rgba(255,255,255,.06);color:var(--ink);font:800 15px/1 inherit;padding:14px 10px}
+.btn.on{background:rgba(255,207,63,.16);border-color:rgba(255,207,63,.55);color:var(--gold)}
+.btn:disabled{opacity:.35}
+.role{font-size:13px;font-weight:800;letter-spacing:.12em;color:var(--gold)}
+.big{font-size:30px;font-weight:900;line-height:1.15}
+/* 타격 */
+.meter{position:relative;width:min(70vw,280px);aspect-ratio:1;margin:4px auto}
+.meter svg{width:100%;height:100%;transform:rotate(-90deg)}
+.meter .val{position:absolute;inset:0;display:flex;flex-direction:column;align-items:center;justify-content:center}
+.meter .val b{font-size:44px;font-weight:900;line-height:1}
+.meter .val span{font-size:12px;color:var(--sub);margin-top:6px;font-weight:700}
+.row{display:grid;grid-auto-flow:column;grid-auto-columns:1fr;gap:8px}
+.fb{min-height:28px;text-align:center;font-weight:900;font-size:20px;transition:transform .15s}
+.fb.pop{transform:scale(1.12)}
+/* 투구 */
+.types{display:grid;grid-template-columns:repeat(3,1fr);gap:8px}
+.grip{position:relative;flex:1;min-height:220px;border-radius:20px;border:2px dashed rgba(255,207,63,.45);background:rgba(255,207,63,.05);display:flex;flex-direction:column;align-items:center;justify-content:center;gap:10px;text-align:center;padding:14px}
+.grip.on{border-style:solid;background:rgba(255,207,63,.13)}
+.zone{position:relative;width:120px;height:150px;border:2px solid rgba(255,255,255,.7);border-radius:4px;background:repeating-linear-gradient(90deg,transparent 0 39px,rgba(255,255,255,.15) 39px 40px),repeating-linear-gradient(0deg,transparent 0 49px,rgba(255,255,255,.15) 49px 50px)}
+.zone .dot{position:absolute;left:50%;top:50%;width:22px;height:22px;margin:-11px 0 0 -11px;border-radius:50%;background:var(--gold);box-shadow:0 0 14px var(--gold)}
+.hint{font-size:13px;color:var(--sub);line-height:1.5}
+.small{font-size:12px;color:var(--sub);text-align:center}
+.sens{display:flex;gap:6px;align-items:center;justify-content:center;font-size:12px;color:var(--sub)}
+.sens .btn{padding:8px 10px;font-size:12px}
+</style>
+</head>
+<body>
+<div class="app">
+  <header><div class="brand">홈런왕 <b>컨트롤러</b></div><div class="pill" id="conn"><i></i><span id="connT">연결 안 됨</span></div></header>
+
+  <main id="vJoin">
+    <h1>핸드폰으로<br>진짜 휘두르기</h1>
+    <p class="lead">PC 화면의 '모션 컨트롤'에 나온 6자리 코드를 넣어줘. QR로 들어왔으면 그대로 시작하면 돼.</p>
+    <div class="code"><input id="code" maxlength="6" autocomplete="off" autocapitalize="characters" spellcheck="false" placeholder="ABC123"></div>
+    <button class="go" id="start">시작하기</button>
+    <p class="small" id="joinErr"></p>
+  </main>
+
+  <main id="vWait" class="hide">
+    <div class="role" id="wRole">대기</div>
+    <div class="big" id="wTxt">PC에서 경기를 시작해줘</div>
+    <p class="lead" id="wSub">타석에 서거나 마운드에 오르면 이 화면이 바뀌어. 수비는 CPU가 해.</p>
+    <div class="sens">스윙 감도 <button class="btn" data-s="0">둔하게</button><button class="btn" data-s="1">보통</button><button class="btn" data-s="2">민감</button></div>
+  </main>
+
+  <main id="vBat" class="hide">
+    <div class="role">타석</div>
+    <div class="big">공이 오면 휘둘러!</div>
+    <div class="meter"><svg viewBox="0 0 100 100"><circle cx="50" cy="50" r="44" fill="none" stroke="rgba(255,255,255,.1)" stroke-width="8"/><circle id="arc" cx="50" cy="50" r="44" fill="none" stroke="#ffcf3f" stroke-width="8" stroke-linecap="round" stroke-dasharray="276.5" stroke-dashoffset="276.5"/></svg><div class="val"><b id="spd">0</b><span id="spdL">스윙 속도</span></div></div>
+    <div class="fb" id="bFb"></div>
+    <div class="row"><button class="btn" id="bBunt">번트</button><button class="btn" id="bChal" disabled>ABS 챌린지</button></div>
+    <div class="row"><button class="btn" data-g="1">직구 노림</button><button class="btn" data-g="2">변화구</button><button class="btn" data-g="3">오프스피드</button></div>
+    <button class="btn hide" id="tapSwing">탭으로 스윙 (센서 없음)</button>
+  </main>
+
+  <main id="vPitch" class="hide">
+    <div class="role">마운드</div>
+    <div class="types" id="types"></div>
+    <div class="grip" id="grip">
+      <div class="zone"><div class="dot" id="dot"></div></div>
+      <div class="big" id="gTxt" style="font-size:20px">여기를 누른 채로 기울여 조준</div>
+      <div class="hint" id="gHint">손가락을 대고 좌우·앞뒤로 기울이면 PC 커서가 따라가. 그대로 팔을 휘두르면 공이 나가 (세게 = 빠른 공).</div>
+    </div>
+    <div class="fb" id="pFb"></div>
+  </main>
+</div>
+<script>
+(() => {
+  const $ = (id) => document.getElementById(id);
+  const show = (id) => { for (const v of ['vJoin', 'vWait', 'vBat', 'vPitch']) $(v).classList.toggle('hide', v !== id); };
+  const vib = (p) => { try { navigator.vibrate && navigator.vibrate(p); } catch (e) { } };
+  const LS = (k, d) => { try { const v = localStorage.getItem('hrpad_' + k); return v == null ? d : JSON.parse(v); } catch (e) { return d; } };
+  const LSset = (k, v) => { try { localStorage.setItem('hrpad_' + k, JSON.stringify(v)); } catch (e) { } };
+  const KO = { FB: '포심', TS: '투심', SL: '슬라이더', CB: '커브', CH: '체인지업', SP: '스플리터' };
+  const SENS = [[720, 1500], [500, 1200], [340, 950]]; // [스윙 시작 °/s, 강타 °/s]
+  let sens = LS('sens', 1);
+  const code0 = (location.hash.slice(1) || LS('code', '')).toUpperCase().replace(/[^A-Z0-9]/g, '').slice(0, 6);
+  $('code').value = code0;
+
+  let ws = null, code = '', retry = 0, st = 'wait', hs = {}, hasMotion = false, lastMotionT = 0;
+  function setConn(on, t) { $('conn').classList.toggle('on', on); $('connT').textContent = t; }
+  function send(m) { if (ws && ws.readyState === 1) ws.send(JSON.stringify(m)); }
+  function connect() {
+    const proto = location.protocol === 'https:' ? 'wss' : 'ws';
+    ws = new WebSocket(`${proto}://${location.host}/ws/pad/${code}?r=p`);
+    ws.onopen = () => { retry = 0; setConn(false, 'PC 찾는 중'); send({ t: 'hello', ua: navigator.userAgent.slice(0, 80) }); };
+    ws.onclose = () => { setConn(false, '다시 연결 중'); setTimeout(connect, Math.min(6000, 500 * 2 ** retry++)); };
+    ws.onmessage = (e) => {
+      let m; try { m = JSON.parse(e.data); } catch (x) { return; }
+      if (m.t === 'peer') { setConn(!!m.host, m.host ? 'PC 연결됨' : 'PC 꺼져 있음'); if (!m.host) setRole('wait'); }
+      else if (m.t === 'png') { send({ t: 'pog', h: m.h, p: performance.now() }); setConn(true, 'PC 연결됨'); }
+      else if (m.t === 'hs') { hs = m; setRole(m.st); paintHS(); }
+      else if (m.t === 'ack') onAck(m);
+      else if (m.t === 'fb') fb(m.k === 'pitch' ? 'pFb' : 'bFb', m.txt, m.col, m.vib);
+    };
+  }
+  function setRole(r) {
+    if (r === st && !$('vJoin').classList.contains('hide') === false) { /* 같은 화면 */ }
+    st = r; show(r === 'bat' ? 'vBat' : r === 'pitch' ? 'vPitch' : 'vWait');
+    if (r !== 'pitch') endGrip(true);
+  }
+  function paintHS() {
+    $('bBunt').classList.toggle('on', !!hs.bunt); $('bChal').disabled = !hs.chal;
+    const box = $('types');
+    const types = (hs.types || []).filter((k) => KO[k]);
+    if (box.dataset.k !== types.join()) { box.dataset.k = types.join(); box.innerHTML = types.map((k) => `<button class="btn" data-t="${k}">${KO[k]}</button>`).join(''); }
+    box.querySelectorAll('button').forEach((b) => b.classList.toggle('on', b.dataset.t === hs.type));
+  }
+  let fbT = 0;
+  function fb(id, txt, col, v) { const e = $(id); e.textContent = txt; e.style.color = col || '#e9f0fb'; e.classList.add('pop'); setTimeout(() => e.classList.remove('pop'), 160); clearTimeout(fbT); fbT = setTimeout(() => { e.textContent = ''; }, 2200); if (v) vib(v); }
+  function onAck(m) {
+    if (m.k === 'swing') { if (m.r === 'early') fb('bFb', '투수가 던지기 전이야', '#ffb36b'); else if (m.r === 'skip') fb('bFb', '지금은 칠 공이 없어', '#8ea3bf'); }
+    if (m.k === 'pitch') { if (m.r === 'ok') fb('pFb', `투구! 세기 ${m.lv}%`, m.lv > 100 ? '#ff6b6b' : m.lv >= 84 ? '#4fd18b' : '#ffcf3f', 40); else fb('pFb', '지금은 던질 수 없어', '#8ea3bf'); }
+  }
+
+  // ── 센서 ──
+  let ori = { b: 0, g: 0 }, burst = null, cool = 0, meterPk = 0, meterT = 0;
+  function rate(e) { const r = e.rotationRate; if (!r) return 0; return Math.hypot(r.alpha || 0, r.beta || 0, r.gamma || 0); }
+  function onMotion(e) {
+    const r = rate(e), now = performance.now();
+    if (r > 0) { hasMotion = true; lastMotionT = now; }
+    if (st === 'bat') {
+      if (r > meterPk || now - meterT > 900) { meterPk = r; meterT = now; paintMeter(r); }
+      detect(r, now, SENS[sens][0], 300, (b) => {
+        const mode = b.pk >= SENS[sens][1] ? 'power' : 'contact';
+        send({ t: 'swing', at: b.at, pk: Math.round(b.pk), mode });
+        fb('bFb', mode === 'power' ? '풀스윙!' : '스윙!', '#ffcf3f', mode === 'power' ? [30, 20, 60] : 30);
+      });
+    } else if (st === 'pitch' && (grip || now < gripUntil)) {
+      detect(r, now, 520, 380, (b) => {
+        const a = aimBefore(b.t0 - 120);
+        send({ t: 'pitch', at: b.at, pk: Math.round(b.pk), x: +a[0].toFixed(3), y: +a[1].toFixed(3), type: hs.type });
+        endGrip(false);
+      });
+    } else burst = null;
+  }
+  // 각속도가 문턱을 넘으면 시작 → 꼭짓점 기록 → 반 아래로 떨어지면 끝 (꼭짓점 시각 = 맞는/놓는 순간)
+  function detect(r, now, th, maxMs, done) {
+    if (now < cool) return;
+    if (!burst) { if (r > th) burst = { t0: now, pk: r, at: now }; return; }
+    if (r > burst.pk) { burst.pk = r; burst.at = now; }
+    if (r < burst.pk * 0.45 || now - burst.t0 > maxMs) { const b = burst; burst = null; cool = now + 750; if (b.pk > th * 1.2) done(b); }
+  }
+  const ARC = 276.5;
+  function paintMeter(r) { const k = Math.min(1, r / 2000); $('arc').style.strokeDashoffset = String(ARC * (1 - k)); $('arc').style.stroke = r >= SENS[sens][1] ? '#ff6b6b' : r >= SENS[sens][0] ? '#ffcf3f' : '#56657a'; $('spd').textContent = Math.round(r); }
+  setInterval(() => { if (st === 'bat' && performance.now() - meterT > 900) { meterPk = 0; paintMeter(0); } if (hasMotion === false && st === 'bat') $('tapSwing').classList.remove('hide'); }, 300);
+  function onOri(e) { if (e.beta == null) return; ori = { b: e.beta, g: e.gamma || 0 }; }
+
+  // ── 투구: 누르고 기울여 조준 → 휘둘러 던지기 (손 떼고 0.6초 안에 휘둘러도 됨) ──
+  let grip = false, gripUntil = 0, ref = null, aimHist = [], aimT = 0, cur = [0, 0];
+  function aimNow() { if (!ref) return [0, 0]; const x = (ori.g - ref.g) / 22, y = (ori.b - ref.b) / 22; return [Math.max(-1.5, Math.min(1.5, x)), Math.max(-1.5, Math.min(1.5, y))]; }
+  function aimBefore(t) { let a = cur; for (const h of aimHist) if (h.t <= t) a = h.a; return a; }
+  function startGrip() { if (st !== 'pitch') return; grip = true; gripUntil = 0; ref = { ...ori }; aimHist = []; $('grip').classList.add('on'); $('gTxt').textContent = '기울여 조준 → 휘둘러!'; send({ t: 'grip', on: 1 }); vib(15); }
+  function endGrip(cancel) {
+    if (!grip && !gripUntil) return;
+    grip = false; gripUntil = 0; $('grip').classList.remove('on'); $('gTxt').textContent = '여기를 누른 채로 기울여 조준'; $('dot').style.transform = '';
+    if (cancel) send({ t: 'grip', on: 0 });
+  }
+  function aimLoop() {
+    requestAnimationFrame(aimLoop);
+    if (!(grip || gripUntil)) return;
+    const now = performance.now();
+    if (!grip && now > gripUntil) { endGrip(true); return; }
+    if (grip && !burst) { cur = aimNow(); aimHist.push({ t: now, a: cur }); if (aimHist.length > 40) aimHist.shift(); $('dot').style.transform = `translate(${cur[0] * 48}px,${-cur[1] * 60}px)`; }
+    if (grip && now - aimT > 33) { aimT = now; send({ t: 'aim', x: +cur[0].toFixed(3), y: +cur[1].toFixed(3) }); }
+  }
+  const G = $('grip');
+  G.addEventListener('touchstart', (e) => { e.preventDefault(); startGrip(); }, { passive: false });
+  G.addEventListener('touchend', (e) => { e.preventDefault(); if (grip) { grip = false; gripUntil = performance.now() + 600; } }, { passive: false });
+  G.addEventListener('mousedown', startGrip);
+  G.addEventListener('mouseup', () => { if (grip) { grip = false; gripUntil = performance.now() + 600; } });
+  // 센서가 없는 기기(PC 브라우저 등): 조준판을 두 번 빠르게 누르면 가운데로 보통 세기 투구
+  let lastTap = 0;
+  G.addEventListener('click', () => { const n = performance.now(); if (!hasMotion && n - lastTap < 350) send({ t: 'pitch', at: n, pk: 1200, x: 0, y: 0, type: hs.type }); lastTap = n; });
+
+  // ── 버튼 ──
+  document.addEventListener('click', (e) => {
+    const b = e.target.closest('button'); if (!b) return;
+    if (b.dataset.t) { hs.type = b.dataset.t; paintHS(); send({ t: 'type', v: b.dataset.t }); vib(10); }
+    if (b.dataset.g) { send({ t: 'guess', g: b.dataset.g }); vib(10); }
+    if (b.dataset.s) { sens = +b.dataset.s; LSset('sens', sens); paintSens(); }
+  });
+  function paintSens() { document.querySelectorAll('[data-s]').forEach((b) => b.classList.toggle('on', +b.dataset.s === sens)); }
+  paintSens();
+  $('bBunt').onclick = () => { send({ t: 'bunt' }); vib(10); };
+  $('bChal').onclick = () => { send({ t: 'chal' }); vib([20, 30, 20]); };
+  $('tapSwing').onclick = () => { send({ t: 'swing', at: performance.now(), pk: 800, mode: 'contact' }); fb('bFb', '스윙!', '#ffcf3f'); };
+
+  // ── 시작: iOS는 버튼을 눌러야 센서 권한을 물어볼 수 있음 ──
+  $('start').onclick = async () => {
+    code = $('code').value.toUpperCase().replace(/[^A-Z0-9]/g, '');
+    if (code.length !== 6) { $('joinErr').textContent = '코드 6자리를 넣어줘'; return; }
+    LSset('code', code); history.replaceState(null, '', '#' + code);
+    try { if (window.DeviceMotionEvent && DeviceMotionEvent.requestPermission) { const p = await DeviceMotionEvent.requestPermission(); if (p !== 'granted') { $('joinErr').textContent = '동작 센서 권한을 허용해줘 (설정 > Safari > 동작 및 방향 접근)'; } } } catch (x) { }
+    try { if (window.DeviceOrientationEvent && DeviceOrientationEvent.requestPermission) await DeviceOrientationEvent.requestPermission(); } catch (x) { }
+    addEventListener('devicemotion', onMotion);
+    addEventListener('deviceorientation', onOri);
+    try { navigator.wakeLock && (await navigator.wakeLock.request('screen')); } catch (x) { }
+    document.addEventListener('visibilitychange', async () => { if (!document.hidden) try { navigator.wakeLock && (await navigator.wakeLock.request('screen')); } catch (x) { } });
+    setRole('wait'); connect(); aimLoop();
+  };
+  if (code0.length === 6) $('start').focus();
+})();
+</script>
+</body>
+</html>

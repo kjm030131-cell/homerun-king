@@ -702,6 +702,29 @@ body[data-screen=over] #hud{opacity:0;transition:opacity .35s ease}
 .clubsel .chev{margin-left:auto;font-style:normal;font-size:11.5px;color:var(--steel);font-weight:700}
 @media (max-width:640px){.presets{grid-template-columns:repeat(2,1fr)}.board.setup .body.grid2{grid-template-columns:1fr}.board.setup .acts.sticky .go{flex:1}}
 @media (prefers-reduced-motion:reduce){*,*:before,*:after{animation:none!important;transition:none!important}}
+
+/* [motion] 모션 컨트롤 */
+.body.motion{display:grid;grid-template-columns:1fr 1fr;gap:18px 22px}
+.body.motion .full{grid-column:1/-1}
+.body.motion .mcol{display:flex;flex-direction:column;gap:10px;min-width:0}
+.body.motion .setgrp em{font-style:normal;font-size:11px;margin-left:6px;padding:2px 6px;border-radius:4px;background:rgba(255,207,63,.16);color:#ffcf3f;letter-spacing:.04em}
+.padbox{display:flex;gap:14px;align-items:center}
+.padbox canvas{width:150px;height:150px;border-radius:8px;image-rendering:pixelated;flex:none}
+.padinfo{display:flex;flex-direction:column;gap:4px;min-width:0}
+.padinfo .url{font-size:13px;word-break:break-all;color:#cfe3ff}
+.padinfo .pcode{font-size:30px;letter-spacing:.16em;color:#ffcf3f;line-height:1.1}
+.padinfo .btn{align-self:flex-start;margin-top:4px}
+.mst{font-size:13px;color:#9fb3cc;min-height:18px;margin:0}
+.mst.ok{color:#4fd18b}
+.camview{width:100%;max-width:320px;border-radius:8px;background:#000}
+#motionBadge{position:fixed;top:58px;left:50%;transform:translateX(-50%);z-index:30;display:flex;align-items:center;gap:8px;padding:5px 12px;border-radius:999px;background:rgba(8,14,26,.78);border:1px solid rgba(79,209,139,.45);color:#d8f5e6;font-size:12px;font-weight:700;pointer-events:none}
+#motionBadge i{width:8px;height:8px;border-radius:50%;background:#4fd18b;box-shadow:0 0 8px #4fd18b;animation:mPulse 1.4s ease-in-out infinite}
+@keyframes mPulse{50%{opacity:.35}}
+#motionCam{position:fixed;left:16px;bottom:16px;z-index:30;width:160px;border-radius:8px;overflow:hidden;background:#000;border:1px solid rgba(255,255,255,.18);pointer-events:none}
+#motionCam canvas{display:block;width:160px;height:120px}
+#motionCam .bar{height:4px;background:rgba(255,255,255,.12)}
+#motionCam .bar b{display:block;height:100%;width:0;background:#ffcf3f;transition:width .06s linear}
+@media (max-width:760px){.body.motion{grid-template-columns:1fr}}
 </style>
 <script type="importmap">
 { "imports": { "three": "https://cdn.jsdelivr.net/npm/three@0.160.0/build/three.module.js", "three/addons/": "https://cdn.jsdelivr.net/npm/three@0.160.0/examples/jsm/" } }
@@ -720,7 +743,7 @@ body[data-screen=over] #hud{opacity:0;transition:opacity .35s ease}
     <label class="lbl" for="nick">닉네임</label>
     <div class="nickrow"><input id="nick" class="inp" maxlength="12" placeholder="경기장에서 쓸 이름" autocomplete="off"><button id="bPlay" class="go">플레이</button></div>
     <div class="err" id="err" role="alert"></div>
-    <div class="tlinks"><button id="bSettings" class="tlink">설정</button><button id="bHelp" class="tlink">조작법</button></div>
+    <div class="tlinks"><button id="bSettings" class="tlink">설정</button><button id="bHelp" class="tlink">조작법</button><button id="bMotion" class="tlink">모션 컨트롤</button></div>
   </div>
   <div class="ver">HOMERUN KING · SEASON 1</div>
 </section>
@@ -753,6 +776,7 @@ body[data-screen=over] #hud{opacity:0;transition:opacity .35s ease}
     <button id="lbName" class="chip" title="닉네임 바꾸기">닉네임</button>
     <button id="lbSettings" class="chip">설정</button>
     <button id="lbHelp" class="chip">조작법</button>
+    <button id="lbMotion" class="chip">모션 컨트롤</button>
   </div>
   <div class="lbody">
     <div class="acts-l">
@@ -989,6 +1013,30 @@ body[data-screen=over] #hud{opacity:0;transition:opacity .35s ease}
     <div class="acts"><button class="go" data-close>확인</button></div>
   </div>
 </div></div>
+<div id="motionM" class="modal hide"><div class="board wide">
+  <header><h3>모션 컨트롤</h3><span class="note">진짜 휘두르고 던지기 · 수비는 CPU가 자동</span></header>
+  <div class="body motion">
+    <section class="mcol">
+      <div class="setgrp">핸드폰 컨트롤러 <em>추천</em></div>
+      <p class="note">핸드폰을 배트 손잡이처럼 두 손으로 쥐고 휘둘러. 투구 땐 화면을 누른 채 기울여서 조준하고, 팔을 휘두르면 공이 나가. 세게 휘두를수록 강타·빠른 공.</p>
+      <button class="go" id="mPadBtn">핸드폰 연결하기</button>
+      <div id="mPadBox" class="hide padbox">
+        <canvas id="mQR" width="200" height="200"></canvas>
+        <div class="padinfo"><span class="lbl">핸드폰 카메라로 QR을 찍거나</span><b class="url" id="mURL"></b><span class="lbl">에서 코드 입력</span><b class="pcode num" id="mCode">------</b><button class="btn sm" id="mNewCode">새 코드</button></div>
+      </div>
+      <p class="mst" id="mPadSt"></p>
+    </section>
+    <section class="mcol">
+      <div class="setgrp">웹캠 <em>베타</em></div>
+      <p class="note">카메라에서 2~3m 떨어져 옆으로 서. 휘두르는 순간을 잡아서 스윙해. 투구는 마우스로 조준해 두고 던지는 동작을 하면 나가. 밝은 곳에서 배경이 덜 움직일수록 정확해.</p>
+      <button class="btn" id="mCamBtn">웹캠 켜기</button>
+      <canvas id="mCamView" class="hide camview" width="320" height="240"></canvas>
+      <p class="mst" id="mCamSt"></p>
+    </section>
+    <div class="full"><label class="lbl" for="mCal">타이밍 보정 (계속 늦게 맞으면 +, 빨리 맞으면 −)</label><div class="range"><input id="mCal" type="range" min="-150" max="150" step="10" value="0"><output id="mCalV">0ms</output></div></div>
+  </div>
+  <div class="acts"><button class="go" data-close>확인</button></div>
+</div></div>
 <div id="menuM" class="modal hide"><div class="board">
   <header><h3 id="menuT">일시정지</h3></header>
   <div class="body col">
@@ -996,6 +1044,7 @@ body[data-screen=over] #hud{opacity:0;transition:opacity .35s ease}
     <button class="go" data-close>계속하기</button>
     <button class="btn" id="mSettings">설정</button>
     <button class="btn" id="mHelp">조작법</button>
+    <button class="btn" id="mMotion">모션 컨트롤 (핸드폰·웹캠)</button>
     <button class="btn hide" id="mLobby">대기실로 돌아가기 (방장)</button>
     <button class="btn" id="mQuit">경기 나가기</button>
   </div>
@@ -1051,6 +1100,8 @@ body[data-screen=over] #hud{opacity:0;transition:opacity .35s ease}
   </div>
 </div></div>
 
+<div id="motionBadge" class="hide"><i></i><span id="motionBadgeT">모션</span></div>
+<div id="motionCam" class="hide"><canvas id="motionCamC" width="160" height="120"></canvas><div class="bar"><b id="motionCamBar"></b></div></div>
 <div id="conn" class="hide">서버 연결이 끊겼어. 다시 붙는 중 <button id="bReconnect" class="btn sm" style="margin-left:8px">다시 연결</button></div>
 <div id="toast"></div>
 <script type="module" src="./app.js"></script>
