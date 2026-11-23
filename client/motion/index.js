@@ -7,6 +7,7 @@ import { $, show, setText, setHTML, cls, style } from '../ui/dom.js';
 import { drawQR } from './qr.js';
 import { createPadLink, newPadCode } from './link.js';
 import { createWebcam } from './webcam.js';
+import { createPose } from './pose.js';
 import { bus } from '../core/bus.js';
 
 const TYPES_KO = { FB: '포심', TS: '투심', SL: '슬라이더', CB: '커브', CH: '체인지업', SP: '스플리터', BP: '빈볼' };
@@ -50,11 +51,12 @@ export function createMotion(api) {
     // [motion] 스윙 높이: 정점 때 핸드폰 윗부분(배트 끝) 각도 el(°). 내 평균 각도 = 존 한가운데, 35° 숙이면/들면 존 아래/위 끝 → 공 높이와 어긋난 만큼 빗맞음(65%만 반영해 조금 너그럽게)
     if (isFinite(el)) {
       const zn = S.zn || [-0.236, 0.236, 0.46, 1.06], zc = (zn[2] + zn[3]) / 2, half = (zn[3] - zn[2]) / 2;
-      const swingY = zc + clamp((el - M.elMean) / 28, -1.6, 1.6) * half; // [11-23] 28°면 존 끝까지 (예전 35°), 85% 반영 (예전 65%라 거의 안 느껴졌음)
+      const mk = src === 'cam' ? 'elMeanCam' : 'elMean'; if (M[mk] == null) M[mk] = el;
+      const swingY = zc + clamp((el - M[mk]) / 28, -1.6, 1.6) * half; // [11-23] 28°면 존 끝까지 (예전 35°), 85% 반영 (예전 65%라 거의 안 느껴졌음)
       ay = p.ty + (swingY - p.ty) * 0.85 + gauss() * sd * 0.5;
       const hk = swingY > zc + half * 0.35 ? '높게' : swingY < zc - half * 0.35 ? '낮게' : '가운데';
       M.lastH = `스윙 높이 ${hk} (${el > 0 ? '+' : ''}${Math.round(el)}°)`; api.toast(M.lastH);
-      M.elMean += (el - M.elMean) * 0.12; store.set('motionEl', Math.round(M.elMean * 10) / 10);
+      M[mk] += (el - M[mk]) * 0.12; if (mk === 'elMean') store.set('motionEl', Math.round(M.elMean * 10) / 10);
       M.lastSwingY = swingY;
     }
     const aim = [p.tx + gauss() * sd, ay];
@@ -111,10 +113,25 @@ export function createMotion(api) {
   M.toggleCam = async () => {
     if (!M.cam) M.cam = createWebcam((b) => {
       const S = api.S(), role = api.role();
+      if (role.batter && M.pose && M.pose.ready) return; // 전신 인식 중엔 손목 속도로 스윙 (아래)
       if (role.batter) { const r = swing(b.at, b.rel > 1.25, 'cam'); if (r === 'ok') api.toast(b.rel > 1.25 ? '스윙! (강타)' : '스윙!'); }
       else if (role.pitcher && S && S.ph === 'pitch') { if (pitch(api.aimNow(), camPower(b.rel))) api.toast('투구!'); }
     });
-    if (M.cam.on) M.cam.stop(); else { setText('mCamSt', '카메라 켜는 중…'); const ok = await M.cam.start(); if (!ok) setText('mCamSt', M.cam.err); }
+    if (M.cam.on) { M.cam.stop(); if (M.pose) M.pose.stop(); }
+    else {
+      setText('mCamSt', '카메라 켜는 중…'); const ok = await M.cam.start(); if (!ok) setText('mCamSt', M.cam.err);
+      else {
+        // 전신 인식(MediaPipe) — 처음 한 번 몇 MB 내려받음. 실패하면 움직임 감지로
+        if (!M.pose) M.pose = createPose(M.cam.video, (b) => {
+          const S = api.S(), role = api.role();
+          if (!role.batter) return;
+          const r = swing(b.at, b.pk > 6.5, 'cam', b.h * 62); // 손 높이(어깨 기준 m) → 각도처럼 (0.45m ≈ 28°)
+          if (r === 'ok') api.toast(b.pk > 6.5 ? '풀스윙!' : '스윙!');
+        });
+        setText('mCamSt', '전신 인식 모델 불러오는 중… (처음 한 번)');
+        M.pose.load().then((ok) => { if (ok) M.pose.start(); paint(); });
+      }
+    }
     paint(); syncAuto();
   };
 
@@ -126,7 +143,7 @@ export function createMotion(api) {
     const P = M.pad;
     const padTxt = !P ? '' : !P.open ? '서버에 붙는 중…' : P.pads ? `핸드폰 연결됨 · 지연 ${Math.round(P.rtt / 2)}ms` : 'QR을 핸드폰 카메라로 찍어줘';
     setText('mPadSt', padTxt); cls('mPadSt', 'ok', !!(P && P.pads));
-    if (M.cam) { setText('mCamSt', M.cam.on ? '웹캠 켜짐 · 옆으로 서서 휘둘러봐' : M.cam.err || '꺼짐'); setText('mCamBtn', M.cam.on ? '웹캠 끄기' : '웹캠 켜기'); cls('mCamSt', 'ok', M.cam.on); }
+    if (M.cam) { setText('mCamSt', M.cam.on ? (M.pose && M.pose.ready ? (M.pose.now() ? '전신 인식 중 · 선수가 내 몸을 따라 해' : '몸이 안 보여 — 카메라에 전신이 나오게 서줘') : M.pose && M.pose.loading ? '전신 인식 모델 불러오는 중…' : M.pose && M.pose.err ? M.pose.err : '웹캠 켜짐 · 옆으로 서서 휘둘러봐') : M.cam.err || '꺼짐'); setText('mCamBtn', M.cam.on ? '웹캠 끄기' : '웹캠 켜기'); cls('mCamSt', 'ok', M.cam.on); }
     show('mCamView', !!(M.cam && M.cam.on));
     setText('mCalV', (M.calib > 0 ? '+' : '') + M.calib + 'ms' + (M.auto ? ` (자동 ${M.auto > 0 ? '+' : ''}${Math.round(M.auto)})` : ''));
     const on = M.connected(); setText('mPlaySt', on ? '준비 끝 · 플레이 볼을 눌러!' : '핸드폰을 연결하거나 웹캠을 켜면 시작할 수 있어'); cls('mPlaySt', 'ok', on);
@@ -186,6 +203,7 @@ export function createMotion(api) {
     const n = Math.hypot(bq[0], bq[1], bq[2], bq[3]) || 1; for (let i = 0; i < 4; i++) bq[i] /= n;
     return bq;
   };
+  M.poseNow = () => (M.pose && M.pose.ready && M.cam && M.cam.on ? M.pose.now() : null);
   M.batOff = () => {
     if (!M.ori || performance.now() - M.oriT > 250) return null;
     bo[0] += (M.ori[0] * Math.PI / 180 - bo[0]) * 0.5; // 핸드폰 윗부분 들면 배트도 세워짐(스크린샷으로 방향 확인) bo[1] += (M.ori[1] * Math.PI / 180 - bo[1]) * 0.5;
