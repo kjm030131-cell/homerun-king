@@ -350,7 +350,7 @@ const seen = { msg: -1, hr: -1, te: -1, ce: -1, we: -1, pitch: -1, lp: -1 };
 let ballL = null, lastBallSt = '', hitStopUntil = 0, excite = 0, hrCine = 0, hrCineStart = 0;
 let shake = 0, lastHolder = -1, camPunch = 0, lastContactT = 0;
 const replay = new Replay();
-let rpInfo = null;
+let rpInfo = null, ballScaleL = null; // [AAA] 화면 공 크기(부드럽게)
 function allPlayers() { const a = fielders.map((A) => A.p); if (batter) a.push(batter.p); for (const A of runners.values()) a.push(A.p); for (const U of umps) a.push(U.p); for (const C of coaches) a.push(C.p); return a; }
 // ── [net] 보간 버퍼·외삽·서버 시계는 client/net/interp.js (NI) — 지연은 스냅샷 '늦음'의 90% 분위에 맞춰 자동, 바닥나면 최대 0.18초 외삽
 const lerpAng = (a, b, u) => { let d = b - a; d = Math.atan2(Math.sin(d), Math.cos(d)); return a + d * u; };
@@ -1228,8 +1228,20 @@ function updateBall(dt, t, role, pitchPhase) {
     let bsc = ballL && (s.ph === 'live' || s.ph === 'result') ? clamp(camera.position.distanceTo(ballPos) / 22, 1, 3) * (camera.fov / 52) ** 0.5 : s.ph === 'pitching' && (role.batter || role.pitcher) ? 1.5 : 1;
     // [pitch] 투구 중엔 화면 지름 최소 보장(창이 작거나 어깨 시점이라도 릴리스 직후 점처럼 안 사라지게): 창 높이의 1.2% (800px → 9.6px, 8~14px)
     if (s.ph === 'pitching' && (role.batter || role.pitcher)) { const d = Math.max(0.5, camera.position.distanceTo(ballPos)), px1 = 2 * BALL_R * 1.6 / d * (innerHeight / 2) / Math.tan(camera.fov * Math.PI / 360), want = clamp(innerHeight * 0.012, 8, 14); if (px1 * bsc < want) bsc = want / px1; }
-    // [AAA] 날아가는 타구도 화면 지름 최소 보장(창 높이 0.9%, 6~10px) — 트래킹 카메라 줌·먼 외야에서 공이 점으로 사라지지 않게
-    if (ballL && (s.ph === 'live' || s.ph === 'result') && ballL.h < 0) { const d = Math.max(0.5, camera.position.distanceTo(ballPos)), px1 = 2 * BALL_R * 1.6 / d * (innerHeight / 2) / Math.tan(camera.fov * Math.PI / 360), want = clamp(innerHeight * 0.009, 6, 10); if (px1 * bsc < want) bsc = Math.min(want / px1, 9); }
+    // [AAA] 공 크기 규칙(11-23): 공 메시는 실제의 1.6배로 만들어져 있음
+    //  - 송구·포구 직전·수비수 6m 안(높이 3m 아래) → 실제에 가까운 크기(0.75 = 실제 1.2배). 예전엔 글러브보다 큰 공이 날아다녔음
+    //  - 아무도 없는 곳으로 멀리 나는 타구만 화면 최소 크기 보장(최대 2.5배)
+    if (ballL && (s.ph === 'live' || s.ph === 'result')) {
+      let near = ballL.state === 'thrown' || ballL.h >= 0;
+      if (!near && s.fl && ballPos.y < 3) for (const f of s.fl) if (Math.hypot(f[1] - ballPos.x, f[2] - ballPos.z) < 6) { near = true; break; }
+      let want = 0.75;
+      if (!near) {
+        const d = Math.max(0.5, camera.position.distanceTo(ballPos)), px1 = 2 * BALL_R * 1.6 / d * (innerHeight / 2) / Math.tan(camera.fov * Math.PI / 360), wpx = clamp(innerHeight * 0.008, 5, 9);
+        want = clamp(Math.max(clamp(d / 30, 0.75, 2), wpx / px1), 0.75, 2.5);
+      }
+      ballScaleL = ballScaleL == null ? want : ballScaleL + (want - ballScaleL) * Math.min(1, dt * 8); // 부드럽게
+      bsc = ballScaleL;
+    } else ballScaleL = null;
     ballLook.update(dt); // [pitch] 실밥 회전
     ballMesh.scale.setScalar(bsc);
     // [gameplay] 키워 그린 공이 땅에 반쯤 묻혀 '바닥 아래에서 튀는' 것처럼 보이던 것: 그린 반지름만큼 띄움 (물리 위치는 그대로)

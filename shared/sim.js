@@ -835,19 +835,30 @@ export class Game {
     if (on(1)) { const DP = { '2B': [-9.5, 36.5], SS: [9, 37] }; if (DP[pos]) return DP[pos]; }
     return hs;
   }
-  resetFielders() {
+  // [11-23] soft: 멀리 있는 수비수는 순간이동시키지 않고 투구 대기 동안 걸어서 돌아오게(walkBack) — 예전엔 결과 화면(1~2초)이 끝나면 외야수가 제자리로 '뿅'
+  resetFielders(soft = false) {
     this.restoreCtrl();
     for (const f of this.fielders) {
-      const hs = f.shift && f.ctrl && this.isLive(f.ctrl) ? f.shift : this.spotOf(f.pos);
-      f.x = hs[0]; f.z = hs[1]; f.mv = 0; f.jt = f.dv = f.fum = -99;
+      const hs = soft ? this.standSpot(f) : f.shift && f.ctrl && this.isLive(f.ctrl) ? f.shift : this.spotOf(f.pos);
+      f.mv = 0; f.jt = f.dv = f.fum = -99;
+      if (soft && dist2(f.x, f.z, hs[0], hs[1]) > 0.25) continue;
+      f.x = hs[0]; f.z = hs[1];
       f.ry = f.pos === 'C' ? 0 : Math.atan2(-hs[0], -hs[1]);
     }
   }
+  // 투구 전 서 있어야 할 자리: 사람이 옮겨 둔 위치 > 1루 주자 있으면 1루수는 견제 위치 > 기본 수비 위치
+  standSpot(f) {
+    if (f.shift && f.ctrl && this.isLive(f.ctrl)) return f.shift;
+    if (f.pos === '1B' && this.mode === 'game' && this.runners.some((r) => r.b === 1 && !r.out)) return [-BASES[1][1] + 0.7, BASES[1][1] + 0.6];
+    return this.spotOf(f.pos);
+  }
+  fieldersHome() { return this.fielders.every((f) => { const hs = this.standSpot(f); return dist2(f.x, f.z, hs[0], hs[1]) < 3; }); }
 
   enterPitch() {
     this.phase = 'pitch';
     this.pitch = null; this.ball = null; this.aiSwing = null; this.play = null;
-    this.resetFielders();
+    this.resetFielders(this.mode !== 'derby');
+    this.backUntil = this.now + 4.5; // 이때까지 못 오면 남은 거리만 맞춤
     this.runners = this.runners.filter((r) => !r.out && !r.scored && !r.trot).map((r) => ({ ...r, b: r.target, start: r.target, forced: false, mustReturn: false, manual: 0, steal: false, trot: false }));
     const pc = this.pitcherCtrl();
     this.pitchDeadline = this.now + (this.isLive(pc) ? 15 : this.mode === 'derby' ? 1.0 : rand(1.4, 2.3));
@@ -1129,13 +1140,15 @@ export class Game {
   }
 
   // [qa 11-19] 플레이 끝(결과 표시) 동안 수비수가 제자리로 걸어서 돌아감 — 전엔 다음 투구 때 한 번에 순간이동(화면에선 미끄러지듯 날아감)
-  walkBack(dt) {
+  walkBack(dt, pre = false, minD = 0) {
     if (!this.fielders.length || this.mode === 'derby') return;
     for (const f of this.fielders) {
+      if (pre && f.ctrl && this.isLive(f.ctrl) && this.isHumanActive(f)) continue; // 사람이 수비 위치 옮기는 중
       if (this.ball && this.ball.holder >= 0 && this.fielders[this.ball.holder] === f && this.now < this.phaseUntil - 0.6) continue; // 공 든 사람은 잠깐 서 있다가
-      const hs = this.spotOf(f.pos), dx = hs[0] - f.x, dz = hs[1] - f.z, d = Math.hypot(dx, dz);
-      if (d < 0.2) { f.mv = 0; continue; }
-      const st = Math.min(d, (d > 25 ? 6.5 : 4.2) * dt);
+      const hs = pre ? this.standSpot(f) : this.spotOf(f.pos), dx = hs[0] - f.x, dz = hs[1] - f.z, d = Math.hypot(dx, dz);
+      if (minD && d < minD) continue;
+      if (d < 0.2) { f.mv = 0; if (pre) f.ry = f.pos === 'C' ? 0 : Math.atan2(-hs[0], -hs[1]); continue; }
+      const st = Math.min(d, (d > 25 ? 6.8 : d > 6 ? 5 : 3.2) * dt);
       f.x += dx / d * st; f.z += dz / d * st; f.ry = Math.atan2(dx, dz); f.mv = d > 25 ? 2 : 1;
     }
   }
@@ -1724,6 +1737,15 @@ export class Game {
     if (this.phase !== 'lobby') for (const [id, p] of this.players) if (!p.conn && this.now - p.dcAt > 120) this.removePlayer(id);
     switch (this.phase) {
       case 'pitch':
+        if (this.backUntil && this.mode !== 'derby') {
+          if (this.fieldersHome()) this.backUntil = 0;
+          else if (this.now >= this.backUntil) { this.backUntil = 0; } // 시간 다 되면 기다림만 그만 (순간이동 없음 — 투구 중에도 마저 걸어감)
+          else { // 수비수가 자리로 돌아오는 동안은 투구를 기다림 (사람 투구는 예약, CPU 투구·견제는 미룸)
+            this.walkBack(dt, true);
+            this.pitchReady = Math.max(this.pitchReady || 0, this.now + 0.1);
+            this.pitchDeadline = Math.max(this.pitchDeadline || 0, this.now + 1.2);
+          }
+        }
         this.buntDefense(dt);
         this.holdRunner(dt);
         if (this.pendPitch && this.now >= this.pitchReady) { const q = this.pendPitch; this.onPitch(q.id, q.m); if (this.phase !== 'pitch') break; } // [pitch]
@@ -1732,6 +1754,8 @@ export class Game {
         break;
       case 'pitching': {
         const p = this.pitch;
+        if (this.mode !== 'derby' && this.now - (this.pitchWalkT || 0) > 0.25) { this.pitchWalkT = this.now; this.pitchFar = !this.fieldersHome(); }
+        if (this.pitchFar) this.walkBack(dt, true, 3); // 아직 못 돌아온 수비수는 투구 중에도 마저 걸어감
         if (!p.rel && this.now >= p.t0) { p.rel = 1; this.ev('release', { pid: p.id, type: p.type, kmh: p.kmh, arr: r2(p.arrive), T: p.T, pf: p.pf || 0 }); }
         this.buntDefense(dt);
         this.stealCover(dt);
