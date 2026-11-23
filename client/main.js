@@ -424,7 +424,7 @@ function onSnap(s) {
   // 송구/포구/펜스 이벤트
   if (s.te && s.te.id !== seen.te) { if (fielders[s.te.i]) { if (!(pred.throwI === s.te.i && p - pred.throwT < 0.8)) fielders[s.te.i].throwT = nowP(); fielders[s.te.i].throwDur = s.te.w ? s.te.w / 0.55 : THROW_DUR; } if (pred.throwI === s.te.i) pred.throwT = 0; seen.te = s.te.id; } // [net] 내가 미리 시작한 송구 동작은 그대로 · [11-23] 클립 길이 = 서버 송구 동작(릴리스 55%)
   if (s.ce && s.ce.id !== seen.ce) { if (fielders[s.ce.i]) { fielders[s.ce.i].catchT = nowP(); if (s.ce.i === getRole().fi && getRole().defense) { feedback(s.ce.dive ? '다이빙 캐치!! 나이스!' : s.ce.jump ? '점프 캐치!! 나이스!' : '나이스 캐치!', '#4fd18b'); if (s.ce.dive || s.ce.jump) bus.emit('ui:perfect'); }
-    if ((s.ce.dive || s.ce.jump) && cfg.replay !== 0) replay.schedule(nowP() + 1.0, { tEvent: nowP(), pre: 1.2, post: 0.5, speed: 0.45, cam: 'catch', focus: fielders[s.ce.i].p, scene }); if (s.ce.dive) { fx.dustPuff(fielders[s.ce.i].p.root.position.x, fielders[s.ce.i].p.root.position.z, 2, 2); } } seen.ce = s.ce.id; }
+    if ((s.ce.dive || s.ce.jump) && cfg.replay !== 0) replay.schedule(nowP() + 1.0, { tEvent: nowP(), pre: 1.6, post: 0.6, speed: 0.45, cam: 'catch', focus: fielders[s.ce.i].p, scene }); if (s.ce.dive) { fx.dustPuff(fielders[s.ce.i].p.root.position.x, fielders[s.ce.i].p.root.position.z, 2, 2); } } seen.ce = s.ce.id; }
   if (s.ce2 && s.ce2.id !== seen.ce2) {
     if (seen.ce2 !== undefined) showCall(s.ce2);
     seen.ce2 = s.ce2.id;
@@ -1305,6 +1305,8 @@ function updateBall(dt, t, role, pitchPhase) {
     let bsc = ballL && (s.ph === 'live' || s.ph === 'result') ? clamp(camera.position.distanceTo(ballPos) / 22, 1, 3) * (camera.fov / 52) ** 0.5 : s.ph === 'pitching' && (role.batter || role.pitcher) ? 1.5 : 1;
     // [pitch] 투구 중엔 화면 지름 최소 보장(창이 작거나 어깨 시점이라도 릴리스 직후 점처럼 안 사라지게): 창 높이의 1.2% (800px → 9.6px, 8~14px)
     if (s.ph === 'pitching' && (role.batter || role.pitcher)) { const d = Math.max(0.5, camera.position.distanceTo(ballPos)), px1 = 2 * BALL_R * 1.6 / d * (innerHeight / 2) / Math.tan(camera.fov * Math.PI / 360), want = clamp(innerHeight * 0.012, 8, 14); if (px1 * bsc < want) bsc = want / px1; }
+    // [AAA] 날아가는 타구도 화면 지름 최소 보장(창 높이 0.9%, 6~10px) — 트래킹 카메라 줌·먼 외야에서 공이 점으로 사라지지 않게
+    if (ballL && (s.ph === 'live' || s.ph === 'result') && ballL.h < 0) { const d = Math.max(0.5, camera.position.distanceTo(ballPos)), px1 = 2 * BALL_R * 1.6 / d * (innerHeight / 2) / Math.tan(camera.fov * Math.PI / 360), want = clamp(innerHeight * 0.009, 6, 10); if (px1 * bsc < want) bsc = Math.min(want / px1, 9); }
     ballLook.update(dt); // [pitch] 실밥 회전
     ballMesh.scale.setScalar(bsc);
     // [gameplay] 키워 그린 공이 땅에 반쯤 묻혀 '바닥 아래에서 튀는' 것처럼 보이던 것: 그린 반지름만큼 띄움 (물리 위치는 그대로)

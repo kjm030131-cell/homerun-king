@@ -386,3 +386,16 @@ export function walkup(s, c) {
   clearTimeout(wuT); wuT = setTimeout(() => e.classList.remove('show'), 4000);
 }
 export function resetHUD() { slowKey = ''; prevCnt = null; prevSc = null; clubsKey = ''; $('bug')._cnt = ''; $('bigcount')._cnt = ''; }
+
+// [AAA] 공수 교대 카드: 중계 '이닝 종료' 그래픽 (가운데 아래, 3.2초) — 이번 이닝 득점 + 현재 스코어
+let innT = 0;
+export function inningCard(d, S) {
+  const e = $('innCard'); if (!e) return;
+  const tn = S.tn || ['원정', '홈'], cl = S.cl || [0, 1], sc = d.sc || S.sc || [0, 0];
+  const half = d.half === 0 ? '초' : '말', bat = d.half === 0 ? 0 : 1;
+  const runs = d.runs | 0;
+  const row = (i) => `<div class="ic-row ${i === bat ? 'bat' : ''}" style="--tc:${teamColor(cl[i])}"><img src="${emblemURL(cl[i], 64)}" alt=""><span>${esc(tn[i])}</span><b>${sc[i]}</b></div>`;
+  e.innerHTML = `<div class="ic-top"><b>${d.inning}회${half}</b> 종료</div><div class="ic-body">${row(0)}${row(1)}</div><div class="ic-foot">${runs ? `이번 이닝 <b>${runs}</b>점` : '이번 이닝 무득점'}</div>`;
+  e.classList.remove('show'); void e.offsetWidth; e.classList.add('show');
+  clearTimeout(innT); innT = setTimeout(() => e.classList.remove('show'), 3200);
+}

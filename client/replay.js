@@ -99,7 +99,7 @@ export class Replay {
     if (f0.ball && f1.ball) { ballMesh.visible = true; ballMesh.position.set(...f0.ball).lerp(_v.set(...f1.ball), u); }
     else if (f0.ball) { ballMesh.visible = true; ballMesh.position.set(...f0.ball); }
     else ballMesh.visible = false;
-    return { t: A.t, rel: A.t - A.tEvent, k: (A.t - A.t0) / (A.t1 - A.t0), cam: A.cam, focus: A.focus };
+    return { t: A.t, t0: A.t0, rel: A.t - A.tEvent, k: (A.t - A.t0) / (A.t1 - A.t0), cam: A.cam, focus: A.focus };
   }
 }
 const _v = new THREE.Vector3();
