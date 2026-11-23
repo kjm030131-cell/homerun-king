@@ -174,6 +174,17 @@ export function hudFrame(c, role, f) {
   ['d1', 'd2', 'd3'].forEach((id, i) => cls(id, 'on', s.occ && s.occ[i]));
   setDots('bug', s.cnt);
   setText('bugRules', c.rules === 'casual' ? '캐주얼' : '리얼'); cls('bugRules', 'casual', c.rules === 'casual');
+  // [physics] 바람: 화면 위 = 중견수 쪽, 왼쪽 = 좌익수 쪽(+x). 외야로 불면 뜬공이 더 뻗음
+  const wd = s.wd || [0, 0], wsp = Math.hypot(wd[0], wd[1]);
+  show('muW', !derby);
+  if (!derby && $('muW')._k !== wd.join()) {
+    $('muW')._k = wd.join();
+    const out = wd[1] / (wsp || 1);
+    setText('windTxt', wsp < 0.5 ? '무풍' : out > 0.55 ? (wsp >= 2 ? '외야로 (타자 유리)' : '외야로') : out < -0.55 ? (wsp >= 2 ? '홈 쪽으로 (투수 유리)' : '홈 쪽으로') : wd[0] > 0 ? '우→좌' : '좌→우');
+    setText('windSp', wsp < 0.5 ? '' : `${wsp.toFixed(1)}m/s`);
+    style($('windArr'), 'transform', `rotate(${(Math.atan2(-wd[0], wd[1]) * 180 / Math.PI).toFixed(0)}deg)`);
+    style($('windArr'), 'visibility', wsp < 0.5 ? 'hidden' : 'visible');
+  }
   // 매치업
   setText('muBat', bat.name || '-');
   if (derby && dy) {
