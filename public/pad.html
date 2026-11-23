@@ -48,6 +48,8 @@ h1{font-size:26px;font-weight:900;line-height:1.2}
 .zone{position:relative;width:170px;height:212px;border:2px solid rgba(255,255,255,.7);border-radius:4px;background:repeating-linear-gradient(90deg,transparent 0 39px,rgba(255,255,255,.15) 39px 40px),repeating-linear-gradient(0deg,transparent 0 49px,rgba(255,255,255,.15) 49px 50px)}
 .zone .dot{position:absolute;left:50%;top:50%;width:22px;height:22px;margin:-11px 0 0 -11px;border-radius:50%;background:var(--gold);box-shadow:0 0 14px var(--gold)}
 .hint{font-size:13px;color:var(--sub);line-height:1.5}
+.chalbig{background:rgba(90,184,255,.16);border-color:rgba(90,184,255,.6);color:#9fd4ff;font-size:17px;padding:16px;animation:chp 1s ease-in-out infinite}
+@keyframes chp{50%{box-shadow:0 0 0 6px rgba(90,184,255,.18)}}
 .small{font-size:12px;color:var(--sub);text-align:center}
 .sens{display:flex;gap:6px;align-items:center;justify-content:center;font-size:12px;color:var(--sub)}
 .sens .btn{padding:8px 10px;font-size:12px}
@@ -69,6 +71,7 @@ h1{font-size:26px;font-weight:900;line-height:1.2}
     <div class="role" id="wRole">대기</div>
     <div class="big" id="wTxt">PC에서 경기를 시작해줘</div>
     <p class="lead" id="wSub">타석에 서거나 마운드에 오르면 이 화면이 바뀌어. 수비는 CPU가 해.</p>
+    <button class="btn chalbig hide" id="wChal">ABS 챌린지 신청</button>
     <div class="sens">스윙 감도 <button class="btn" data-s="0">둔하게</button><button class="btn" data-s="1">보통</button><button class="btn" data-s="2">민감</button></div>
   </main>
 
@@ -93,6 +96,7 @@ h1{font-size:26px;font-weight:900;line-height:1.2}
       <div class="hint" id="gHint">존 위를 손가락으로 끌어 조준 → 손 떼면 고정 → 팔을 휘두르면 공이 나가 (세게 = 빠른 공, 너무 세면 제구 흔들림).</div>
     </div>
     <div class="fb" id="pFb"></div>
+    <button class="btn chalbig hide" id="pChal">ABS 챌린지 신청</button>
   </main>
 </div>
 <script>
@@ -110,20 +114,42 @@ h1{font-size:26px;font-weight:900;line-height:1.2}
 
   let ws = null, code = '', retry = 0, st = 'wait', hs = {}, hasMotion = false, lastMotionT = 0;
   function setConn(on, t) { $('conn').classList.toggle('on', on); $('connT').textContent = t; }
-  function send(m) { if (ws && ws.readyState === 1) ws.send(JSON.stringify(m)); }
+  function wsSend(m) { if (ws && ws.readyState === 1) ws.send(JSON.stringify(m)); }
+  // [11-24] WebRTC 직접 연결 — 같은 와이파이면 서버를 안 거쳐 핑이 수 ms. 안 되면 서버 경유
+  let pc = null, dc = null, direct = false, rtcT = -1e9;
+  function send(m) { if (dc && dc.readyState === 'open') { try { dc.send(JSON.stringify(m)); return; } catch (e) { } } wsSend(m); }
+  function rtcReset() { try { dc && dc.close(); } catch (e) { } try { pc && pc.close(); } catch (e) { } pc = dc = null; direct = false; }
+  window.__rtc = () => ({ pc: pc && pc.connectionState, ice: pc && pc.iceConnectionState, sig: pc && pc.signalingState, dc: dc && dc.readyState }); // [qa]
+  async function rtcStart() {
+    if (typeof RTCPeerConnection === 'undefined' || performance.now() - rtcT < 4000) return;
+    rtcT = performance.now(); rtcReset();
+    pc = new RTCPeerConnection({ iceServers: [{ urls: 'stun:stun.l.google.com:19302' }] });
+    dc = pc.createDataChannel('d', { ordered: false });
+    dc.onopen = () => { direct = true; setConn(true, 'PC 직접 연결 ⚡'); };
+    dc.onclose = () => { direct = false; setConn(true, 'PC 연결됨 (서버 경유)'); setTimeout(rtcStart, 1500); };
+    dc.onmessage = (e) => onData(e.data);
+    pc.onicecandidate = (e) => { if (e.candidate) wsSend({ t: 'ice', c: e.candidate.toJSON ? e.candidate.toJSON() : e.candidate }); };
+    pc.onconnectionstatechange = () => { if (pc && pc.connectionState === 'failed') { rtcReset(); setTimeout(rtcStart, 3000); } };
+    try { const o = await pc.createOffer(); await pc.setLocalDescription(o); wsSend({ t: 'rtc', sdp: pc.localDescription }); } catch (e) { rtcReset(); }
+  }
   function connect() {
     const proto = location.protocol === 'https:' ? 'wss' : 'ws';
     ws = new WebSocket(`${proto}://${location.host}/ws/pad/${code}?r=p`);
     ws.onopen = () => { retry = 0; setConn(false, 'PC 찾는 중'); send({ t: 'hello', ua: navigator.userAgent.slice(0, 80) }); };
     ws.onclose = () => { setConn(false, '다시 연결 중'); setTimeout(connect, Math.min(6000, 500 * 2 ** retry++)); };
-    ws.onmessage = (e) => {
-      let m; try { m = JSON.parse(e.data); } catch (x) { return; }
-      if (m.t === 'peer') { setConn(!!m.host, m.host ? 'PC 연결됨' : 'PC 꺼져 있음'); if (!m.host) setRole('wait'); }
-      else if (m.t === 'png') { send({ t: 'pog', h: m.h, p: performance.now() }); setConn(true, 'PC 연결됨'); }
+    ws.onmessage = (e) => onData(e.data);
+  }
+  function onData(data) {
+    {
+      let m; try { m = JSON.parse(data); } catch (x) { return; }
+      if (m.t === 'rtc' && m.sdp && pc) { pc.setRemoteDescription(m.sdp).catch(() => { }); return; }
+      if (m.t === 'ice' && m.c && pc) { pc.addIceCandidate(m.c).catch(() => { }); return; }
+      if (m.t === 'peer') { setConn(!!m.host, m.host ? 'PC 연결됨' : 'PC 꺼져 있음'); if (!m.host) { setRole('wait'); rtcReset(); } else if (!direct) rtcStart(); }
+      else if (m.t === 'png') { send({ t: 'pog', h: m.h, p: performance.now() }); if (!direct) setConn(true, 'PC 연결됨 (서버 경유)'); }
       else if (m.t === 'hs') { hs = m; setRole(m.st); paintHS(); }
       else if (m.t === 'ack') onAck(m);
       else if (m.t === 'fb') fb(m.k === 'pitch' ? 'pFb' : 'bFb', m.txt, m.col, m.vib);
-    };
+    }
   }
   function setRole(r) {
     if (r === st && !$('vJoin').classList.contains('hide') === false) { /* 같은 화면 */ }
@@ -134,6 +160,7 @@ h1{font-size:26px;font-weight:900;line-height:1.2}
   }
   function paintHS() {
     $('bBunt').classList.toggle('on', !!hs.bunt); $('bChal').disabled = !hs.chal;
+    for (const id of ['pChal', 'wChal']) $(id).classList.toggle('hide', !hs.chal); // 투수·포수도 볼 판정에 챌린지
     const box = $('types');
     const types = (hs.types || []).filter((k) => KO[k]);
     if (box.dataset.k !== types.join()) { box.dataset.k = types.join(); box.innerHTML = types.map((k) => `<button class="btn" data-t="${k}">${KO[k]}</button>`).join(''); }
@@ -245,7 +272,7 @@ h1{font-size:26px;font-weight:900;line-height:1.2}
   paintSens();
   $('bStance').onclick = () => resetStance();
   $('bBunt').onclick = () => { send({ t: 'bunt' }); vib(10); };
-  $('bChal').onclick = () => { send({ t: 'chal' }); vib([20, 30, 20]); };
+  $('bChal').onclick = $('pChal').onclick = $('wChal').onclick = () => { send({ t: 'chal' }); vib([20, 30, 20]); fb(st === 'pitch' ? 'pFb' : 'bFb', '챌린지 신청!', '#9fd4ff'); };
   $('tapSwing').onclick = () => { send({ t: 'swing', at: performance.now(), pk: 800, mode: 'contact' }); fb('bFb', '스윙!', '#ffcf3f'); };
 
   // ── 시작: iOS는 버튼을 눌러야 센서 권한을 물어볼 수 있음 ──
