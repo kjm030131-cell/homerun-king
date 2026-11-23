@@ -138,7 +138,7 @@ h1{font-size:26px;font-weight:900;line-height:1.2}
   let fbT = 0;
   function fb(id, txt, col, v) { const e = $(id); e.textContent = txt; e.style.color = col || '#e9f0fb'; e.classList.add('pop'); setTimeout(() => e.classList.remove('pop'), 160); clearTimeout(fbT); fbT = setTimeout(() => { e.textContent = ''; }, 2200); if (v) vib(v); }
   function onAck(m) {
-    if (m.k === 'swing') { if (m.r === 'early') fb('bFb', '투수가 던지기 전이야', '#ffb36b'); else if (m.r === 'skip') fb('bFb', '지금은 칠 공이 없어', '#8ea3bf'); }
+    if (m.k === 'swing') { if (m.lag != null) $('spdL').textContent = `PC까지 ${m.lag}ms (판정은 보정됨)`; if (m.r === 'early') fb('bFb', '투수가 던지기 전이야', '#ffb36b'); else if (m.r === 'skip') fb('bFb', '지금은 칠 공이 없어', '#8ea3bf'); }
     if (m.k === 'pitch') { if (m.r === 'ok') fb('pFb', `투구! 세기 ${m.lv}%`, m.lv > 100 ? '#ff6b6b' : m.lv >= 84 ? '#4fd18b' : '#ffcf3f', 40); else fb('pFb', '지금은 던질 수 없어', '#8ea3bf'); }
   }
 
@@ -155,6 +155,7 @@ h1{font-size:26px;font-weight:900;line-height:1.2}
         send({ t: 'swing', at: b.at, pk: Math.round(b.pk), mode });
         fb('bFb', mode === 'power' ? '풀스윙!' : '스윙!', '#ffcf3f', mode === 'power' ? [30, 20, 60] : 30);
       });
+      if (burst && !burst.sws && r > SENS[sens][0] * 1.3) { burst.sws = 1; send({ t: 'sws', at: now }); } // 휘두르기 시작(정점 ~50ms 전) → PC가 배트를 미리 돌림
     } else if (st === 'pitch' && (grip || now < gripUntil)) {
       detect(r, now, 520, 380, (b) => {
         const a = aimBefore(b.t0 - 120);
@@ -166,9 +167,11 @@ h1{font-size:26px;font-weight:900;line-height:1.2}
   // 각속도가 문턱을 넘으면 시작 → 꼭짓점 기록 → 반 아래로 떨어지면 끝 (꼭짓점 시각 = 맞는/놓는 순간)
   function detect(r, now, th, maxMs, done) {
     if (now < cool) return;
-    if (!burst) { if (r > th) burst = { t0: now, pk: r, at: now }; return; }
-    if (r > burst.pk) { burst.pk = r; burst.at = now; }
-    if (r < burst.pk * 0.45 || now - burst.t0 > maxMs) { const b = burst; burst = null; cool = now + 750; if (b.pk > th * 1.2) done(b); }
+    // [11-23] 정점을 지나자마자(정점의 82% 아래로 2번 연속) 바로 보냄 — 예전엔 45% 아래까지 기다려 0.1~0.2초 늦게 휘둘러졌음
+    if (!burst) { if (r > th) burst = { t0: now, pk: r, at: now, down: 0 }; return; }
+    if (r > burst.pk) { burst.pk = r; burst.at = now; burst.down = 0; }
+    else if (r < burst.pk * 0.82) burst.down++;
+    if (burst.down >= 2 || now - burst.t0 > maxMs) { const b = burst; burst = null; if (b.pk > th * 1.2) { cool = now + 750; done(b); } } // 약한 흔들림이면 쿨다운 없이 다음 스윙 바로 받음
   }
   const ARC = 276.5;
   function paintMeter(r) { const k = Math.min(1, r / 2000); $('arc').style.strokeDashoffset = String(ARC * (1 - k)); $('arc').style.stroke = r >= SENS[sens][1] ? '#ff6b6b' : r >= SENS[sens][0] ? '#ffcf3f' : '#56657a'; $('spd').textContent = Math.round(r); }

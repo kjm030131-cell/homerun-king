@@ -28,7 +28,7 @@ export function createWebcam(onBurst, onFrame) {
         else if (C.burst) {
           const B = C.burst;
           if (e > B.peak) { B.peak = e; B.at = tMs; B.cx = cx; B.cy = cy; }
-          if (e < B.peak * 0.45 || tMs - B.t0 > 450) {
+          if (e < B.peak * 0.7 || tMs - B.t0 > 450) { // [11-23] 정점 지나면 바로 (예전 45%까지 기다려 늦었음)
             C.burst = null; C.cool = tMs + 550;
             if (B.peak > th * 1.4) { C.avgPeak += (B.peak - C.avgPeak) * 0.25; onBurst({ at: B.at, peak: B.peak, rel: B.peak / Math.max(0.05, C.avgPeak), cx: B.cx, cy: B.cy }); }
           }

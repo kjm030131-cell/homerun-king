@@ -46,6 +46,7 @@ export function createMotion(api) {
     const aim = [p.tx + gauss() * sd, p.ty + gauss() * sd * 0.8];
     api.swing(strong ? 'power' : 'contact', { t, aim });
     M.log.push({ src, lag: Math.round(lagMs), dt: Math.round((t - p.arrive) * 1000) }); if (M.log.length > 20) M.log.shift();
+    M.lastLag = Math.round(lagMs);
     return 'ok';
   }
   // ── 투구 ──
@@ -60,7 +61,10 @@ export function createMotion(api) {
 
   // ── 핸드폰 ──
   function onPad(m) {
-    if (m.t === 'swing') { const r = swing(M.pad.toLocal(m.at), m.mode === 'power', 'pad'); M.pad.send({ t: 'ack', k: 'swing', r }); }
+    if (m.t === 'sws') { // 휘두르기 시작: 정점(=임팩트)은 보통 시작 뒤 ~60ms → 그 시각으로 화면 스윙만 먼저
+      const S = api.S(), role = api.role();
+      if (S && role.batter && S.ph === 'pitching' && S.p) { const lag = performance.now() - M.pad.toLocal(m.at) - M.calib; const t = api.simNow() - lag / 1000 + 0.06; if (t >= S.p.t0) api.preSwing(t); }
+    } else if (m.t === 'swing') { const r = swing(M.pad.toLocal(m.at), m.mode === 'power', 'pad'); M.pad.send({ t: 'ack', k: 'swing', r, lag: r === 'ok' ? M.lastLag : null }); }
     else if (m.t === 'grip') { M.grip = !!m.on; if (!m.on) { M.aim = null; api.setAim(null); } }
     else if (m.t === 'aim') { M.aim = [clamp(+m.x || 0, -1.6, 1.6), clamp(+m.y || 0, -1.6, 1.6)]; }
     else if (m.t === 'type') { if (TYPES_KO[m.v]) api.setType(m.v); M.hsT = 0; }
