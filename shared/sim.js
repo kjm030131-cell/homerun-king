@@ -15,6 +15,8 @@ export const WALL_H = 2.6;
 export const RUN_SPEED = 7.2; // 평균 주루 속도(예측·도루용)
 export const RUN_TOP = 8.0; // 최고 속도: 정지 상태에서 ~1초 가속 → 타자 1루 도달 ~4.3초 (실제 MLB 평균)
 export const TROT_SPEED = 6.5;
+// [trot] 홈런 트롯: 마지막 주자(타자)가 HR_ARRIVE 초 안에 홈에 오게 주자마다 속도를 정함(5.2~9.2m/s) → 결과 시간 = 도착 + HR_GREET(하이파이브), 8~11.2초
+export const HR_ARRIVE = 9.6, HR_GREET = 1.3;
 export const FIELD_SPEED = 6.7; // CPU 수비수 실효 이동 속도(판단·경로 손실 포함)
 export const SPRINT_SPEED = 8.9;
 export const THROW_SPEED = 31;
@@ -1620,13 +1622,14 @@ export class Game {
     const sc0 = [...this.score];
     const wo = this.half === 1 && this.inning >= this.innings && this.score[1] + n > this.score[0] ? 1 : 0;
     this.ev('hr', { dist, n, walkoff: wo, name: this.batter.name, bid: this.batter.id || null, ev: this.ball.ev, la: this.lastHit ? this.lastHit.la : 0, x: r2(this.ball.x), z: r2(this.ball.z), before: sc0 });
-    for (const r of al) { r.trot = true; r.target = 4; r.manual = 0; this.addRun(r); }
+    let arrive = 0;
+    for (const r of al) { r.trot = true; r.target = 4; r.manual = 0; r.tv = clamp((4 - r.b) * BASE_D / HR_ARRIVE, 5.2, 9.2); arrive = Math.max(arrive, (4 - r.b) * BASE_D / r.tv); this.addRun(r); } // [trot]
     st.rbi += n;
     this.say(`${n >= 4 ? '만루 홈런!!!' : n > 1 ? `${n}점 홈런!` : '솔로 홈런!'} ${dist}m`);
     this.hrEv = { id: ++this.seq, dist, name: this.batter.name, n };
     for (const r of this.runners) delete r.batter;
     this.play = null;
-    this.pause(8.0, this.outs >= 3 ? 'half' : 'next'); // 홈런 리플레이 시간 확보
+    this.pause(clamp(arrive + HR_GREET, 8, 11.2), this.outs >= 3 ? 'half' : 'next'); // [trot] 홈런 리플레이 + 타자가 홈까지 (전: 8초 고정 → 타자가 3루 근처에서 다음 타석으로 사라짐)
   }
 
   call(out, k, x, z) { this.callEv = { id: ++this.seq, out: out ? 1 : 0, k, x: r2(x), z: r2(z) }; }
@@ -1767,7 +1770,7 @@ export class Game {
           if ((r > fenceR(phi) + 1 && b.y < 7) || (Math.abs(phi) > FOUL && r * Math.sin(Math.abs(phi) - FOUL) > 22 && b.y < 4) || b.z < -18 || (b.vy === 0 && Math.hypot(b.vx, b.vz) < 0.2)) b.state = 'dead';
         }
         // 홈런 트롯
-        for (const r of this.runners) if (r.trot && !r.scored) { r.b = Math.min(4, r.b + TROT_SPEED / BASE_D * dt); if (r.b >= 4) r.scored = true; }
+        for (const r of this.runners) if (r.trot && !r.scored) { r.b = Math.min(4, r.b + (r.tv || TROT_SPEED) / BASE_D * dt); if (r.b >= 4) r.scored = true; }
         this.walkBack(dt);
         if (this.now >= this.phaseUntil) this.afterResult();
         break;

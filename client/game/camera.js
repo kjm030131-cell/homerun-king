@@ -171,6 +171,11 @@ export function createCamRig(camera, ctx) {
         if (e < 2.4 && ballMesh.visible) { tPos.set(ballPos.x * 0.35, 6 + ballPos.y * 0.55, ballPos.z * 0.5 - 12); tLook.copy(ballPos); k = 4; fov = 50; }
         else { const a = (e - 2.4) * 0.08; tPos.set(Math.sin(a) * 30, 9, -18 + e * 2); tLook.set(0, 40, 140); k = 1.6; fov = 58; }
         mode = 'hr';
+      } else if (ph === 'result' && ctx.hrCine && tp - ctx.hrCineStart < 14 && ((S.rn || []).some((r) => r[5] & 2) || ctx.greetN)) {
+        // [trot] 홈런 컷씬(5.5초)·리플레이 뒤: 1루 쪽 홈 뒤 고정 중계 — 3루→홈 트롯과 홈 옆 하이파이브 (컷으로 들어가고 움직이지 않음)
+        tPos.set(-8.5, 3.4, -10.5); tLook.set(3.2, 1.0, 4.2); fov = 44; k = 4;
+        if (lastMode !== 'trot') snap = true;
+        mode = 'trot';
       } else if (pitchPhase && role.batter) {
         // 기본: 포수 뒤 망원(pitch.md — 투수 릴리스·존이 한 화면, 타자는 왼쪽 가장자리). 높이 프리셋을 바꿔도 존이 화면의 같은 자리에 오게 시선 높이를 같이 보정
         // V: 가까이(존 크게) — 전엔 존이 화면 맨 아래 왼쪽에 붙어 있었음 → 존·투수가 가운데 세로줄에

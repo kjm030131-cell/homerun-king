@@ -185,6 +185,7 @@ if (!/noskin/.test(location.search)) loadSkin((window.HR_ASSETS && window.HR_ASS
 function mkActor(opts) { return makeActor(opts, scene); } // [anim] 새 캐릭터(GLB) 있으면 Character, 없으면 옛 몸 — client/anim/actor.js
 // [qa] 공수 교대마다 수비 9명·타자·코치를 새로 만들던 것(유니폼 데칼 캔버스·스켈레톤 복제 → 교대 순간 프레임 40ms+ 멈칫)을 팀별로 보관해 다시 씀
 const teamCache = new Map();
+const greet = []; // [trot] 홈런 트롯으로 홈을 밟은 주자: 홈 옆에서 기다렸다가 타자와 하이파이브 ({A, t0, i})
 const runnerPool = new Map(); // [qa] 주자 재사용 (poolKey → 배우 목록)
 function parkRunner(A) { scene.remove(A.p.root); if (A.poolKey) (runnerPool.get(A.poolKey) || runnerPool.set(A.poolKey, []).get(A.poolKey)).push(A); }
 function takeRunner(pk) { const l = runnerPool.get(pk); const A = l && l.pop(); if (!A || (usingNewCharacter() && !A.p.char)) return null; A.init = false; A.slideT = 0; A.p.root.visible = true; scene.add(A.p.root); return A; }
@@ -196,6 +197,7 @@ function clearActors() {
   if (batter) scene.remove(batter.p.root); batter = null; batTeamBuilt = null;
   for (const A of runners.values()) scene.remove(A.p.root);
   runners.clear();
+  for (const g of greet) scene.remove(g.A.p.root); greet.length = 0; // [trot]
   for (const A of coaches) scene.remove(A.p.root); coaches.length = 0;
 }
 window.__actors = () => ({ fielders, batter, runners: [...runners.values()], umps, coaches, celeb: celeb ? celeb.actors : [] }); // [bugs] QA 훅: 장비(헬멧·모자) 상태 확인용 (tools/qa/flows.mjs)
@@ -222,6 +224,7 @@ function buildTeams(s) {
     if (batter) scene.remove(batter.p.root);
     for (const A of runners.values()) parkRunner(A); // [qa]
     runners.clear();
+    for (const g of greet) parkRunner(g.A); greet.length = 0; // [trot]
     for (const A of coaches) scene.remove(A.p.root);
     if (batTeamBuilt && batter) teamCache.set('b' + batTeamBuilt, [batter, ...coaches]); // [qa]
     coaches.length = 0;
@@ -970,10 +973,15 @@ function updateWorld(dt) {
     if (A.slideT) { slideK = (tp - A.slideT) / 0.6; if (slideK > 1.6 || (sp < 0.3 && slideK > 1)) { A.slideT = 0; slideK = -1; } }
     const nm = nameOf(pid);
     setTag(A, nm || '', pid === myId ? '#ffcf3f' : '#fff');
-    A.a.runner(dt, { speed: sp, slideK, lead: onBase && (s.ph === 'pitch' || s.ph === 'pitching'), cheer: !!(flags & 2), lookW: onBase ? _v.set(0, 1.2, 15) : null });
+    A.a.runner(dt, { speed: sp, slideK, lead: onBase && (s.ph === 'pitch' || s.ph === 'pitching'), cheer: !!(flags & 2) && !(b > 0 && b < 4), lookW: onBase ? _v.set(0, 1.2, 15) : null }); // [trot] 트롯 중엔 뛰는 동작(전: 느려지면 베이스 사이에서도 만세)
     A.p.root.visible = !(showBatter && (b === 0 || (swingHold && b < 0.3))); // [motion] swingHold
+    A.lastB = b; A.trot = !!(flags & 2); // [trot]
   }
-  for (const [k, A] of runners) if (!live.has(k)) { parkRunner(A); runners.delete(k); }
+  for (const [k, A] of runners) if (!live.has(k)) {
+    if (A.trot && s.ph === 'result') { if (A.p.root.position.length() > 6) A.init = false; greet.push({ A, t0: tp, i: greet.length }); runners.delete(k); continue; } // [trot] 홈 밟음 → 하이파이브 대기 (리플레이 중에 들어왔으면 그 자리로 바로)
+    parkRunner(A); runners.delete(k);
+  }
+  updateGreet(s, tp, dt);
   // 심판/코치
   for (const U of umps) {
     let call = null;
@@ -986,6 +994,33 @@ function updateWorld(dt) {
   updateBall(dt, t, role, pitchPhase);
 }
 // ── 끝내기 세리머니: 덕아웃에서 동료들이 뛰어나와 홈 근처에서 방방 뛰고 꽃가루 ──
+// [trot] 홈런 뒤 홈 옆 하이파이브: 먼저 들어온 주자들은 1루 쪽 홈 뒤에 줄 서서 3루 쪽(들어오는 타자)을 보고 만세,
+//        마지막 주자(타자)가 들어오면 타자 쪽으로 돌아서 차례로 오른손을 맞댐(손 IK). 결과 시간이 끝나면(다음 타석) 치움
+const _gv = new THREE.Vector3();
+function updateGreet(s, tp, dt) {
+  if (!greet.length) return;
+  if (s.ph !== 'result') { for (const g of greet) parkRunner(g.A); greet.length = 0; return; }
+  const left = (s.rn || []).some((r) => r[5] & 2);
+  const last = left ? null : greet[greet.length - 1], n = greet.length;
+  for (const g of greet) {
+    const A = g.A, isB = g === last, j = g.i; // 줄 번호
+    const sx = isB ? -2.3 : -3.3 - j * 0.85, sz = isB ? -0.2 : -0.7 - j * 0.12; // 포수·주심(홈 뒤)을 피해 1루 쪽
+    const fx = last && !isB ? last.A.p.root.position.x : isB ? -3 : 7, fz = last && !isB ? last.A.p.root.position.z : isB ? -1 : 7;
+    const r = A.p.root.position, ry = Math.atan2(fx - r.x, fz - r.z);
+    const sp = place(A, sx, sz, tp - g.t0 < 0.15 ? Math.atan2(sx - r.x, sz - r.z) : ry, dt, 3.2);
+    A.p.root.visible = true;
+    if (last && A.p.char && n > 1) {
+      const e = tp - last.t0 - 0.35; // 타자가 멈춰 선 뒤부터 한 명씩 0.45초
+      const k = isB ? Math.floor(e / 0.45) : j, ek = e - k * 0.45;
+      const mate = isB ? greet[k] : last;
+      if (mate && mate !== g && ek >= 0 && ek < 0.4 && e >= 0) {
+        const q = mate.A.p.root.position;
+        A.p.char.reach('R', _gv.set((r.x + q.x) / 2, 2.0 + Math.sin(ek / 0.4 * Math.PI) * 0.12, (r.z + q.z) / 2), Math.sin(Math.min(1, ek / 0.4) * Math.PI));
+      }
+    }
+    A.a.runner(dt, { speed: sp, slideK: -1, lead: false, cheer: sp < 0.5, lookW: null });
+  }
+}
 let celeb = null;
 function startCelebration() {
   if (celeb) for (const A of celeb.actors) scene.remove(A.p.root);
@@ -1244,7 +1279,7 @@ let camMode = ''; // [cam] 이번 프레임 카메라 모드 (HUD·입력이 읽
 const camRig = createCamRig(camera, { // [cam]
   get S() { return S; }, get screen() { return screen; }, get fielders() { return fielders; }, get batter() { return batter; }, umps,
   ballPos, ballMesh, landRing, get ballL() { return ballL; }, get lastContactT() { return lastContactT; },
-  get hrCine() { return hrCine; }, get hrCineStart() { return hrCineStart; }, get rpInfo() { return rpInfo; }, get myId() { return myId; },
+  get hrCine() { return hrCine; }, get greetN() { return greet.length; }, /* [trot] */ get hrCineStart() { return hrCineStart; }, get rpInfo() { return rpInfo; }, get myId() { return myId; },
   introStep, getRole, recBase, nowP,
 });
 window.__camRig = camRig; // [cam] qa: 데드존 여부(direct)·모드

@@ -76,6 +76,7 @@ const STEP = String(function step(arg) {
       if (e === 'out' && d.kind === 'k') { sched(d.looking ? 'motion-k-looking-react' : 'motion-k-swing-react', t + 0.7, batCam, '삼진 반응'); sched('motion-k-walkout', t + 1.8, { pos: [-1.0, 1.4, 4.6], look: [1.6, 0.9, 0], fov: 42 }, 'Walk_Out'); sched('motion-k-walkout2', t + 2.4, { pos: [-1.0, 1.4, 4.6], look: [1.8, 0.9, 0], fov: 42 }, 'Walk_Out 뒤'); sched('motion-pitcher-pump', t + 1.0, { pos: [-4.5, 1.2, 15.5], look: [0, 1.2, 18.0], fov: 38 }, '삼진 잡은 투수'); }
       if (e === 'dive') { const f = s.fl[d.i]; if (f) sched('motion-dive', t + 0.32, { pos: [f[1] + 3.2, 1.3, f[2] - 3.2], look: [f[1], 0.5, f[2]], fov: 45, follow: d.i }, '다이빙 ' + d.pos); }
       if (e === 'slide') { const b = B[d.base % 4]; sched('motion-slide', t + 0.3, { pos: [b[0] + 3.5, 1.1, b[1] - 3.2], look: [b[0], 0.4, b[1]], fov: 45 }, '슬라이딩 ' + d.base + '루'); }
+      if (e === 'hr' && !d.derby) { sched('next-hr-trot', t + 8.4, { game: 1 }, '[trot] 리플레이 끝/건너뛴 뒤 게임 카메라: 3루→홈 트롯'); sched('next-hr-greet', t + 10.0, { pos: [-1.2, 1.5, 3.4], look: [-3.0, 1.2, -0.5], fov: 42 }, '[trot] 홈 옆 하이파이브'); sched('next-hr-greet2', t + 10.5, { pos: [-1.2, 1.5, 3.4], look: [-3.0, 1.2, -0.5], fov: 42 }, '[trot] 하이파이브 뒤'); }
       if (e === 'hr') sched('motion-hr-pitcher', t + 1.6, { pos: [-4.5, 1.2, 15.5], look: [0, 1.0, 18.2], fov: 38 }, '홈런 맞은 투수');
       if (e === 'catch' && !d.pitch && d.pos === 'C' && d.fly) sched('motion-catcher-pop', t + 0.4, { pos: [-2.6, 1.0, 2.0], look: [d.x, 1.0, d.z], fov: 45 }, '포수 뜬공');
       if (e === 'throw' && d.pos === 'C') sched('motion-catcher-throw', t + (d.pick ? 0.3 : 0.32), { pos: [-3.0, 1.0, 1.5], look: [d.from[0], 0.9, d.from[1]], fov: 40 }, '포수 송구');
@@ -95,7 +96,7 @@ const STEP = String(function step(arg) {
     if (i >= 0) {
       const x = W.q.splice(i, 1)[0];
       if (x.cam.follow != null) { const f = s.fl[x.cam.follow]; if (f) { x.cam.look = [f[1], 0.45, f[2]]; x.cam.pos = [f[1] + 3.2, 1.3, f[2] - 3.2]; } }
-      const clips = anims().filter((o) => { const c = x.cam.look; return Math.hypot(o.position.x - c[0], o.position.z - c[2]) < 3; }).map((o) => curT(o));
+      const clips = anims().filter((o) => { const c = x.cam.look || [-1, 0, 0]; return Math.hypot(o.position.x - c[0], o.position.z - c[2]) < 3; }).map((o) => curT(o));
       return { name: x.name, cam: x.cam, why: x.why, t, clip: clips.join(',') };
     }
     if (s.ph === 'over' && !W.q.length) return { end: 1, t };
@@ -115,7 +116,8 @@ while (simT < max) {
   await page.evaluate((cam) => {
     const c = document.getElementById('c'); for (const el of document.body.querySelectorAll('*')) if (el !== c && !el.contains(c) && el.style) el.style.visibility = 'hidden';
     if (c) c.style.visibility = 'visible';
-    window.__cam = cam; window.__qaStep(1 / 60, { render: 0 }); window.__noRender = 0; window.__frame(window.__V); window.__noRender = 1;
+    if (cam.game) { window.__hr.rp.stop(); window.__cam = null; window.__fastCam = 0; for (let i = 0; i < 20; i++) window.__qaStep(1 / 60, { render: 0 }); window.__fastCam = 1; } else window.__cam = cam; // [trot] game: 게임 카메라 그대로(리플레이 건너뛰기)
+    window.__qaStep(1 / 60, { render: 0 }); window.__noRender = 0; window.__frame(window.__V); window.__noRender = 1;
   }, r.cam);
   const f = join(outDir, r.name + '.png');
   await page.screenshot({ path: f }); files.push(f);
