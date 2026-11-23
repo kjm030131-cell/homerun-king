@@ -534,6 +534,29 @@ body[data-screen=over] #hud{opacity:0;transition:opacity .35s ease}
 #over .ov > :nth-child(2){animation-delay:.08s} #over .ov > :nth-child(3){animation-delay:.16s} #over .ov > :nth-child(4){animation-delay:.24s} #over .ov > :nth-child(5){animation-delay:.32s} #over .ov > :nth-child(n+6){animation-delay:.4s}
 #over #overT{animation:overT .8s var(--ease) both}
 @keyframes overT{0%{opacity:0;transform:scale(1.4);letter-spacing:.06em}100%{opacity:1;transform:none}}
+
+/* [AAA] 리플레이 각도 컷 플래시 */
+#replay.cut:after{animation:none}
+#replay.cut .rl{animation:rpCut .35s var(--ease)}
+#replay.cut{box-shadow:inset 0 0 0 100vmax rgba(255,255,255,0);animation:rpFlash .22s ease-out}
+@keyframes rpFlash{0%{box-shadow:inset 0 0 0 100vmax rgba(255,255,255,.55)}100%{box-shadow:inset 0 0 0 100vmax rgba(255,255,255,0)}}
+@keyframes rpCut{0%{transform:translateX(-14px);opacity:.4}100%{transform:none;opacity:1}}
+
+/* [AAA] 공수 교대 카드 */
+#innCard{position:absolute;left:50%;bottom:14vh;transform:translateX(-50%);min-width:300px;opacity:0;pointer-events:none;filter:drop-shadow(0 14px 30px rgba(0,0,0,.45))}
+#innCard.show{animation:icIn 3.2s var(--ease) both}
+@keyframes icIn{0%{opacity:0;transform:translate(-50%,24px)}10%,86%{opacity:1;transform:translate(-50%,0)}100%{opacity:0;transform:translate(-50%,-10px)}}
+#innCard .ic-top{background:var(--seam);color:#fff;font-weight:900;font-size:14px;padding:5px 16px;clip-path:polygon(0 0,100% 0,calc(100% - 10px) 100%,0 100%);display:inline-block;letter-spacing:.02em}
+#innCard .ic-top b{font-family:var(--num);font-size:17px;margin-right:4px}
+#innCard .ic-body{background:var(--ink);border-top:3px solid var(--chalk)}
+#innCard .ic-row{--tc:var(--steel);display:flex;align-items:center;gap:10px;padding:8px 14px;border-left:5px solid var(--tc)}
+#innCard .ic-row + .ic-row{border-top:1px solid rgba(255,255,255,.08)}
+#innCard .ic-row img{width:26px;height:26px}
+#innCard .ic-row span{flex:1;font-weight:900;font-size:16px}
+#innCard .ic-row b{font-family:var(--num);font-weight:800;font-size:28px;min-width:30px;text-align:right}
+#innCard .ic-row.bat span{color:var(--bulb)}
+#innCard .ic-foot{background:var(--ink2);color:var(--steel);font-size:13px;font-weight:700;padding:6px 14px}
+#innCard .ic-foot b{color:var(--bulb);font-family:var(--num);font-size:16px}
 @media (prefers-reduced-motion:reduce){*{transition:none!important;animation:none!important}}
 
 /* ═══ [ui] 모션 레이어 — 중계 그래픽 전환·등장·버튼 반응 ═══
@@ -791,6 +814,7 @@ body[data-screen=over] #hud{opacity:0;transition:opacity .35s ease}
   <div id="ptype" class="hide"></div>
   <div id="bigcount" class="hide"><span class="bc-b"><b>B</b><i></i><i></i><i></i></span><span class="bc-s"><b>S</b><i></i><i></i></span><span class="bc-o"><b>O</b><i></i><i></i></span></div>
   <div id="banner"><span></span></div>
+  <div id="innCard" aria-live="polite"></div>
   <div id="coach"><b></b><span></span></div>
   <div id="walkup"><div class="wu-no"></div><div class="wu-main"><div class="wu-nm"></div><div class="wu-st"></div></div></div>
   <div id="intro"><div class="in-l"><div class="in-tag"></div><div class="in-nm"></div><div class="in-today"></div><div class="in-car"></div></div><div class="in-r"><div class="in-big"></div><div class="in-bigl"></div><div class="in-sit"></div></div></div>

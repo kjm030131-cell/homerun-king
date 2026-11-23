@@ -6,7 +6,7 @@
 // - 타구 순간은 '컷' + deadzoneCam(고정 위치·고정 화각, 공이 데드존을 벗어날 때만 고개) → 화면 공 속도 유지. 이 부분 숫자는 건드리지 말 것.
 // - 공 위치 미리보기 금지: 카메라가 투구 목표 쪽으로 미리 움직이지 않는다.
 import * as THREE from 'three';
-import { BASES, MOUND } from '../../shared/sim.js';
+import { BASES, MOUND, integrate } from '../../shared/sim.js';
 import { cfg, store, toast, myDuty } from '../ui/index.js';
 
 const clamp = (v, a, b) => (v < a ? a : v > b ? b : v);
@@ -82,6 +82,33 @@ export function createCamRig(camera, ctx) {
   // [gameplay] 타구 직후 중계 카메라: 홈 뒤 높은 곳에 고정, 시선은 공이 화면 데드존(가로 ±50%, 위·아래 60%)을 벗어날 때만 따라감.
   // 데드존 안에선 배경이 멈춰 있어 공이 실제 속도로 보인다. 화각 고정 54°(줌으로 공 움직임이 상쇄되지 않게) — 숫자 바꾸지 말 것
   const DZ = { id: -1, yaw: 0, pitch: 0, pos: new THREE.Vector3(0, 8.5, -15), fov: 54 };
+  // [AAA] 뜬공 낙구 예측 (타구마다 0.25s 간격으로 다시 계산 — 바람·스핀 반영된 같은 integrate)
+  const rpShot = { key: '' };
+  const TRACK = { pos: new THREE.Vector3(0, 19, -26), cut: -1, id: -1, t: -9, res: { far: false, x: 0, z: 0, T: 0 } };
+  function trackLand(bl, tp) {
+    if (!bl) return TRACK.res;
+    if (TRACK.id === ctx.lastContactT && tp - TRACK.t < 0.25) return TRACK.res;
+    TRACK.id = ctx.lastContactT; TRACK.t = tp;
+    const b = { x: bl.x, y: bl.y, z: bl.z, vx: bl.vx, vy: bl.vy, vz: bl.vz, sx: bl.sx || 0, sy: bl.sy || 0, sz: bl.sz || 0, state: 'air' };
+    let t = 0; while (b.y > 0.3 && t < 9) { integrate(b, 1 / 60, false); t += 1 / 60; }
+    const r = Math.hypot(b.x, b.z), tc = tp - ctx.lastContactT;
+    TRACK.res = { far: r > 42 && (tc + t) > 1.6, x: b.x, z: b.z, T: tc + t };
+    return TRACK.res;
+  }
+  // [AAA 11-23] 큰 뜬공 중계: 맞는 소리 직후(0.45s) 홈 뒤 높은 트래킹 카메라로 컷 → 공을 따라 패닝하며
+  //  '공 + 낙구 지점'이 한 화면에 들어오게 줌. 떨어질수록 낙구 지점(잡는 수비수)으로 당겨짐 — 실제 중계의 하이홈 트래킹
+  const _v1 = new THREE.Vector3(), _v2 = new THREE.Vector3();
+  function trackCam(bx, bz, tc, tp) {
+    const L = trackLand(ctx.ballL, tp), P = TRACK.pos, by = ctx.ballPos.y;
+    if (TRACK.cut !== ctx.lastContactT) { TRACK.cut = ctx.lastContactT; snap = true; }
+    tPos.copy(P);
+    const w = clamp((tc - 0.45) / Math.max(0.6, L.T - 0.45), 0, 1), lk = 0.12 + 0.6 * w * w * w; // 처음엔 공 위주, 떨어질 때 낙구 지점으로
+    tLook.set(lerp(bx, L.x, lk), lerp(Math.max(1, by), 1.2, lk), lerp(bz, L.z, lk));
+    _v1.set(bx - P.x, by - P.y, bz - P.z).normalize(); _v2.set(L.x - P.x, 1 - P.y, L.z - P.z).normalize();
+    const ang = Math.acos(clamp(_v1.dot(_v2), -1, 1)) * 180 / Math.PI;
+    const dL = Math.hypot(L.x - P.x, L.z - P.z), base = Math.atan(16 / dL) * 360 / Math.PI; // 낙구 지점 주변 ±16m
+    return clamp(Math.max(ang * 1.35 + 6, base), 9, 46);
+  }
   function deadzoneCam(dt) {
     const P = DZ.pos, ballPos = ctx.ballPos, lct = ctx.lastContactT;
     if (DZ.id !== lct) { DZ.id = lct; DZ.yaw = 0; DZ.pitch = Math.atan2(1.5 - P.y, 24 - P.z); }
@@ -154,7 +181,18 @@ export function createCamRig(camera, ctx) {
       } else if (rpInfo) {
         // ── 리플레이 카메라 ──
         const I = rpInfo; fov = 42; k = 7;
-        if (I.cam === 'hr' && I.rel < 0.32) {
+        // [AAA] 각도 컷: 구간이 바뀌면 스프링 없이 컷 + 흰 플래시 (중계 리플레이 편집처럼)
+        const shot = I.cam === 'hr' ? (I.rel < 0.32 ? 0 : I.rel < 1.1 ? 1 : 2) : (I.rel < -0.35 ? 0 : 1);
+        if (rpShot.key !== I.t0 + ':' + shot) { rpShot.key = I.t0 + ':' + shot; snap = true; const e = document.getElementById('replay'); if (e) { e.classList.remove('cut'); void e.offsetWidth; e.classList.add('cut'); } }
+        if (I.cam === 'hr' && shot === 1) {
+          // 타자 뒤 낮은 각도: 공이 외야로 쭉 뻗어 나가는 게 보임
+          const b = ballMesh.position;
+          tPos.set(-1.6 * sd, 1.35, -3.4); tLook.set(lerp(0.4 * sd, b.x, 0.85), Math.max(1.2, b.y * 0.8), Math.max(6, b.z)); fov = 50; k = 12;
+        } else if (I.cam !== 'hr' && shot === 0) {
+          // 호수비 1컷: 홈 뒤 높은 망원으로 타구·야수 움직임 전체
+          const F = I.focus ? I.focus.root.position : ballMesh.position;
+          tPos.set(F.x * 0.15, 14, -20); tLook.set(F.x, 1, F.z); fov = clamp(Math.atan(14 / Math.hypot(F.x, F.z + 20)) * 360 / Math.PI, 10, 40); k = 8;
+        } else if (I.cam === 'hr' && I.rel < 0.32) {
           const a = I.rel * 0.25; // 타자 정면 비스듬히: 스윙과 임팩트
           tPos.set((-2.4 + a) * sd, 1.15, 2.7 - a); tLook.set(0.75 * sd, 1.05, 0.15); fov = 36; k = 9;
         } else if (I.cam === 'hr') {
@@ -214,6 +252,7 @@ export function createCamRig(camera, ctx) {
         // 투수가 할 일이 없을 땐 내 선수 따라 흔들리지 않게 '중계 카메라'로 고정 → 어지럽지 않음
         const bz = ballPos.z, bx = ballPos.x;
         if (!ballMesh.visible) { tPos.set(0, 9, -15); tLook.set(0, 1, 20); }
+        else if (ctx.ballL && ctx.ballL.state === 'air' && tp - ctx.lastContactT >= 0.45 && trackLand(ctx.ballL, tp).far) { fov = trackCam(bx, bz, tp - ctx.lastContactT, tp); } // [AAA] 큰 뜬공 트래킹
         else if (tp - ctx.lastContactT < 2.4) { fov = deadzoneCam(dt); direct = true; } // [gameplay] 고정 중계 + 데드존
         else { const far = clamp(bz, 0, 120); tPos.set(bx * 0.2, 8 + far * 0.08, -15 + far * 0.18); tLook.set(bx * 0.8, Math.max(0.6, Math.min(ballPos.y, 20) * 0.5), Math.max(8, bz * 0.85)); fov = 52; }
         k = tp - ctx.lastContactT < 2.4 ? 6 : 2.2; mode = 'pwatch';
@@ -240,6 +279,7 @@ export function createCamRig(camera, ctx) {
         // 타구 중계: 맞은 직후엔 홈 뒤에 '고정'하고 고개만 돌려 공을 따라감 → 공이 실제 속도로 쭉 뻗어나가 보임
         const bz = ballPos.z, bx = ballPos.x, tc = tp - ctx.lastContactT, ballL = ctx.ballL, fly = ballL && ballL.state === 'air';
         if (!ballMesh.visible && !(S.b && S.b[6] >= 0)) { tPos.set(0, 30, -30); tLook.set(0, 0, 30); k = 3; fov = 52; }
+        else if (fly && tc >= 0.45 && trackLand(ballL, tp).far) { fov = trackCam(bx, bz, tc, tp); k = 7; mode = 'track'; }
         else if (tc < 2.4 && (fly || bz < 40)) {
           // [gameplay] 맞는 순간 중계 위치로 '컷' → 카메라 고정, 공이 화면 가운데 데드존을 벗어날 때만 고개를 돌림 (docs/rebuild/gameplay.md 5-A)
           fov = deadzoneCam(dt); direct = true; k = 6;

@@ -8,7 +8,7 @@ import { initChat, addChat, sysChat, openChat, closeChat, toggleQuick, sendQuick
 import { bindRoom, renderRoom, clubGrid, rulesOf, RULES_KO } from './room.js';
 import { fillOver, renderTab } from './results.js';
 import { refreshCareer, saveLocalCareer } from './career.js';
-import { initHUD, hudFrame, myDuty, paintClubs, swingReport, updateCoach, introCard, introHide, walkup, renderPitchBar, resetHUD, onBus, pulseCount, flashScore } from './hud.js';
+import { initHUD, hudFrame, myDuty, paintClubs, swingReport, updateCoach, introCard, introHide, walkup, renderPitchBar, resetHUD, onBus, pulseCount, flashScore, inningCard } from './hud.js';
 import { CLUBS, clubOf, emblemURL } from '../emblem.js';
 import { bus } from '../core/bus.js';
 
@@ -340,6 +340,7 @@ export function createUI(ctx) {
   bus.on('score', (d) => { onBus('score'); flashScore(d && d.half === 1 ? 'home' : 'away'); }); // half 0 = 초(원정 공격)
   bus.on('contact', (d) => { if (d && d.grade) gradeFeedback(d.grade, d.pow); });
   bus.on('modeChange', () => { resetHUD(); paintRules(); });
+  bus.on('inningEnd', (d) => { if (d && ctx.S && ctx.S.mode !== 'derby') inningCard(d, ctx.S); }); // [AAA] 공수 교대 중계 카드
 
   setScreen('title');
   emitVolume(); // 저장된 음량을 사운드 파트에 처음 한 번 알림
