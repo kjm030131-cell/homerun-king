@@ -13,7 +13,7 @@ export function createWebcam(onBurst, onFrame) {
 
   function frame(tMs) {
     if (!running) return;
-    if (video.readyState >= 2) {
+    if (video.readyState >= 2 && !C.paused) { // [perf] 전신 인식 중엔 프레임 차이(픽셀 읽기) 안 함
       g.save(); g.scale(-1, 1); g.drawImage(video, -W, 0, W, H); g.restore(); // 거울처럼
       const d = g.getImageData(0, 0, W, H).data, cur = new Uint8Array(W * H);
       for (let i = 0, j = 0; i < cur.length; i++, j += 4) cur[i] = (d[j] * 77 + d[j + 1] * 150 + d[j + 2] * 29) >> 8;

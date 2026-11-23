@@ -26,7 +26,7 @@ export function createPose(video, onSwing) {
     if (!on) return;
     raf = requestAnimationFrame(frame);
     if (!lander || video.readyState < 2) return;
-    const ts = performance.now(); if (ts - lastTs < 28) return; // ~30fps
+    const ts = performance.now(); if (ts - lastTs < 48) return; // [perf] ~20fps (30fps는 게임 렌더와 GPU를 다퉈 렉)
     lastTs = ts;
     let r; try { r = lander.detectForVideo(video, ts); } catch { return; }
     const w = r && r.worldLandmarks && r.worldLandmarks[0];
