@@ -1346,6 +1346,8 @@ export class Game {
     const pre = this.phase === 'pitch' || (this.phase === 'pitching' && this.now < this.pitch.t0);
     if (this.phase !== 'live' && !(pre && f.pos !== 'P' && f.pos !== 'C')) return;
     if (this.now - f.dv < 1.2) return;
+    if (this.play && this.play.windup && this.play.windup.i === i) { f.act = this.now; return; } // 송구 동작 중엔 못 움직임
+    if (this.play && this.play.autoRun && this.play.autoRun.i === i && this.now < this.play.autoRun.until) { f.act = this.now; return; } // 베이스 밟으러 가는 중
     const x = Number(m.x), z = Number(m.z);
     if (!isFinite(x) || !isFinite(z)) return;
     const el = Math.max(0.02, this.now - (f.lastMvT || this.now - 0.1)); // [net] 클라가 30Hz 로 보냄(전 20Hz) — 0.05 하한이면 전력질주가 조깅(mv 1)으로 잡힘
@@ -1398,7 +1400,31 @@ export class Game {
       const bp = BASES[tk % 4]; this.throwTo(i, bp[0], bp[1], clamp(Number(m.p) || 0.5, 0, 1)); return;
     }
     const pt = k === 0 ? MOUND : BASES[k % 4];
+    if (k >= 1 && k <= 4 && this.smartThrow(i, k, clamp(Number(m.p) || 0.4, 0, 1))) return;
     this.throwTo(i, pt[0], pt[1], clamp(Number(m.p) || 0.4, 0, 1));
+  }
+  // [11-23] 사람 송구 보조 — 빈 베이스로 던져 악송구 실점 나던 것 방지 (실제 야수처럼)
+  //  1) 내가 그 베이스에 제일 가깝고 7m 안이면 → 던지지 않고 직접 밟으러 감(언어시스트)
+  //  2) 받을 사람(커버)이 공보다 늦게 도착하면 → 커버를 전력질주시키고, 그가 도착할 때 맞춰 던짐(리드 송구)
+  //  3) 커버가 아예 없으면 → 베이스에 제일 가까운 야수를 보냄
+  smartThrow(i, k, pw) {
+    const P = this.play, f = this.fielders[i], bp = BASES[k % 4];
+    const dSelf = dist2(f.x, f.z, bp[0], bp[1]);
+    const cov = (P.roles && P.roles.cov) || this.coverMap(-1);
+    let ci = cov[k] != null && cov[k] !== i ? cov[k] : -1;
+    if (ci < 0) { let bd = 1e9; this.fielders.forEach((g, j) => { if (j === i) return; const d = dist2(g.x, g.z, bp[0], bp[1]); if (d < bd) { bd = d; ci = j; } }); }
+    const c = ci >= 0 ? this.fielders[ci] : null, dC = c ? dist2(c.x, c.z, bp[0], bp[1]) : 1e9;
+    const tC = dC < 1.2 ? 0 : dC / SPRINT_SPEED + 0.15;
+    if (dSelf < 7 && dSelf / SPRINT_SPEED <= tC + 0.1) {
+      P.autoRun = { i, x: bp[0], z: bp[1], until: this.now + 2.5 };
+      return true;
+    }
+    if (!c || tC < 0.05) return false;
+    const w0 = 0.45, T = throwT(dSelf) / (0.9 + 0.32 * pw);
+    P.hurry = { i: ci, x: bp[0], z: bp[1], until: this.now + tC + 1.5 };
+    const lag = tC - (w0 + T);
+    if (lag > 0.05) P.leadDelay = Math.min(0.9, lag);
+    return false;
   }
 
   onRunCmd(id, m) {
@@ -1427,7 +1453,31 @@ export class Game {
     }
     if (any) this.sendTo(id, { t: 'toast', text: '슬라이딩!' });
   }
+  // [11-23] 송구 동작: 누르면/CPU가 정하면 바로 공이 나가던 것 → 잡은 공을 손으로 옮기고(트랜스퍼) 스텝·팔 스윙 뒤 릴리스
+  //  동작 시간: 포수 0.42 · 투수 0.45 · 내야 0.48 · 외야 0.66(크로 홉) + 잡은 직후면 남은 트랜스퍼 시간. 빠른 송구(강송구 아님)는 조금 짧게
+  //  그동안 공은 손에 있고(holder 유지) 야수는 멈춤. 클라는 s.te.w 로 송구 클립을 릴리스 시점(55%)에 맞춰 재생
   throwTo(i, x, z, pw = 0.4) {
+    const P = this.play, f = this.fielders[i];
+    if (!P || this.ball.holder !== i) return;
+    if (P.windup && P.windup.i === i) { P.leadDelay = 0; return; } // 이미 던지는 중
+    const base = f.pos === 'C' ? 0.4 : f.pos === 'P' ? 0.42 : i >= 6 ? 0.64 : 0.42;
+    const quick = P.kind === 'pick' ? 0.5 : 1; // 견제는 짧고 빠른 동작
+    const transfer = P.kind === 'pick' ? 0 : Math.max(0, 0.16 - (this.now - P.holderSince)); // 견제는 공을 이미 손에 쥐고 있음
+    const w = r2((base * quick + transfer) * (1.04 - 0.1 * pw) + (P.leadDelay || 0)); P.leadDelay = 0;
+    P.windup = { i, x, z, pw, at: this.now + w, relay: P.relay && P.relay.at === this.now ? P.relay : null };
+    // 베이스로 던지면 그 베이스 커버가 아직 안 왔을 때 전력질주로 들어감 (CPU 송구 포함)
+    if (!P.hurry || this.now >= P.hurry.until) for (let q = 1; q <= 4; q++) {
+      const bp = BASES[q % 4]; if (dist2(x, z, bp[0], bp[1]) > 3) continue;
+      if (this.fielders.some((g, j) => j !== i && dist2(g.x, g.z, bp[0], bp[1]) < 1.5)) break;
+      const cov = (P.roles && P.roles.cov) || this.coverMap(-1); let ci = cov[q] != null && cov[q] !== i ? cov[q] : -1;
+      if (ci < 0) { let bd = 1e9; this.fielders.forEach((g, j) => { if (j === i) return; const d = dist2(g.x, g.z, bp[0], bp[1]); if (d < bd) { bd = d; ci = j; } }); }
+      if (ci >= 0) P.hurry = { i: ci, x: bp[0], z: bp[1], until: this.now + w + 3 };
+      break;
+    }
+    f.mv = 0; f.v = 0; f.ry = Math.atan2(x - f.x, z - f.z);
+    this.throwEv = { id: ++this.seq, i, w };
+  }
+  releaseThrow(i, x, z, pw = 0.4) {
     const b = this.ball, f = this.fielders[i];
     const d0 = Math.max(1, dist2(f.x, f.z, x, z));
     // 송구 오차 (먼 거리일수록, 세게 던질수록 커짐, 가끔 악송구)
@@ -1445,9 +1495,8 @@ export class Game {
     aimThrow(b, x, z, T); // [qa 11-19] 공기저항 보정: 안 하면 긴 송구(외야→1루 등)가 5~6m 짧게 떨어져 받는 사람 앞에서 바운드(플레이 16%)
     b.state = 'thrown'; b.batted = false; b.holder = -1; b.thrower = i; b.throwAt = this.now; b.tx = x; b.tz = z;
     this.play.traj = null; this.play.nextRole = 0;
-    this.throwEv = { id: ++this.seq, i };
     let base = -1; for (let k = 0; k < 4; k++) if (dist2(x, z, BASES[k][0], BASES[k][1]) < 6) base = k === 0 ? 4 : k;
-    this.ev('throw', { i, pos: f.pos, from: [r2(f.x), r2(f.z)], to: [r2(x), r2(z)], base, T: r2(T), pw: r2(pw), relay: this.play.relay && this.play.relay.at === this.now ? 1 : 0, pick: this.play.kind === 'pick' ? 1 : 0 });
+    this.ev('throw', { i, pos: f.pos, from: [r2(f.x), r2(f.z)], to: [r2(x), r2(z)], base, T: r2(T), pw: r2(pw), relay: this.play.relayRel ? 1 : 0, pick: this.play.kind === 'pick' ? 1 : 0 });
   }
 
   // 포구 가능 여부
@@ -1508,7 +1557,7 @@ export class Game {
     this.play.holderSince = this.now;
     this.play.holderGoal = null;
     // 포구→송구 전환 시간: 땅볼 포구는 자세 잡는 시간, 송구 받은 피벗은 조금 짧게
-    this.play.nextAI = this.now + (fromThrow ? rand(0.4, 0.66) : this.D.react * 0.6 + rand(0.35, 0.6));
+    this.play.nextAI = this.now + (fromThrow ? rand(0.12, 0.3) : this.D.react * 0.4 + rand(0.15, 0.35)); // [11-23] 트랜스퍼·팔 동작은 throwTo 의 송구 동작 시간에 포함
     f.v = 0;
     this.catchEv = { id: ++this.seq, i, dive: diving, jump: this.now - f.jt < 0.7 };
     { const fr = Math.hypot(b.x, b.z), fp = Math.atan2(b.x, b.z);
@@ -1732,7 +1781,7 @@ export class Game {
     }
     this.ball = { x: pf.x, y: 1.5, z: pf.z, vx: 0, vy: 0, vz: 0, sx: 0, sy: 0, sz: 0, state: 'held', batted: false, bounced: true, touched: true, fair: true, holder: pi, thrower: -1, throwAt: 0 };
     this.phase = 'live';
-    this.play = { t0: this.now, runs: 0, settleSince: -1, holderSince: this.now, nextAI: this.now + 99, nextRole: 0, traj: null, chaser: -1, result: null, kind: 'pick', after: 'pitch', outs: 0, pickAt: this.now + 0.32, pickFrom: pi, pickBase: base };
+    this.play = { t0: this.now, runs: 0, settleSince: -1, holderSince: this.now, nextAI: this.now + 99, nextRole: 0, traj: null, chaser: -1, result: null, kind: 'pick', after: 'pitch', outs: 0, pickAt: this.now + 0.1, /* [11-23] 견제 팔 동작은 throwTo 송구 동작(0.21s)에 포함 */ pickFrom: pi, pickBase: base };
     this.say(`${base}루 견제!`, false);
     this.ev('pick', { base, cpu: id === 'cpu' ? 1 : 0 });
   }
@@ -1830,6 +1879,18 @@ export class Game {
   liveStep(dt) {
     const b = this.ball, P = this.play;
     if (!P) return;
+    // 송구 동작 끝 → 릴리스 (그사이 공을 놓쳤거나 다른 사람에게 갔으면 취소)
+    if (P.windup && this.now >= P.windup.at) {
+      const w = P.windup; P.windup = null;
+      if (b.holder === w.i) {
+        // CPU: 던지는 사이 주자가 이미 그 베이스에 들어갔고 그쪽으로 오는 주자도 없으면 안 던지고 공을 든다(펌프 페이크) → 쓸데없는 송구·악송구 실점 방지
+        const fw = this.fielders[w.i], human = fw.ctrl && this.isLive(fw.ctrl);
+        let k = -1; for (let q = 0; q < 4; q++) if (dist2(w.x, w.z, BASES[q][0], BASES[q][1]) < 6) k = q === 0 ? 4 : q;
+        const moot = !human && k > 0 && P.kind !== 'pick' && !w.relay && !this.alive().some((r) => r.target === k && r.b < k && !r.trot) && this.alive().some((r) => r.b === k);
+        if (moot) { P.nextAI = this.now + 0.15; }
+        else { P.relayRel = !!w.relay; this.releaseThrow(w.i, w.x, w.z, w.pw); P.relayRel = false; }
+      }
+    }
     // 예약된 사람 송구 실행
     if (P.queuedThrow && this.now >= P.queuedThrow.at) {
       const q = P.queuedThrow; P.queuedThrow = null;
@@ -2158,6 +2219,15 @@ export class Game {
     const react = this.now - P.t0;
     for (let i = 0; i < N; i++) {
       const f = this.fielders[i];
+      if (P.windup && P.windup.i === i) { f.mv = 0; continue; } // 던지는 중엔 제자리
+      const ar = P.autoRun && P.autoRun.i === i && b.holder === i && this.now < P.autoRun.until ? P.autoRun : null;
+      const hu = !ar && P.hurry && P.hurry.i === i && this.now < P.hurry.until && !this.isHumanActive(f) ? P.hurry : null;
+      if (ar || hu) { // 베이스 직접 밟으러 / 커버 전력질주
+        const t = ar || hu, dx = t.x - f.x, dz = t.z - f.z, d = Math.hypot(dx, dz);
+        if (d > 0.35) { f.v = Math.min(SPRINT_SPEED, (f.v || 0) + 12 * dt); const st = Math.min(d, f.v * dt); f.x += dx / d * st; f.z += dz / d * st; f.ry = Math.atan2(dx, dz); f.mv = 2; }
+        else { f.mv = 0; f.v = 0; if (ar) P.autoRun = null; }
+        continue;
+      }
       if (this.isHumanActive(f)) continue;
       if (this.now - f.dv < 1.2) { f.mv = 0; continue; }
       if (P.kind !== 'steal' && P.kind !== 'pick' && react < (i >= 6 ? this.D.react + 0.2 : this.D.react)) continue;
@@ -2208,7 +2278,7 @@ export class Game {
       const tRun = dHold / FIELD_SPEED;
       const ci = cov[k];
       const tCover = ci >= 0 ? dist2(this.fielders[ci].x, this.fielders[ci].z, base[0], base[1]) / FIELD_SPEED : 9;
-      const tThrow = Math.max(throwT(dHold) + 0.15, tCover);
+      const tThrow = Math.max(throwT(dHold) + (i >= 6 ? 0.64 : 0.42), tCover); // [11-23] 송구 동작 시간 포함
       const mode = tRun <= tThrow ? 'run' : 'throw';
       const margin = tr - Math.min(tRun, tThrow);
       const lead = !best || k > best.k;
@@ -2357,6 +2427,7 @@ export class Game {
     if (this.mode === 'derby' && this.dy) s.dy = { pr: this.dy.pr ? 1 : 0, sw: this.dy.sw, xh: r2(this.dy.xh), pp: this.ppick, n: this.dy.n, outs: this.dy.outs, idx: this.dy.idx, list: this.dy.order.map((o) => [o.id, o.name, o.hr, o.max, o.done ? 1 : 0]) };
     if (this.hrEv) s.hr = this.hrEv;
     if (this.throwEv) s.te = this.throwEv;
+    s.ar = this.play && this.play.autoRun && this.now < this.play.autoRun.until ? this.play.autoRun.i : -1; // 사람 야수 자동 베이스 밟기 중(클라 조작 잠금)
     if (this.catchEv) s.ce = this.catchEv;
     if (this.wallEv) s.we = this.wallEv;
     if (this.callEv) s.ce2 = this.callEv;

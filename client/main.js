@@ -385,7 +385,7 @@ function onSnap(s) {
     if (cfg.replay && lastContactT && nowP() - lastContactT < 8) replay.schedule(nowP() + 2.6, { tEvent: lastContactT, pre: 0.8, post: 1.6, speed: 0.42, cam: 'hr', scene });
   }
   // 송구/포구/펜스 이벤트
-  if (s.te && s.te.id !== seen.te) { if (fielders[s.te.i]) { fielders[s.te.i].throwT = nowP(); } seen.te = s.te.id; }
+  if (s.te && s.te.id !== seen.te) { if (fielders[s.te.i]) { fielders[s.te.i].throwT = nowP(); fielders[s.te.i].throwDur = s.te.w ? s.te.w / 0.55 : THROW_DUR; } seen.te = s.te.id; } // [11-23] 송구 동작 시작 = 클립 시작, 릴리스(55%) = 서버 릴리스
   if (s.ce && s.ce.id !== seen.ce) { if (fielders[s.ce.i]) { fielders[s.ce.i].catchT = nowP(); if (s.ce.i === getRole().fi && getRole().defense) { feedback(s.ce.dive ? '다이빙 캐치!! 나이스!' : s.ce.jump ? '점프 캐치!! 나이스!' : '나이스 캐치!', '#4fd18b'); if (s.ce.dive || s.ce.jump) bus.emit('ui:perfect'); }
     if ((s.ce.dive || s.ce.jump) && cfg.replay !== 0) replay.schedule(nowP() + 1.0, { tEvent: nowP(), pre: 1.2, post: 0.5, speed: 0.45, cam: 'catch', focus: fielders[s.ce.i].p, scene }); if (s.ce.dive) { fx.dustPuff(fielders[s.ce.i].p.root.position.x, fielders[s.ce.i].p.root.position.z, 2, 2); } } seen.ce = s.ce.id; }
   if (s.ce2 && s.ce2.id !== seen.ce2) {
@@ -703,6 +703,8 @@ function updateControl(dt) {
     ctl.block = ctl.idx >= 0; ctl.idx = role.fi; ctl.active = false;
   }
   const diveAge = f[7];
+  const FA = fielders[role.fi], throwing = FA && FA.throwT && nowP() - FA.throwT < (FA.throwDur || THROW_DUR) * 0.6; // 송구 동작 중엔 제자리
+  if (throwing || S.ar === role.fi) { ctl.active = false; ctl.moving = false; if (S.ar === role.fi) ctl.block = true; return; } // 송구 동작·베이스 직접 밟기 중엔 조작 잠금
   let fw = (keys.w || keys.arrowup ? 1 : 0) - (keys.s || keys.arrowdown ? 1 : 0) + touchMove.y;
   let rt = (keys.d || keys.arrowright ? 1 : 0) - (keys.a || keys.arrowleft ? 1 : 0) + touchMove.x;
   if (ctl.block) { if (Math.abs(fw) < 0.1 && Math.abs(rt) < 0.1) ctl.block = false; else { fw = 0; rt = 0; } }
@@ -838,7 +840,7 @@ function updateWorld(dt) {
     const ready = s.ph === 'pitching' && s.p && t > s.p.t0 - 0.25 && pos !== 'P';
     const splitK = s.ph === 'pitching' && s.p ? (t - s.p.t0) / 0.35 : -1;
     let throwK = -1;
-    if (A.throwT && tp - A.throwT < THROW_DUR) throwK = (tp - A.throwT) / THROW_DUR;
+    { const TD = A.throwDur || THROW_DUR; if (A.throwT && tp - A.throwT < TD) throwK = (tp - A.throwT) / TD; }
     const diveK = dv >= 0 ? dv / 0.55 : -1, jumpK = jt >= 0 && jt < 0.6 ? jt / 0.6 : -1;
     let reachW = null, ground = false;
     if (ballL && ballL.h < 0 && s.ph === 'live') {
