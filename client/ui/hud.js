@@ -159,6 +159,10 @@ export function hudFrame(c, role, f) {
     prevSc = s.sc;
   }
 
+  // [guess] 구종 예측 패널 (타석·투구 전)
+  { const on = role.batter && s.mode === 'game' && (s.ph === 'pitch' || s.ph === 'pitching');
+    show('guessBox', on);
+    if (on && $('guessBox')._g !== (s.gs || '')) { $('guessBox')._g = s.gs || ''; $('guessBox').querySelectorAll('[data-g]').forEach((b) => b.classList.toggle('on', b.dataset.g === s.gs)); } }
   // [ABS 챌린지] 주심 콜 직후 3초: 손해 본 팀에게 'C · ABS 챌린지' (남은 횟수·시간 막대)
   { const ch = s.ch2, myT = role.offense ? s.bt : role.defense ? (s.bt === 'home' ? 'away' : 'home') : null;
     const on = !!(ch && !ch[4] && ch[5] > 0 && myT === ch[2] && ch[3] > 0.05) && !$('absRev').classList.contains('show');

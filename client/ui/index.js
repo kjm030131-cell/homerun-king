@@ -341,6 +341,7 @@ export function createUI(ctx) {
   bus.on('score', (d) => { onBus('score'); flashScore(d && d.half === 1 ? 'home' : 'away'); }); // half 0 = 초(원정 공격)
   bus.on('contact', (d) => { if (d && d.grade) gradeFeedback(d.grade, d.pow); });
   bus.on('modeChange', () => { resetHUD(); paintRules(); });
+  bus.on('guessResult', (d) => { if (d && ctx.S && ctx.S.bat && ctx.S.bat.id === ctx.myId) feedback(d.ok ? '구종 예측 적중! 타이밍·판정 넓어짐' : '구종 예측 실패', d.ok ? '#4fd18b' : '#ff8d86'); }); // [guess]
   bus.on('inningEnd', (d) => { if (d && ctx.S && ctx.S.mode !== 'derby') inningCard(d, ctx.S); }); // [AAA] 공수 교대 중계 카드
 
   setScreen('title');
