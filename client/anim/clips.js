@@ -36,8 +36,8 @@ export const CLIPS = {
   pitch: { loop: false, lockXZ: false, fallback: 'throw' },
   // throw: anim.js THROW_RELEASE_K(0.55) 에 놓음
   throw: { loop: false, lockXZ: false, kmap: [[0, 'start'], [0.55, 'release'], [1, 'end']], fallback: 'idle' },
-  catchHigh: { loop: false, lockXZ: true, kmap: [[0, 'start'], [1, 'end']], fallback: 'ready' },
-  catchLow: { loop: false, lockXZ: true, kmap: [[0, 'start'], [0.5, 'catch'], [1, 'end']], hold: true, fallback: 'ready' },
+  catchHigh: { loop: false, lockXZ: true, kmap: [[0, 'start'], [0.45, 'catch'], [1, 'end']], fallback: 'ready' }, // [motion2] FBX 없으면 procedural.js (catch = 왼손 최고점)
+  catchLow: { loop: false, lockXZ: true, kmap: [[0, 'start'], [0.5, 'catch'], [1, 'end']], hold: true, fallback: 'ready' }, // [motion2] FBX 없으면 procedural.js
   // dive/slide: k 1 = 0.55s / 0.6s (main.js 진행도 정의) — 그 뒤는 자연 속도로 이어 감
   dive: { loop: false, lockXZ: true, kmap: [[0, 'start'], [1, 'land'], [1.8, 'end']], fallback: 'catchLow' },
   slide: { loop: false, lockXZ: true, kmap: [[0, 'start'], [1, 'land'], [1.6, 'end']], fallback: 'run' },
@@ -46,7 +46,7 @@ export const CLIPS = {
   disappointed: { loop: false, lockXZ: true, fallback: 'idle' },
   umpireCall: { loop: false, lockXZ: true, fallback: 'idle' },
   // (선택) 고정 목록 밖 — 있으면 세이프 판정에 씀
-  umpireSafe: { loop: false, lockXZ: true, fallback: 'idle', optional: true },
+  umpireSafe: { loop: false, lockXZ: true, fallback: 'idle', optional: true }, // [motion2] FBX 없으면 procedural.js (팔 교차 → 양옆 쫙)
   // [motion] 상황별 변주 클립(전부 선택 — 없으면 fallback 사슬로 기존 클립). 뒤에서 늦게 받음(EARLY 아님) → 시작 로딩·메모리 영향 작음
   //  kind   : 마커 자동 추정 방식(swing·pitch·throw …) — 이름이 달라도 같은 방식으로
   //  anchor : 'end' = 마지막 프레임 엉덩이 수평 위치를 제자리(타석)로 / 'start' = 첫 프레임을 제자리로 (걸어 들어오기·나가기)

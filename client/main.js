@@ -198,6 +198,7 @@ function clearActors() {
   for (const A of runners.values()) scene.remove(A.p.root);
   runners.clear();
   for (const g of greet) scene.remove(g.A.p.root); greet.length = 0; // [trot]
+  for (const L of leavers) scene.remove(L.A.p.root); leavers.length = 0; // [motion2]
   for (const A of coaches) scene.remove(A.p.root); coaches.length = 0;
 }
 window.__actors = () => ({ fielders, batter, runners: [...runners.values()], umps, coaches, celeb: celeb ? celeb.actors : [] }); // [bugs] QA 훅: 장비(헬멧·모자) 상태 확인용 (tools/qa/flows.mjs)
@@ -208,16 +209,35 @@ for (const [x, z, ry] of [[0, -2.35, 0], [-22.5, 27, Math.PI * 0.75], [22.5, 27,
   if (!U.home) { U.p.maskG.visible = false; U.p.capG.visible = true; }
   umps.push(U);
 }
+// [motion2] 이닝 교대 뛰기: 덕아웃 앞(홈 = 3루 쪽 +x, 원정 = 1루 쪽 -x — startCelebration 과 같은 쪽), 조깅 속도, 들어올 때 최대 거리(→ 3.5초 안에 도착, 첫 투구 전)
+const DUGOUT_XZ = (team) => [(team === 'home' ? 1 : -1) * 23.5, 16];
+const SWAP_RUN = { v: 6.8, maxD: 24, leaveT: 5 };
+const leavers = []; // 나가는 수비 {A, t0, dx, dz}
+const tp0 = () => nowP();
 function buildTeams(s) {
   const ft = s.half === 0 ? 'home' : 'away', bt = s.half === 0 ? 'away' : 'home';
   const key = ft + s.fl.map((f) => f[0]).join('');
   if (fieldTeamBuilt !== key) {
-    for (const A of fielders) scene.remove(A.p.root);
+    // [motion2] 이닝 교대: 공수 바뀌는 순간(결과 대기 중)이면 나가는 수비는 자기 덕아웃 쪽으로 뛰어 들어가고, 들어오는 수비는 덕아웃 쪽에서 뛰어나옴
+    //   화면 연출만 — sim 위치·시간은 그대로(첫 투구 시각 안 바뀜 = 템포 그대로)
+    const swap = !!fieldTeamBuilt && s.ph === 'result' && fielders.length && !window.__noSwapRun;
+    for (const A of leavers) scene.remove(A.p.root); leavers.length = 0;
+    if (swap) { const D = DUGOUT_XZ(fieldTeamBuilt.startsWith('home') ? 'home' : 'away'); for (const A of fielders) leavers.push({ A, t0: tp0(), dx: D[0], dz: D[1] }); }
+    else for (const A of fielders) scene.remove(A.p.root);
     if (fieldTeamBuilt && fielders.length) teamCache.set('f' + fieldTeamBuilt, fielders); // [qa]
     const nums = { P: 18, C: 22, '1B': 25, '2B': 4, '3B': 13, SS: 6, LF: 7, CF: 8, RF: 9 };
     const c = cachedTeam('f' + key); // [qa]
     if (c) { fielders = c; for (const A of c) { A.init = false; scene.add(A.p.root); } }
     else fielders = s.fl.map((f, i) => { const A = mkActor({ team: ft, num: nums[f[0]], role: f[0] === 'C' ? 'catcher' : 'fielder', seed: i + (ft === 'home' ? 0 : 50) }); A.pos = f[0]; return A; });
+    for (const A of fielders) A.entry = null;
+    if (swap) {
+      const D = DUGOUT_XZ(ft);
+      s.fl.forEach((f, i) => {
+        const A = fielders[i]; if (!A) return;
+        const dx = D[0] - f[1], dz = D[1] - f[2], d = Math.hypot(dx, dz), L = Math.min(d, SWAP_RUN.maxD);
+        if (L > 2) A.entry = { t0: tp0(), sx: f[1] + dx / d * L, sz: f[2] + dz / d * L, T: L / SWAP_RUN.v };
+      });
+    }
     fieldTeamBuilt = key;
   }
   if (batTeamBuilt !== bt) {
@@ -851,7 +871,12 @@ function updateWorld(dt) {
     // [gameplay] 타구 중엔 공(현재 시각으로 외삽)과 수비수(보간 지연만큼 과거)가 다른 시각이라 공이 수비수 앞 허공에서 잡혔음 → 구간 속도로 지연만큼 앞으로(최대 1.5m) — NI.sample/fl 안에서
     if (IP) { const q = IP.fl(i, pos); if (q) { x = q[0]; z = q[1]; ry = q[2]; } }
     if (i === role.fi && ctl.active) { x = ctl.x; z = ctl.z; ry = ctl.ry; }
-    if (pos === 'P' && pitchPhase) ry = Math.PI;
+    if (A.entry) { // [motion2] 이닝 교대: 덕아웃 쪽에서 자기 자리로 조깅
+      const e = A.entry, k = (tp - e.t0) / e.T;
+      if (k >= 1 || s.ph === 'pitching' || s.ph === 'live' || (i === role.fi && ctl.active)) A.entry = null;
+      else { const tx = x, tz = z; x = lerp(e.sx, tx, k); z = lerp(e.sz, tz, k); if (k < 0.92) ry = Math.atan2(tx - e.sx, tz - e.sz); }
+    }
+    if (pos === 'P' && pitchPhase && !A.entry) ry = Math.PI;
     const sp = place(A, x, z, ry, dt, i === role.fi && ctl.active ? 30 : IP ? 22 : 12);
     const nm = nameOf(ctrlId) || (net?.local && ctrlId === myId ? myName : null);
     setTag(A, nm ? (ctrlId === myId ? `${nm} ★` : nm) : '', ctrlId === myId ? '#ffcf3f' : '#ffffff', ctrlId === myId && (camMode !== 'field' || cfg.fieldCam === 'tps'));
@@ -888,18 +913,19 @@ function updateWorld(dt) {
     if (i === role.fi && tp - pred.jt < 1) jt = tp - pred.jt; // [net] 내가 누른 점프·다이빙은 누른 순간부터 (서버 나이로 다시 시작 안 함)
     if (i === role.fi && tp - pred.dv < 3) dv = tp - pred.dv;
     const diveK = dv >= 0 ? dv / 0.55 : -1, jumpK = jt >= 0 && jt < 0.6 ? jt / 0.6 : -1;
-    let reachW = null, ground = false;
+    let reachW = null, ground = false, groundK = -1, highK = -1;
     if (ballL && ballL.h < 0 && s.ph === 'live') {
       const d = Math.hypot(ballPos.x - A.p.root.position.x, ballPos.z - A.p.root.position.z);
       const incoming = (ballL.vx * (A.p.root.position.x - ballPos.x) + ballL.vz * (A.p.root.position.z - ballPos.z)) > 0;
       if (d < 4.5 && (incoming || d < 1.5)) {
-        if (ballPos.y < 0.6 && ballL.state === 'ground') ground = true;
-        else reachW = ballPos;
+        if (ballPos.y < 0.6 && ballL.state === 'ground') { ground = true; groundK = 0.5 * clamp(1 - (d - 0.6) / 3.2, 0.12, 1); } // [motion2] 공이 다가올수록 숙임(가까우면 포구 자세 = catchLow 'catch')
+        else { reachW = ballPos; if (ballPos.y > 1.75 && ballL.state !== 'ground' && sp < 3.5) { highK = 0.45 * clamp(1 - (d - 0.8) / 3.4, 0, 1); A.highC = tp; } } // [motion2] 높은 공: 글러브를 머리 위로(catchHigh 'catch'), 손 IK 가 공 쪽으로 다듬음
       }
     }
-    if (A.catchT && tp - A.catchT < 0.25 && !reachW) reachW = _u.copy(A.p.root.position).add(_w.set(Math.sin(A.p.root.rotation.y) * 0.5, 1.2, Math.cos(A.p.root.rotation.y) * 0.5));
+    if (A.catchT && tp - A.catchT < 0.5 && A.highC && A.catchT - A.highC < 0.3 && !reachW) highK = 0.45 + 0.55 * (tp - A.catchT) / 0.5; // [motion2] 높은 공 잡은 뒤 가슴으로 내림
+    else if (A.catchT && tp - A.catchT < 0.25 && !reachW) reachW = _u.copy(A.p.root.position).add(_w.set(Math.sin(A.p.root.rotation.y) * 0.5, 1.2, Math.cos(A.p.root.rotation.y) * 0.5));
     const knees = (pos === 'LF' || pos === 'CF' || pos === 'RF') && (s.ph === 'pitch' || (s.ph === 'pitching' && s.p && t < s.p.t0 - 0.9));
-    A.a.fielder(dt, { speed: sp, ready, knees, splitK, hasBall: hasBall(i), throwK, diveK, jumpK, ballW, reachW, ground, reachWeight: 1 });
+    A.a.fielder(dt, { speed: sp, ready, knees, splitK, hasBall: hasBall(i), throwK, diveK, jumpK, ballW, reachW, ground, groundK, highK, reachWeight: 1 });
   });
   // 타자
   // [motion] 맞힌 순간(phase → live) 타자가 바로 주자로 바뀌어 스윙이 컨택 프레임에서 끊기던 것 → 팔로스루(0.34초)까지 타자를 보여 주고 홈의 주자는 그동안 숨김
@@ -982,6 +1008,7 @@ function updateWorld(dt) {
     parkRunner(A); runners.delete(k);
   }
   updateGreet(s, tp, dt);
+  updateLeavers(tp, dt);
   // 심판/코치
   for (const U of umps) {
     let call = null;
@@ -993,7 +1020,6 @@ function updateWorld(dt) {
   updateCelebration(dt);
   updateBall(dt, t, role, pitchPhase);
 }
-// ── 끝내기 세리머니: 덕아웃에서 동료들이 뛰어나와 홈 근처에서 방방 뛰고 꽃가루 ──
 // [trot] 홈런 뒤 홈 옆 하이파이브: 먼저 들어온 주자들은 1루 쪽 홈 뒤에 줄 서서 3루 쪽(들어오는 타자)을 보고 만세,
 //        마지막 주자(타자)가 들어오면 타자 쪽으로 돌아서 차례로 오른손을 맞댐(손 IK). 결과 시간이 끝나면(다음 타석) 치움
 const _gv = new THREE.Vector3();
@@ -1021,6 +1047,19 @@ function updateGreet(s, tp, dt) {
     A.a.runner(dt, { speed: sp, slideK: -1, lead: false, cheer: sp < 0.5, lookW: null });
   }
 }
+// [motion2] 이닝 교대로 나가는 수비: 덕아웃 앞까지 조깅(6.8m/s), 도착하거나 5초 지나면 치움(외야수는 도중에 — 그땐 이미 타석 시점이라 멀리 작게 보임)
+function updateLeavers(tp, dt) {
+  for (let i = leavers.length - 1; i >= 0; i--) {
+    const L = leavers[i], A = L.A, r = A.p.root.position;
+    const dx = L.dx - r.x, dz = L.dz - r.z, d = Math.hypot(dx, dz);
+    if (d < 1.2 || tp - L.t0 > SWAP_RUN.leaveT || fielders.includes(A)) { if (!fielders.includes(A)) scene.remove(A.p.root); leavers.splice(i, 1); continue; }
+    const st = Math.min(d, SWAP_RUN.v * Math.min(1, (tp - L.t0) / 0.5 + 0.3) * dt);
+    const sp = place(A, r.x + dx / d * st, r.z + dz / d * st, Math.atan2(dx, dz), dt, 40);
+    setTag(A, '', '#fff');
+    A.a.fielder(dt, { speed: sp, ready: false, hasBall: false, throwK: -1, diveK: -1, jumpK: -1, ballW: null, reachW: null, ground: false });
+  }
+}
+// ── 끝내기 세리머니: 덕아웃에서 동료들이 뛰어나와 홈 근처에서 방방 뛰고 꽃가루 ──
 let celeb = null;
 function startCelebration() {
   if (celeb) for (const A of celeb.actors) scene.remove(A.p.root);

@@ -185,7 +185,7 @@ export class ClipAnimator {
     motionEvents(this.ev, this.p, 'fielder', c);
     const C = this.c, P = this.p, sp = c.speed || 0;
     this._fwd(false, dt);
-    const busy = c.diveK >= 0 || c.throwK >= 0 || c.jumpK >= 0 || (c.ground && sp < 3);
+    const busy = c.diveK >= 0 || c.throwK >= 0 || c.jumpK >= 0 || (c.ground && sp < 3) || c.highK >= 0;
     const isC = P.role === 'catcher';
     if (busy || sp > 0.8) this._cut();
     else {
@@ -199,7 +199,8 @@ export class ClipAnimator {
     // 포수 송구는 Baseball_Catcher 의 짧은 팔 송구(일어서며), 야수는 투구 동작 송구
     else if (c.throwK >= 0) C.scrubK(isC && C.has('catcherThrow') ? 'catcherThrow' : 'throw', c.throwK, { fade: isC ? 0.15 : 0.12 });
     else if (c.jumpK >= 0) C.scrubK('catchHigh', c.jumpK);
-    else if (c.ground && sp < 3) { this.gk = Math.min(1, this.gk + dt / 0.5); C.scrubK('catchLow', this.gk); }
+    else if (c.ground && sp < 3) { this.gk = Math.min(1, this.gk + dt / 0.5); C.scrubK('catchLow', c.groundK >= 0 ? Math.max(c.groundK, Math.min(this.gk, 0.5)) : this.gk, { fade: 0.15 }); } // [motion2] 다가오는 공 거리로 숙임
+    else if (c.highK >= 0) C.scrubK('catchHigh', c.highK, { fade: 0.18 }); // [motion2] 높은 공 포구(절차적 catchHigh — FBX 받으면 그걸로)
     else if (this._shotOn()) { /* 한 번 재생 동작 */ }
     else if (!this._mood(sp)) this._loco(sp, c.ready || c.knees ? 'ready' : 'idle');
     if (!(c.ground && sp < 3)) this.gk = 0;
@@ -316,7 +317,7 @@ export class ClipAnimator {
     C.update(dt);
   }
   // 심판: 주심은 투구 시작 ~ 공 도착까지 무릎 짚은 자세(Umpire 클립 첫 자세), 스트라이크 콜은 Umpire 콜 구간(0.45초~)을 끝까지,
-  //  삼진 콜은 조금 느리게(힘 줘서). 루심 아웃 콜도 같은 콜 동작. 세이프는 클립이 없어 대기 자세.
+  //  삼진 콜은 조금 느리게(힘 줘서). 루심 아웃 콜도 같은 콜 동작. 세이프는 umpireSafe(FBX 없으면 procedural.js 절차적 클립: 팔 교차 → 양옆).
   ump(dt, c) {
     const C = this.c, t = now(), home = !c.stand;
     const call = c.call || null;
@@ -327,7 +328,7 @@ export class ClipAnimator {
         const s = k ? 0.85 : 1.1, from = call === 'safe' ? 0 : call === 'strike' ? 0.45 : 0.55;
         const nm = call === 'safe' ? 'umpireSafe' : 'umpireCall';
         C.play(nm, { fade: 0.12, restart: true, from, speed: s });
-        this.callUntil = t + Math.max(0.6, (C.duration(nm) - 0.45 - from) / s);
+        this.callUntil = t + Math.max(0.6, (C.duration(nm) - (call === 'safe' ? 0.15 : 0.45) - from) / s); // [motion2] 세이프는 팔 내리는 데까지
       }
     }
     this.call = call;

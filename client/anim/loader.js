@@ -7,6 +7,7 @@ import * as THREE from 'three';
 import * as SkeletonUtils from 'three/addons/utils/SkeletonUtils.js';
 import { decalTex } from '../skinned.js';
 import { MODEL_DIR, FILES, CLIPS, REQUIRED, EARLY, FIT, BODY, mergeManifest } from './clips.js';
+import { buildProcClips } from './procedural.js';
 
 const DEG = Math.PI / 180;
 // 'mixamorig:Hips'(FBX) / 'mixamorigHips'(GLTFLoader 가 ':' 를 지움) / 'mixamorig1:Hips' → 'Hips'
@@ -353,7 +354,17 @@ export function loadLib({ dir = MODEL_DIR, onClip = null } = {}) {
     lib.raw = { cap, helmet, bat, glove };
     if (!lib.incomplete.length) LIB = lib;
     // 나머지 클립은 뒤에서(게임 시작을 막지 않음)
-    (async () => { for (const n of Object.keys(CLIPS)) if (!lib.clips.has(n) && !EARLY.includes(n)) await getClip(n); })();
+    (async () => {
+      for (const n of Object.keys(CLIPS)) if (!lib.clips.has(n) && !EARLY.includes(n)) await getClip(n);
+      // [motion2] FBX 가 없는 동작(세이프 콜·높은 공·땅볼 포구)은 받은 클립 자세로 만든 절차적 클립 (procedural.js) — 파일이 있으면 그게 우선
+      try {
+        for (const { name, clip } of buildProcClips(lib, T)) {
+          const cfg = CLIPS[name] || (CLIPS[name] = { loop: false, optional: true });
+          const e = { name, clip, cfg, markers: { ...autoMarkers(name, clip, T), ...(cfg.markers || {}) }, index: lib.clipList.length, proc: true };
+          lib.clipList.push(e); lib.clips.set(name, e); if (onClip) onClip(e);
+        }
+      } catch (err) { console.warn('[anim] 절차적 클립', err.message); }
+    })();
     return lib;
   })();
   return LOADING;
