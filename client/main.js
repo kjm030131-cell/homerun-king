@@ -273,6 +273,8 @@ function startLocal(name, o) {
     const t = performance.now(); const dt = Math.min(0.1, (t - last) / 1000); last = t;
     if (dt <= 0 || (net && net.paused)) return; // [ui] 혼자하기 일시정지 (Esc 메뉴)
     game.tick(dt);
+    // [motion] 혼자 하는 스크린야구: 내가 칠 차례가 아닌 수비 이닝(CPU끼리)은 2배속
+    if (game.set.mo === 2 && game.fieldTeam === o.team && game.phase !== 'over') game.tick(dt);
     handleMsg(game.snapshot(true)); // [gameplay] true: 이벤트(ev)도 같이
   };
   const iv = setInterval(tickFn, 1000 / 60);
@@ -1476,7 +1478,8 @@ function updateHUD() {
   }
   const a = (role.batter || role.pitcher) && pitchPhase ? aimPoint() : null;
   const mode = mode2();
-  if (a && role.batter && camMode !== 'intro') PCIv.update(a, mode, hitEase(), pciHot, camera, SWING.bunt.R); // [gameplay] 정타/강타 크기 다름, 그려진 크기 = 판정 크기
+  if (S.mo && role.batter) pci.visible = false; // [motion] 모션 경기엔 마우스 커서 없음
+  else if (a && role.batter && camMode !== 'intro') PCIv.update(a, mode, hitEase(), pciHot, camera, SWING.bunt.R); // [gameplay] 정타/강타 크기 다름, 그려진 크기 = 판정 크기
   if (camMode === 'intro') { pci.visible = false; aimMark.visible = false; }
   if (role.pitcher && s.ph === 'pitch' && camMode !== 'intro') {
     const aim = gauge ? gauge.aim : a;

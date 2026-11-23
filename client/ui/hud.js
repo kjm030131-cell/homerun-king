@@ -231,7 +231,12 @@ export function hudFrame(c, role, f) {
   // 조작 안내: 역할 이름 + 키 칩 + 상황 팁
   let keysL = [], tip = '', title = '';
   const runnersOn = (s.occ || []).some(Boolean);
-  if (role.batter && pitchPhase) {
+  if (s.mo && role.batter && pitchPhase) { // [motion] 모션 경기: 핸드폰·웹캠 안내
+    title = '모션 타격'; keysL = [['휘두르기', '스윙'], ['세게', '강타'], ['낮게·높게', '공 높이 맞추기'], ['멈추기', '체크스윙'], ['V', '시점']];
+    tip = '공이 오는 순간에 휘둘러. 낮은 공은 낮게, 높은 공은 높게';
+  } else if (s.mo && role.pitcher && s.ph === 'pitch') {
+    title = '모션 투구'; keysL = [['핸드폰 존 끌기', '조준'], ['손 떼기', '조준 고정'], ['팔 휘두르기', '투구 (세기 = 구속)']];
+  } else if (role.batter && pitchPhase) {
     title = f.bunt ? '번트' : '타격';
     keysL = f.bunt ? [['클릭', '번트 대기'], ['마우스 좌우', '방향'], ['B', '강공 전환']]
       : [['마우스', 'PCI 커서'], ['좌클릭', '정타'], ['우클릭 · F', '강타(잘 뜸)'], ['공이 커서 위쪽', '뜬공 · 아래쪽은 땅볼'], ...(dy && dy.pr ? [['1~6', `구종 고정${dy.pp && dy.pp !== 'MIX' && PITCHES[dy.pp] ? '(' + PITCHES[dy.pp].name + ')' : ''}`], ['0', '섞어서']] : derby ? [] : [['B', '번트']]), ['V', '시점']];
