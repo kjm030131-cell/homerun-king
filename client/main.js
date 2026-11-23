@@ -534,7 +534,7 @@ function nameOf(id) { if (!id) return null; const p = lobby && lobby.players.fin
 
 // ═════════════ 역할 ═════════════
 // [ABS 챌린지] 내 팀이 지금 챌린지할 수 있나 (주심 콜 직후 3초 창)
-function canChallenge() { return !!(S && S.ch2 && !S.ch2[4] && S.ch2[5] > 0 && myTeam() === S.ch2[2] && S.ch2[3] > 0.05); }
+function canChallenge() { return !!(S && S.ch2 && !S.ch2[4] && S.ch2[5] > 0 && myTeam() === S.ch2[2] && S.ch2[3] > 0.05 && (!S.ch2[6] || S.ch2[6].includes(myId))); } // 타자·투수·포수만
 window.__absChallenge = () => { if (canChallenge()) { net && net.send({ t: 'challenge' }); feedback('ABS 챌린지 신청!', '#5ab8ff'); } };
 function getRole() {
   const r = { batter: false, pitcher: false, fi: -1, holding: false, offense: false, defense: false, pos: null, spec: false };

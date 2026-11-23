@@ -165,7 +165,7 @@ export function hudFrame(c, role, f) {
     if (on && $('guessBox')._g !== (s.gs || '')) { $('guessBox')._g = s.gs || ''; $('guessBox').querySelectorAll('[data-g]').forEach((b) => b.classList.toggle('on', b.dataset.g === s.gs)); } }
   // [ABS 챌린지] 주심 콜 직후 3초: 손해 본 팀에게 'C · ABS 챌린지' (남은 횟수·시간 막대)
   { const ch = s.ch2, myT = role.offense ? s.bt : role.defense ? (s.bt === 'home' ? 'away' : 'home') : null;
-    const on = !!(ch && !ch[4] && ch[5] > 0 && myT === ch[2] && ch[3] > 0.05) && !$('absRev').classList.contains('show');
+    const on = !!(ch && !ch[4] && ch[5] > 0 && myT === ch[2] && ch[3] > 0.05 && (!ch[6] || ch[6].includes(c.myId))) && !$('absRev').classList.contains('show');
     show('chalBar', on);
     if (on) { setHTML('chalTxt', `주심 <b>${ch[1] ? '스트라이크' : '볼'}</b> · 억울하면 <span class="kbd">C</span> ABS 챌린지 <small>남은 ${ch[5]}회</small>`); style($('chalBar').querySelector('i'), 'transform', `scaleX(${clamp(ch[3] / 3.2, 0, 1).toFixed(3)})`); }
     const cl = s.cl2; if (cl && myT) setText('chalLeft', `챌린지 ${cl[myT === 'away' ? 0 : 1]}`); }
