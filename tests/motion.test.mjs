@@ -24,12 +24,12 @@ test('모션 모드(autoD): 사람은 투구만, 수비수 조작은 안 넘어�
       g.tick(1 / 60);
       if (g.phase === 'live') for (const f of g.fielders) if (f.ctrl === 'me' && f.pos !== 'P') stolen++;
       const h = g.ball ? g.ball.holder : -1;
-      if (g.phase === 'live' && h >= 0) { if (h !== holdI) { holdI = h; holdT = g.now; } maxHold = Math.max(maxHold, g.now - holdT); } else holdI = -1;
+      if (g.phase === 'live' && h >= 0 && g.fielders[h].ctrl === 'me') { /* 내 선수(투수)가 공을 잡았을 때 사람 입력을 기다리는지만 */ if (h !== holdI) { holdI = h; holdT = g.now; } maxHold = Math.max(maxHold, g.now - holdT); } else holdI = -1;
     }
     assert.ok(pitches > 3, `투구 ${pitches}`);
     if (autoD) {
       assert.equal(stolen, 0, '수비수 조작이 사람에게 넘어옴');
-      assert.ok(maxHold < 1.6, `공 들고 기다린 시간 ${maxHold.toFixed(2)}s (사람 기다리면 1.6s)`);
+      assert.ok(maxHold < 1.3, `내 투수가 공 들고 기다린 시간 ${maxHold.toFixed(2)}s (사람 기다리면 1.6s)`);
     } else assert.ok(stolen > 0, '비교용: autoD 끄면 자동 전환으로 조작이 넘어와야 함');
   }
 });
