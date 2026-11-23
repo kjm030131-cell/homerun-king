@@ -942,7 +942,7 @@ function updateWorld(dt) {
       else if (s.p && (s.ph === 'pitching' || s.ph === 'result')) k = pitchK(t - (s.p.t0 - WINDUP));
       if (k > 1.15) k = -1;
       if (window.__pk != null) k = window.__pk;
-      A.a.pitcher(dt, { k, speed: sp, lookW: tossBall.visible ? tossBall.position : _v.set(0, 1.2, 0), catchW: tossing && tk > TOSS.start + TOSS.dur - 0.35 ? _u.set(-0.25, 1.45, 17.75) : null });
+      A.a.pitcher(dt, { pose: role.pitcher && motion && motion.active() ? motion.poseNow() : null, poseMir: !!(motion && motion.mirror), k, speed: sp, lookW: tossBall.visible ? tossBall.position : _v.set(0, 1.2, 0), catchW: tossing && tk > TOSS.start + TOSS.dur - 0.35 ? _u.set(-0.25, 1.45, 17.75) : null });
       return;
     }
     if (pos === 'C' && pitchPhase && tossing && tk < TOSS.start + 0.5) {

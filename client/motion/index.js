@@ -139,6 +139,8 @@ export function createMotion(api) {
         // 전신 인식(MediaPipe) — 처음 한 번 몇 MB 내려받음. 실패하면 움직임 감지로
         if (!M.pose) M.pose = createPose(M.cam.video, (b) => {
           const S = api.S(), role = api.role();
+          // [11-24] 전신 인식 중 투구: 손목이 가장 빠른 순간 = 릴리스, 손목 속도 = 세기 (움직임 감지는 꺼져 있어서 예전엔 투구가 안 됐음)
+          if (role.pitcher && S && S.ph === 'pitch') { if (pitch(api.aimNow(), clamp(0.5 + (b.pk - 3) * 0.08, 0.5, 0.97))) api.toast('투구!'); return; }
           if (!role.batter) return;
           const r = swing(b.at, b.pk > 6.5, 'cam', b.h * 62); // 손 높이(어깨 기준 m) → 각도처럼 (0.45m ≈ 28°)
           if (r === 'ok') api.toast(b.pk > 6.5 ? '풀스윙!' : '스윙!');
