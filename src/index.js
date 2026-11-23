@@ -19,6 +19,12 @@ export default {
       const code = m[1].toUpperCase();
       return env.ROOMS.get(env.ROOMS.idFromName(code), { locationHint: 'apac' }).fetch(new Request('https://room/info', { headers: { 'x-room': code } }));
     }
+    // [motion] 핸드폰 컨트롤러 ↔ PC 중계 (방 코드와 따로, 6자리)
+    m = p.match(/^\/ws\/pad\/([A-Za-z0-9]{6})$/);
+    if (m) {
+      if (req.headers.get('Upgrade') !== 'websocket') return new Response('websocket only', { status: 426 });
+      return env.PADS.get(env.PADS.idFromName(m[1].toUpperCase()), { locationHint: 'apac' }).fetch(req);
+    }
     m = p.match(/^\/ws\/([A-Za-z0-9]{4})$/);
     if (m) {
       if (req.headers.get('Upgrade') !== 'websocket') return new Response('websocket only', { status: 426 });
@@ -250,5 +256,27 @@ export class Lobby {
     for (const [k, v] of this.rooms) if (now - v.t > 120000) this.rooms.delete(k);
     const list = [...this.rooms.values()].sort((a, b) => (a.phase === 'lobby' ? 0 : 1) - (b.phase === 'lobby' ? 0 : 1) || b.players - a.players).slice(0, 50);
     return json({ rooms: list });
+  }
+}
+
+// [motion] 핸드폰 컨트롤러 중계: 코드 하나 = DO 하나. host(PC) 1명 ↔ pad(핸드폰) 여럿, 받은 문자열을 반대쪽에 그대로 넘김 (저장 없음)
+export class Pad {
+  constructor(state) { this.state = state; this.host = null; this.pads = new Set(); }
+  peers() { const n = JSON.stringify({ t: 'peer', host: this.host ? 1 : 0, pads: this.pads.size }); for (const w of [this.host, ...this.pads]) if (w) try { w.send(n); } catch { } }
+  async fetch(req) {
+    const role = new URL(req.url).searchParams.get('r') === 'h' ? 'h' : 'p';
+    const [client, server] = Object.values(new WebSocketPair());
+    server.accept();
+    if (role === 'h') { if (this.host) try { this.host.close(4004, '다른 곳에서 연결'); } catch { } this.host = server; }
+    else { if (this.pads.size >= 4) { server.close(4002, '컨트롤러가 너무 많아'); return new Response(null, { status: 101, webSocket: client }); } this.pads.add(server); }
+    server.addEventListener('message', (e) => {
+      const d = typeof e.data === 'string' ? e.data : ''; if (!d || d.length > 2048) return;
+      if (role === 'h') { for (const w of this.pads) try { w.send(d); } catch { } }
+      else if (this.host) try { this.host.send(d); } catch { }
+    });
+    const bye = () => { if (role === 'h') { if (this.host === server) this.host = null; } else this.pads.delete(server); this.peers(); };
+    server.addEventListener('close', bye); server.addEventListener('error', bye);
+    this.peers();
+    return new Response(null, { status: 101, webSocket: client });
   }
 }

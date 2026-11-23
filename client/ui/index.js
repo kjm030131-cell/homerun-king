@@ -68,9 +68,9 @@ export function createUI(ctx) {
 
   // ── 모달 ──
   // [bugs] 혼자하기: 일시정지 메뉴에서 연 설정·조작법 창(또는 경기 중 H)도 열려 있는 동안 멈춤 — 전엔 메뉴가 닫히는 순간 풀려서 설정 보는 동안 투구가 들어옴
-  const PAUSE = ['menuM', 'setM', 'helpM'];
+  const PAUSE = ['menuM', 'setM', 'helpM', 'motionM'];
   const repause = () => ctx.setPaused(screen === 'game' && PAUSE.some((m) => isShown(m)));
-  const onClose = { menuM: repause, setM: repause, helpM: repause };
+  const onClose = { menuM: repause, setM: repause, helpM: repause, motionM: repause };
   function openModal(id) { show(id, true); if (PAUSE.includes(id) && screen === 'game') ctx.setPaused(true); }
   function closeModal(id) { if (!isShown(id)) return; show(id, false); onClose[id] && onClose[id](); }
   document.querySelectorAll('[data-close]').forEach((b) => (b.onclick = () => closeModal(b.closest('.modal').id)));
@@ -101,6 +101,7 @@ export function createUI(ctx) {
   $('nick').onkeydown = (e) => { e.stopPropagation(); if (e.key === 'Enter') $('bPlay').click(); };
   for (const id of ['bSettings', 'lbSettings']) $(id).onclick = openSettings;
   for (const id of ['bHelp', 'lbHelp']) $(id).onclick = () => openModal('helpM');
+  for (const id of ['bMotion', 'lbMotion']) $(id).onclick = () => { openModal('motionM'); window.__motion && window.__motion.paint(); }; // [motion]
 
   // ── 모드 선택 ──
   function paintRules() {
@@ -293,6 +294,7 @@ export function createUI(ctx) {
   // ── 일시정지 메뉴 ──
   $('mSettings').onclick = () => { closeModal('menuM'); openSettings(); };
   $('mHelp').onclick = () => { closeModal('menuM'); openModal('helpM'); };
+  $('mMotion').onclick = () => { closeModal('menuM'); openModal('motionM'); window.__motion && window.__motion.paint(); }; // [motion]
   $('mLobby').onclick = () => { closeModal('menuM'); send({ t: 'lobby' }); };
   $('mQuit').onclick = () => { closeModal('menuM'); ctx.leave(); };
   function openMenu() {
