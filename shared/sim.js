@@ -604,6 +604,7 @@ export class Game {
       case 'pitch': this.onPitch(id, m); break;
       case 'swing': this.onSwing(id, m); break;
       case 'autoD': { const pl = this.players.get(id); if (pl) pl.autoD = !!m.on; break; } // [motion]
+      case 'chk': { const p = this.pitch; if (this.phase === 'pitching' && p && this.batter && this.batter.id === id && !p.swung) p.chk = 1; break; } // [motion] 체크스윙
       case 'pad': { const pl = this.players.get(id); if (pl && !!m.on !== !!pl.pad) { pl.pad = !!m.on; if (this.phase === 'lobby' || this.phase === 'over') this.emitLobby(); } break; } // [motion] 대기실에 '연결됨' 표시
       case 'bunt': if (this.batter && this.batter.id === id && (this.phase === 'pitch' || (this.phase === 'pitching' && this.now < this.pitch.t0))) this.buntStance = !!m.on; break;
       case 'steal': this.onSteal(id); break;
@@ -1852,9 +1853,12 @@ export class Game {
             const wild = (p.ty < 0.22 || Math.abs(p.tx) > 0.62) && this.runners.some((r) => !r.out && !r.scored && !r.steal) && Math.random() < 0.14;
             const zn = this.zoneNow(), strike = inZoneOf(zn, p.tx, p.ty);
             // [ABS 챌린지] 리얼: 주심이 콜(경계 근처는 가끔 틀림) → 3초 안에 손해 본 쪽 사람이 챌린지 → 슬로모션 ABS 판독
-            const call = this.umpCall(zn, p.tx, p.ty, strike);
+            let call = this.umpCall(zn, p.tx, p.ty, strike);
+            const chkSw = !call && p.chk && Math.random() < 0.4; // [motion] 체크스윙: 휘두르다 멈춘 볼 → 40% 루심이 스윙 판정
+            if (chkSw) call = true;
             const tm = call ? this.batTeam : this.batTeam === 'home' ? 'away' : 'home'; // 스트라이크 콜 → 타격팀, 볼 콜 → 수비팀이 신청
-            const can = this.R.abs !== false && this.mode === 'game' && !this.runners.some((r) => r.steal && !r.out) && (this.chalLeft[tm] ?? 0) > 0 && this.chalBy({ call }).length > 0 && edgeOf(zn, p.tx, p.ty) < 0.12;
+            if (chkSw) this.say('체크스윙 — 스윙!', true);
+            const can = !chkSw && this.R.abs !== false && this.mode === 'game' && !this.runners.some((r) => r.steal && !r.out) && (this.chalLeft[tm] ?? 0) > 0 && this.chalBy({ call }).length > 0 && edgeOf(zn, p.tx, p.ty) < 0.12;
             this.absEv = { id: ++this.seq, pid: p.id, x: r2(p.tx), y: r2(p.ty), z: [zn.x0, zn.x1, zn.y0, zn.y1], s: strike ? 1 : 0, c: call ? 1 : 0, abs: 0 };
             if (can) {
               this.chal = { pid: p.id, call, truth: strike, team: tm, x: r2(p.tx), y: r2(p.ty), z: [zn.x0, zn.x1, zn.y0, zn.y1], until: this.now + 3.2, req: null };

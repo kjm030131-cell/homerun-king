@@ -28,7 +28,7 @@ export function createMotion(api) {
   const M = {
     pad: null, cam: null, code: store.get('padCode', null) || newPadCode(),
     calib: store.get('motionCal', 0), // 타이밍 보정(ms, +면 더 늦게 친 걸로)
-    auto: store.get('motionAuto', 0), // [11-23] 자동 보정(ms): 스윙마다 내 평균 타이밍 쪽으로 조금씩
+    auto: store.get('motionAuto', 0), elMean: store.get('motionEl', -12), ori: null, oriT: 0, // [11-23] 자동 보정(ms): 스윙마다 내 평균 타이밍 쪽으로 조금씩
     camLag: 90, // 웹캠 캡처 지연(ms) 기본값
     aim: null, grip: false, lastHS: '', hsT: 0, autoSent: null, log: [],
   };
@@ -38,7 +38,7 @@ export function createMotion(api) {
   M.active = () => M.connected() && api.mg(); // 모션 플레이 경기에서만 입력을 받음
 
   // ── 타격 ──
-  function swing(atLocalMs, strong, src) {
+  function swing(atLocalMs, strong, src, el) {
     const S = api.S(), role = api.role();
     if (!S || !S.mo || !role.batter || S.ph !== 'pitching' || !S.p) return S && !S.mo ? 'nomo' : 'skip';
     // 각속도 정점은 '맞혔다고 느끼는 순간'보다 늦음 → 기본 80ms 앞당김 + 자동 보정 + 수동 보정
@@ -46,7 +46,16 @@ export function createMotion(api) {
     const t = api.simNow() - lagMs / 1000;
     if (t < S.p.t0 - 0.05) return 'early'; // 공 놓기 전 동작(준비 동작)은 무시
     const p = S.p, sd = src === 'cam' ? 0.07 : 0.055;
-    const aim = [p.tx + gauss() * sd, p.ty + gauss() * sd * 0.8];
+    let ay = p.ty + gauss() * sd * 0.8;
+    // [motion] 스윙 높이: 정점 때 핸드폰 윗부분(배트 끝) 각도 el(°). 내 평균 각도 = 존 한가운데, 35° 숙이면/들면 존 아래/위 끝 → 공 높이와 어긋난 만큼 빗맞음(65%만 반영해 조금 너그럽게)
+    if (isFinite(el)) {
+      const zn = S.zn || [-0.236, 0.236, 0.46, 1.06], zc = (zn[2] + zn[3]) / 2, half = (zn[3] - zn[2]) / 2;
+      const swingY = zc + clamp((el - M.elMean) / 35, -1.6, 1.6) * half;
+      ay = p.ty + (swingY - p.ty) * 0.65 + gauss() * sd * 0.5;
+      M.elMean += (el - M.elMean) * 0.12; store.set('motionEl', Math.round(M.elMean * 10) / 10);
+      M.lastSwingY = swingY;
+    }
+    const aim = [p.tx + gauss() * sd, ay];
     api.swing(strong ? 'power' : 'contact', { t, aim });
     M.log.push({ src, lag: Math.round(lagMs), dt: Math.round((t - p.arrive) * 1000) }); if (M.log.length > 20) M.log.shift();
     M.lastLag = Math.round(lagMs);
@@ -67,10 +76,12 @@ export function createMotion(api) {
 
   // ── 핸드폰 ──
   function onPad(m) {
-    if (m.t === 'sws') { // 휘두르기 시작: 정점(=임팩트)은 보통 시작 뒤 ~60ms → 그 시각으로 화면 스윙만 먼저
+    if (m.t === 'ori') { M.ori = [+m.b || 0, +m.g || 0]; M.oriT = performance.now(); }
+    else if (m.t === 'chk') { const S = api.S(), role = api.role(); if (S && S.mo && role.batter && S.ph === 'pitching' && S.p && api.simNow() > S.p.t0 && api.net()) { api.net().send({ t: 'chk' }); api.toast('체크스윙'); } }
+    else if (m.t === 'sws') { // 휘두르기 시작: 정점(=임팩트)은 보통 시작 뒤 ~60ms → 그 시각으로 화면 스윙만 먼저
       const S = api.S(), role = api.role();
       if (S && S.mo && role.batter && S.ph === 'pitching' && S.p) { const lag = performance.now() - M.pad.toLocal(m.at) - M.calib - M.auto + 80; const t = api.simNow() - lag / 1000 + 0.06; if (t >= S.p.t0) api.preSwing(t); }
-    } else if (m.t === 'swing') { const r = swing(M.pad.toLocal(m.at), m.mode === 'power', 'pad'); M.pad.send({ t: 'ack', k: 'swing', r, lag: r === 'ok' ? M.lastLag : null, auto: Math.round(M.auto) }); }
+    } else if (m.t === 'swing') { const r = swing(M.pad.toLocal(m.at), m.mode === 'power', 'pad', +m.el); M.pad.send({ t: 'ack', k: 'swing', r, lag: r === 'ok' ? M.lastLag : null, auto: Math.round(M.auto) }); }
     else if (m.t === 'grip') { M.grip = !!m.on; if (!m.on) { M.aim = null; api.setAim(null); } }
     else if (m.t === 'aim') { M.aim = [clamp(+m.x || 0, -1.6, 1.6), clamp(+m.y || 0, -1.6, 1.6)]; }
     else if (m.t === 'type') { if (TYPES_KO[m.v]) api.setType(m.v); M.hsT = 0; }
@@ -152,12 +163,23 @@ export function createMotion(api) {
     }
   };
   // 스윙 결과를 핸드폰에도 (맞으면 진동)
+  const S0 = () => api.S();
   bus.on('localSwing', (e) => {
     if (!M.pad || !M.pad.pads) return;
     const late = e.dt > 0, ms = Math.abs(e.dt);
     const txt = e.contact ? (e.q > 0.8 ? '정타! 제대로 맞았다' : '맞혔다!') : ms > 140 ? (late ? `늦었어 (${ms}ms)` : `빨랐어 (${ms}ms)`) : '헛스윙';
-    M.pad.send({ t: 'fb', k: 'swing', txt, col: e.contact ? '#4fd18b' : '#ff8a80', vib: e.contact ? [50, 30, 90] : 0 });
+    const hi = M.lastSwingY != null && S0() && S0().p ? (M.lastSwingY > S0().p.ty + 0.12 ? ' · 공 위로 지나감' : M.lastSwingY < S0().p.ty - 0.12 ? ' · 공 아래로 지나감' : '') : '';
+    // 타격감: 정타 = 길고 묵직하게, 맞힘 = 짧게 두 번, 헛스윙 = 아주 짧게
+    M.pad.send({ t: 'fb', k: 'swing', txt: txt + (e.contact ? '' : hi), col: e.contact ? '#4fd18b' : '#ff8a80', vib: e.contact ? (e.q > 0.8 ? [90, 30, 140] : [35, 40, 35]) : 15 });
+    M.lastSwingY = null;
   });
+  // 실시간 배트: 핸드폰 기울기(타석 자세 기준, °) → 배트 각도(rad). 0.25초 넘게 안 오면 끔
+  const bo = [0, 0];
+  M.batOff = () => {
+    if (!M.ori || performance.now() - M.oriT > 250) return null;
+    bo[0] += (M.ori[0] * Math.PI / 180 - bo[0]) * 0.5; // 핸드폰 윗부분 들면 배트도 세워짐(스크린샷으로 방향 확인) bo[1] += (M.ori[1] * Math.PI / 180 - bo[1]) * 0.5;
+    return bo;
+  };
   M.paint = paint;
   setInterval(paint, 1000);
   return M;
