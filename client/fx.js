@@ -1,5 +1,6 @@
 // fx.js — 파티클/연출: 불꽃놀이, 임팩트 플래시, 흙먼지, 공 궤적
 import * as THREE from 'three';
+import { DUST_PNG, TRAIL_PNG } from './fxtex.js';
 import { glowTex } from './stadium.js';
 
 export class FX {
@@ -40,10 +41,10 @@ export class FX {
     dg.setAttribute('size', new THREE.BufferAttribute(this.dsize, 1));
     dg.setAttribute('alpha', new THREE.BufferAttribute(this.dalpha, 1));
     const dmat = new THREE.ShaderMaterial({
-      uniforms: { map: { value: glowTex() }, scale: { value: 600 }, color: { value: new THREE.Color('#b98a63') } },
+      uniforms: { map: { value: imgTex(DUST_PNG) }, scale: { value: 600 }, color: { value: new THREE.Color('#b98a63') } }, // [hud 11-24] 먼지: 실사 흙먼지 텍스처(전엔 둥근 빛 점)
       vertexShader: `attribute float size; attribute float alpha; varying float vA; uniform float scale;
         void main(){ vA = alpha; vec4 mv = modelViewMatrix * vec4(position,1.0); gl_PointSize = size * scale / -mv.z; gl_Position = projectionMatrix * mv; }`,
-      fragmentShader: `uniform sampler2D map; uniform vec3 color; varying float vA; void main(){ vec4 t = texture2D(map, gl_PointCoord); gl_FragColor = vec4(color, t.a * vA * 0.7); }`,
+      fragmentShader: `uniform sampler2D map; uniform vec3 color; varying float vA; void main(){ vec4 t = texture2D(map, gl_PointCoord); gl_FragColor = vec4(color, t.a * vA * 0.8); }`,
       depthWrite: false, transparent: true,
     });
     this.dust = new THREE.Points(dg, dmat);
@@ -70,11 +71,12 @@ export class FX {
     tg.setIndex(idx);
     tg.setAttribute('position', new THREE.BufferAttribute(this.tpos, 3));
     tg.setAttribute('alpha', new THREE.BufferAttribute(this.talpha, 1));
+    { const uv = new Float32Array(this.TN * 2 * 2); for (let i = 0; i < this.TN; i++) { const u = 1 - i / (this.TN - 1); uv.set([u, 0, u, 1], i * 4); } tg.setAttribute('uv', new THREE.BufferAttribute(uv, 2)); } // [hud 11-24] 리본 텍스처 좌표(u=0 공 쪽)
     this.trailColor = new THREE.Color('#ffffff');
     this.trail = new THREE.Mesh(tg, new THREE.ShaderMaterial({
-      uniforms: { color: { value: this.trailColor } },
-      vertexShader: 'attribute float alpha; varying float vA; void main(){ vA = alpha; gl_Position = projectionMatrix * modelViewMatrix * vec4(position,1.0); }',
-      fragmentShader: 'uniform vec3 color; varying float vA; void main(){ gl_FragColor = vec4(color * vA, vA); }',
+      uniforms: { color: { value: this.trailColor }, map: { value: imgTex(TRAIL_PNG) } },
+      vertexShader: 'attribute float alpha; varying float vA; varying vec2 vUv; void main(){ vA = alpha; vUv = uv; gl_Position = projectionMatrix * modelViewMatrix * vec4(position,1.0); }',
+      fragmentShader: 'uniform vec3 color; uniform sampler2D map; varying float vA; varying vec2 vUv; void main(){ float t = texture2D(map, vec2(vUv.x * 0.6, vUv.y)).r; float a = vA * (0.35 + 0.9 * t); gl_FragColor = vec4(color * a, a); }',
       transparent: true, depthWrite: false, blending: THREE.AdditiveBlending, side: THREE.DoubleSide,
     }));
     this.trail.frustumCulled = false;
@@ -154,7 +156,7 @@ export class FX {
       this.dpos[i * 3] = x + Math.cos(a) * 0.2; this.dpos[i * 3 + 1] = 0.15; this.dpos[i * 3 + 2] = z + Math.sin(a) * 0.2;
       this.dvel[i * 3] = Math.cos(a) * v; this.dvel[i * 3 + 1] = 0.5 + Math.random() * 0.8; this.dvel[i * 3 + 2] = Math.sin(a) * v;
       this.dlife[i] = this.dmax[i] = 0.8 + Math.random() * 0.7;
-      this.dsize[i] = 0.6 + Math.random() * 0.6;
+      this.dsize[i] = 0.75 + Math.random() * 0.7;
     }
   }
   trailPush(p, color) {
@@ -235,7 +237,7 @@ export class FX {
         t.subVectors(q, o); view.subVectors(cp, p);
         side.crossVectors(t, view).normalize();
         const k = i / (this.TN - 1);
-        const w = 0.045 * k;
+        const w = 0.06 * k; // [hud 11-24] 텍스처 가장자리가 부드러워서 폭 0.045→0.06
         this.tpos[i * 6] = p.x + side.x * w; this.tpos[i * 6 + 1] = p.y + side.y * w; this.tpos[i * 6 + 2] = p.z + side.z * w;
         this.tpos[i * 6 + 3] = p.x - side.x * w; this.tpos[i * 6 + 4] = p.y - side.y * w; this.tpos[i * 6 + 5] = p.z - side.z * w;
         const a = i < this.TN - n ? 0 : k * k * 0.85;
@@ -246,3 +248,6 @@ export class FX {
     }
   }
 }
+
+// [hud 11-24] data URI 이미지 → 텍스처 (fxtex.js)
+function imgTex(url) { const t = new THREE.TextureLoader().load(url); t.colorSpace = THREE.SRGBColorSpace; return t; }

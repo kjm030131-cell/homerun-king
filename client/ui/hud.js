@@ -125,10 +125,14 @@ export function hudFrame(c, role, f) {
 
   // 타구 정보
   const hiOn = !!(s.lh && (s.ph === 'live' || s.ph === 'result') && s.p && s.lh.id === s.p.id && s.p.res === 'hit');
-  cls('hitinfo', 'show', hiOn);
+  // [hud 11-24] 홈런이면 작은 타구 정보 대신 왼쪽에서 밀려 들어오는 홈런 패널
+  const hrOn = !!(hiOn && s.hr && s.hr.id && s.ph === 'result' && s.msg && /홈런/.test(s.msg[1]));
+  cls('hitinfo', 'show', hiOn && !hrOn);
+  cls('hrCard', 'show', hrOn);
+  if (hrOn) { setText('hrEv', s.lh.ev); setText('hrLa', s.lh.la); setText('hrD', s.hr.dist); }
   if (hiOn) {
     setText('hiEv', s.lh.ev); setText('hiLa', s.lh.la);
-    setText('hiD', s.hr && s.hr.id && s.ph === 'result' && s.msg && /홈런/.test(s.msg[1]) ? s.hr.dist : f.ballDist != null ? Math.round(f.ballDist) : '-');
+    setText('hiD', hrOn ? s.hr.dist : f.ballDist != null ? Math.round(f.ballDist) : '-');
   }
 
   // 핑 · fps (0.5초마다)
@@ -400,7 +404,7 @@ export function walkup(s, c) {
   // 오르간: 사운드 매니저(batterUp)
   clearTimeout(wuT); wuT = setTimeout(() => e.classList.remove('show'), 4000);
 }
-export function resetHUD() { slowKey = ''; prevCnt = null; prevSc = null; clubsKey = ''; $('bug')._cnt = ''; $('bigcount')._cnt = ''; }
+export function resetHUD() { cls('hrCard', 'show', false); slowKey = ''; prevCnt = null; prevSc = null; clubsKey = ''; $('bug')._cnt = ''; $('bigcount')._cnt = ''; }
 
 // [AAA] 공수 교대 카드: 중계 '이닝 종료' 그래픽 (가운데 아래, 3.2초) — 이번 이닝 득점 + 현재 스코어
 let innT = 0;
