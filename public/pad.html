@@ -52,6 +52,13 @@ h1{font-size:26px;font-weight:900;line-height:1.2}
 .mz .mzz{position:absolute;left:30px;top:20px;width:60px;height:70px;border:2px solid rgba(255,255,255,.7);border-radius:3px}
 .mz i{position:absolute;left:60px;top:55px;width:16px;height:16px;margin:-8px 0 0 -8px;border-radius:50%;background:#4fd18b;box-shadow:0 0 12px #4fd18b;transition:transform .05s linear}
 .mz span{position:absolute;left:0;right:0;bottom:-16px;text-align:center;font-size:11px;color:var(--sub);font-weight:700}
+.pm{margin-top:2px}
+.pmb{position:relative;height:16px;border-radius:8px;overflow:hidden;background:#1b2436;display:flex}
+.pmb i{height:100%}.pmb .z1{width:15%;background:#3a4558}.pmb .z2{width:36%;background:#6b5a22}.pmb .z3{width:36%;background:#1f7a4c}.pmb .z4{width:13%;background:#7a2626}
+.pmb b{position:absolute;left:0;top:0;bottom:0;width:0;background:rgba(255,255,255,.55);mix-blend-mode:screen;transition:width .05s linear}
+.pmb u{position:absolute;top:-2px;bottom:-2px;width:3px;left:0;background:#fff;box-shadow:0 0 6px #fff;display:none}
+.pml{display:grid;grid-template-columns:15% 36% 36% 13%;font-size:11px;color:var(--sub);margin-top:4px;text-align:center;font-weight:700}
+.pml .g{color:#4fd18b}.pml .r{color:#ff8a80}
 .chalbig{background:rgba(90,184,255,.16);border-color:rgba(90,184,255,.6);color:#9fd4ff;font-size:17px;padding:16px;animation:chp 1s ease-in-out infinite}
 @keyframes chp{50%{box-shadow:0 0 0 6px rgba(90,184,255,.18)}}
 .small{font-size:12px;color:var(--sub);text-align:center}
@@ -99,8 +106,10 @@ h1{font-size:26px;font-weight:900;line-height:1.2}
     <div class="grip" id="grip">
       <div class="zone"><div class="dot" id="dot"></div></div>
       <div class="big" id="gTxt" style="font-size:20px">손가락으로 끌어서 조준</div>
-      <div class="hint" id="gHint">존 위를 손가락으로 끌어 조준 → 손 떼면 고정 → 팔을 휘두르면 공이 나가 (세게 = 빠른 공, 너무 세면 제구 흔들림).</div>
+      <div class="hint" id="gHint">① 존을 손가락으로 끌어 조준 ② 손 떼면 고정 ③ 팔을 휘둘러 던지기 — 아래 막대 <b style="color:#4fd18b">초록(퍼펙트)</b> 세기로 휘두르면 빠르고 정확, 약하면 느리고 가운데로, 빨강은 제구가 흔들려</div>
     </div>
+    <div class="pm"><div class="pmb"><i class="z1"></i><i class="z2"></i><i class="z3"></i><i class="z4"></i><b id="pmV"></b><u id="pmPk"></u></div>
+      <div class="pml"><span>약함</span><span>보통</span><span class="g">퍼펙트</span><span class="r">과투구</span></div></div>
     <div class="fb" id="pFb"></div>
     <button class="btn chalbig hide" id="pChal">ABS 챌린지 신청</button>
   </main>
@@ -179,11 +188,15 @@ h1{font-size:26px;font-weight:900;line-height:1.2}
   function fb(id, txt, col, v) { const e = $(id); e.textContent = txt; e.style.color = col || '#e9f0fb'; e.classList.add('pop'); setTimeout(() => e.classList.remove('pop'), 160); clearTimeout(fbT); fbT = setTimeout(() => { e.textContent = ''; }, 2200); if (v) vib(v); }
   function onAck(m) {
     if (m.k === 'swing') { if (m.lag != null) $('spdL').textContent = (m.h ? m.h + ' · ' : '') + `지연 ${m.lag}ms`; if (m.r === 'early') fb('bFb', '투수가 던지기 전이야', '#ffb36b'); else if (m.r === 'skip') fb('bFb', '지금은 칠 공이 없어', '#8ea3bf'); else if (m.r === 'nomo') fb('bFb', '일반 모드 경기야 (키보드·마우스)', '#8ea3bf'); }
-    if (m.k === 'pitch') { if (m.r === 'ok') fb('pFb', `투구! 세기 ${m.lv}%`, m.lv > 100 ? '#ff6b6b' : m.lv >= 84 ? '#4fd18b' : '#ffcf3f', 40); else fb('pFb', '지금은 던질 수 없어', '#8ea3bf'); }
+    if (m.k === 'pitch') { if (m.r === 'ok') { const t = m.lv > 100 ? '과투구 — 너무 세서 제구가 흔들려' : m.lv >= 84 ? '퍼펙트! 빠르고 조준한 곳으로' : m.lv >= 70 ? '보통 — 조금 더 세게' : '약함 — 공이 느리고 가운데로 몰려'; fb('pFb', t, m.lv > 100 ? '#ff6b6b' : m.lv >= 84 ? '#4fd18b' : '#ffcf3f', m.lv >= 84 && m.lv <= 100 ? [40, 30, 60] : 30); } else fb('pFb', '지금은 던질 수 없어', '#8ea3bf'); }
   }
 
   // ── 센서 ──
   let ori = { b: 0, g: 0 }, burst = null, cool = 0, meterPk = 0, meterT = 0;
+  const pmPos = (r) => { const v = Math.min(2000, r); return v < 300 ? v / 300 * 15 : v < 1000 ? 15 + (v - 300) / 700 * 36 : v < 1700 ? 51 + (v - 1000) / 700 * 36 : 87 + (v - 1700) / 300 * 13; };
+  let pmPeak = 0, pmT = 0;
+  function pmLive(r) { if (st !== 'pitch') return; const n = performance.now(); if (r > pmPeak || n - pmT > 1500) { pmPeak = r; pmT = n; } $('pmV').style.width = pmPos(r) + '%'; }
+  function pmMark(pk) { const u = $('pmPk'); u.style.display = 'block'; u.style.left = pmPos(pk) + '%'; }
   function rate(e) { const r = e.rotationRate; if (!r) return 0; return Math.hypot(r.alpha || 0, r.beta || 0, r.gamma || 0); }
   function onMotion(e) {
     const r = rate(e), now = performance.now();
@@ -198,10 +211,11 @@ h1{font-size:26px;font-weight:900;line-height:1.2}
         fb('bFb', mode === 'power' ? '풀스윙!' : '스윙!', '#ffcf3f', mode === 'power' ? [30, 20, 60] : 30);
       });
       if (burst && !burst.sws && r > thr()[0] * 1.3) { burst.sws = 1; send({ t: 'sws', at: now }); } // 휘두르기 시작(정점 ~50ms 전) → PC가 배트를 미리 돌림
-    } else if (st === 'pitch' && !grip && now < gripUntil) { // [11-23] 손 떼서 조준 고정된 뒤에만 던지기 감지
+    } else if (st === 'pitch') pmLive(r);
+    if (st === 'pitch' && !grip && now < gripUntil) { // [11-23] 손 떼서 조준 고정된 뒤에만 던지기 감지
       detect(r, now, 520, 380, (b) => {
         const a = locked || cur;
-        send({ t: 'pitch', at: b.at, pk: Math.round(b.pk), x: +a[0].toFixed(3), y: +a[1].toFixed(3), type: hs.type });
+        send({ t: 'pitch', at: b.at, pk: Math.round(b.pk), x: +a[0].toFixed(3), y: +a[1].toFixed(3), type: hs.type }); pmMark(b.pk);
         endGrip(false);
       });
     } else burst = null;
@@ -246,7 +260,7 @@ h1{font-size:26px;font-weight:900;line-height:1.2}
   function startGrip(ev) { if (st !== 'pitch') return; grip = true; gripUntil = 0; locked = null; if (ev) fingerAim(ev); ref = { ...ori }; aimHist = []; $('grip').classList.add('on'); $('gTxt').textContent = '끌어서 조준 → 손 떼면 고정'; send({ t: 'grip', on: 1 }); vib(15); }
   function endGrip(cancel) {
     if (!grip && !gripUntil) return;
-    grip = false; gripUntil = 0; locked = null; $('grip').classList.remove('on'); $('gTxt').textContent = '손가락으로 끌어서 조준'; $('gHint').textContent = '존 위를 손가락으로 끌어 조준 → 손 떼면 고정 → 팔을 휘두르면 공이 나가 (세게 = 빠른 공, 너무 세면 제구 흔들림).'; $('dot').style.transform = '';
+    grip = false; gripUntil = 0; locked = null; $('grip').classList.remove('on'); $('gTxt').textContent = '손가락으로 끌어서 조준'; $('gHint').innerHTML = '① 존을 손가락으로 끌어 조준 ② 손 떼면 고정 ③ 팔을 휘둘러 던지기 — 아래 막대 <b style="color:#4fd18b">초록(퍼펙트)</b> 세기로 휘두르면 빠르고 정확, 약하면 느리고 가운데로, 빨강은 제구가 흔들려'; $('dot').style.transform = '';
     if (cancel) send({ t: 'grip', on: 0 });
   }
   function aimLoop() {
