@@ -170,7 +170,8 @@ export function createCamRig(camera, ctx) {
       snap = false;
       if (role.fi >= 0 && fielders[role.fi]) {
         const P = fielders[role.fi].p.root.position;
-        if (fcam.fi !== role.fi) { if (fcam.fi >= 0 && Math.hypot(P.x - fcam.mx, P.z - fcam.mz) > 10) snap = true; fcam.fi = role.fi; }
+        // [11-24] 멀리 바뀌어도 '컷' 대신 0.8초 동안 빠르게 미끄러지듯 (컷하면 화면이 툭 튀고 선수가 순간이동한 것처럼 보였음)
+        if (fcam.fi !== role.fi) { if (fcam.fi >= 0) fcam.swT = tp; fcam.fi = role.fi; }
         fcam.mx = P.x; fcam.mz = P.z;
       } else fcam.fi = -1;
       if (IN) {
@@ -284,7 +285,7 @@ export function createCamRig(camera, ctx) {
           const tgt = landRing.visible ? landRing.position : ballMesh.visible ? ballPos : null;
           fov = tgt ? tpsCam(me, tgt.x, ballMesh.visible ? ballPos.y : 1, tgt.z, dt, false) : tpsCam(me, 0, 1, 0, dt, false);
         }
-        k = 4.5; mode = 'field';
+        k = tp - (fcam.swT || -9) < 0.8 ? 6 : 4.5; mode = 'field';
       } else if (role.fi >= 0 && fielders[role.fi] && (ph === 'live' || (ph === 'result' && S.b))) {
         // 수비 카메라(V 중계): 홈 뒤 높은 곳에서 '공 + 내 수비수'를 같이 잡는 중계 시점. W = 외야 쪽 / S = 홈 쪽 / A·D = 화면 좌우로 항상 같음
         const me = fielders[role.fi].p.root.position;
@@ -294,7 +295,7 @@ export function createCamRig(camera, ctx) {
         const far = Math.max(cz, 10);
         tPos.set(cx * 0.3, 7 + far * 0.13 + spread * 0.12 + clamp(ballPos.y * 0.15, 0, 6), -14 + cz * 0.3 - spread * 0.15);
         tLook.set(cx, Math.max(0.5, ballMesh.visible ? Math.min(ballPos.y, 14) * 0.45 : 0.8), cz);
-        k = 3.2; mode = 'field'; fov = clamp(46 + spread * 0.25, 46, 62);
+        k = tp - (fcam.swT || -9) < 0.8 ? 5.5 : 3.2; mode = 'field'; fov = clamp(46 + spread * 0.25, 46, 62);
       } else {
         // 타구 중계: 맞은 직후엔 홈 뒤에 '고정'하고 고개만 돌려 공을 따라감 → 공이 실제 속도로 쭉 뻗어나가 보임
         const bz = ballPos.z, bx = ballPos.x, tc = tp - ctx.lastContactT, ballL = ctx.ballL, fly = ballL && ballL.state === 'air';

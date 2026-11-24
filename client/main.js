@@ -471,7 +471,16 @@ function onSnap(s) {
 let umpCall = 0, bigBoard = null, pitchFb = false;
 // ── 판정 팝업 (베이스 위 3D 글자) + 누심 동작 ──
 const calls = [];
+// [11-24] 판정 글자 텍스처 재사용: 판정마다 캔버스·텍스처를 새로 만들어 GPU 업로드(+처음엔 셰이더 컴파일)로 멈칫했음
+const callTex = new Map();
 function callSprite(text, color) {
+  const key = text + color;
+  let t = callTex.get(key);
+  if (!t) { t = callTexture(text, color); callTex.set(key, t); }
+  const sp = new THREE.Sprite(new THREE.SpriteMaterial({ map: t, depthTest: false, transparent: true }));
+  sp.renderOrder = 30; return sp;
+}
+function callTexture(text, color) {
   const c = document.createElement('canvas'); c.width = 512; c.height = 192;
   const g = c.getContext('2d');
   g.font = '900 128px Oswald, "Arial Narrow", sans-serif'; g.textAlign = 'center'; g.textBaseline = 'middle';
@@ -481,9 +490,10 @@ function callSprite(text, color) {
   g.lineWidth = 16; g.strokeStyle = 'rgba(0,0,0,.75)'; g.strokeText(text, 256, 100);
   g.fillStyle = color; g.fillText(text, 256, 100);
   const t = new THREE.CanvasTexture(c); t.colorSpace = THREE.SRGBColorSpace;
-  const sp = new THREE.Sprite(new THREE.SpriteMaterial({ map: t, depthTest: false, transparent: true }));
-  sp.renderOrder = 30; return sp;
+  return t;
 }
+// 미리 만들어 두고 숨긴 판정 글자(셰이더 미리 컴파일 대상)
+{ const c = document.createElement('canvas'); c.width = c.height = 4; const sp = new THREE.Sprite(new THREE.SpriteMaterial({ map: new THREE.CanvasTexture(c), depthTest: false, transparent: true })); sp.visible = false; scene.add(sp); } // 셰이더만 미리 (글자 텍스처는 글꼴 받은 뒤 처음 쓸 때 만들어 재사용)
 function showCall(ev) {
   const sp = callSprite(ev.out ? 'OUT' : 'SAFE', ev.out ? '#ff5050' : '#5be08f');
   sp.position.set(ev.x, 2.6, ev.z); scene.add(sp);
@@ -505,7 +515,7 @@ function updateCalls() {
     c.sp.scale.set(sc * 2.67, sc, 1);
     c.sp.position.y = 2.6 + e * 0.4;
     c.sp.material.opacity = e > 1.4 ? Math.max(0, 1 - (e - 1.4) / 0.4) : 1;
-    if (e > 1.8) { scene.remove(c.sp); c.sp.material.map.dispose(); c.sp.material.dispose(); calls.splice(i, 1); }
+    if (e > 1.8) { scene.remove(c.sp); c.sp.material.dispose(); calls.splice(i, 1); }
   }
 }
 function onContact(p, q, bunt) {
