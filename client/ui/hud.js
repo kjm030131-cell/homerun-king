@@ -232,8 +232,8 @@ export function hudFrame(c, role, f) {
   let keysL = [], tip = '', title = '';
   const runnersOn = (s.occ || []).some(Boolean);
   if (s.mo && role.batter && pitchPhase) { // [motion] 모션 경기: 핸드폰·웹캠 안내
-    title = '모션 타격'; keysL = [['휘두르기', '스윙'], ['세게', '강타'], ['낮게·높게', '공 높이 맞추기'], ['멈추기', '체크스윙'], ['V', '시점']];
-    tip = '공이 오는 순간에 휘둘러. 낮은 공은 낮게, 높은 공은 높게';
+    title = '모션 타격'; keysL = [['배트 끝 기울이기', '조준'], ['휘두르기', '스윙'], ['세게', '강타'], ['멈추기', '체크스윙'], ['V', '시점']];
+    tip = '배트 끝을 기울여 커서를 공 오는 곳에 맞추고, 공이 오는 순간 휘둘러';
   } else if (s.mo && role.pitcher && s.ph === 'pitch') {
     title = '모션 투구'; keysL = [['핸드폰 존 끌기', '조준'], ['손 떼기', '조준 고정'], ['팔 휘두르기', '투구 (세기 = 구속)']];
   } else if (role.batter && pitchPhase) {
