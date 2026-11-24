@@ -59,6 +59,8 @@ h1{font-size:26px;font-weight:900;line-height:1.2}
 .pmb u{position:absolute;top:-2px;bottom:-2px;width:3px;left:0;background:#fff;box-shadow:0 0 6px #fff;display:none}
 .pml{display:grid;grid-template-columns:15% 36% 36% 13%;font-size:11px;color:var(--sub);margin-top:4px;text-align:center;font-weight:700}
 .pml .g{color:#4fd18b}.pml .r{color:#ff8a80}
+.calfl{height:120px;border-radius:16px;background:#121a2a;transition:background .05s}
+.calfl.on{background:#4fd18b;box-shadow:0 0 40px #4fd18b}
 .chalbig{background:rgba(90,184,255,.16);border-color:rgba(90,184,255,.6);color:#9fd4ff;font-size:17px;padding:16px;animation:chp 1s ease-in-out infinite}
 @keyframes chp{50%{box-shadow:0 0 0 6px rgba(90,184,255,.18)}}
 .small{font-size:12px;color:var(--sub);text-align:center}
@@ -83,7 +85,17 @@ h1{font-size:26px;font-weight:900;line-height:1.2}
     <div class="big" id="wTxt">PC에서 경기를 시작해줘</div>
     <p class="lead" id="wSub">타석에 서거나 마운드에 오르면 이 화면이 바뀌어. 수비는 CPU가 해.</p>
     <button class="btn chalbig hide" id="wChal">ABS 챌린지 신청</button>
+    <button class="btn" id="wCal">스윙 보정하기 (30초)</button>
     <div class="sens">스윙 감도 <button class="btn" data-s="3">자동</button><button class="btn" data-s="0">둔하게</button><button class="btn" data-s="1">보통</button><button class="btn" data-s="2">민감</button></div>
+  </main>
+
+  <main id="vCal" class="hide">
+    <div class="role">보정 · 30초</div>
+    <div class="big" id="calT">타석 자세로 쥐어</div>
+    <p class="lead" id="calS">핸드폰을 배트처럼 세로로 두 손으로 쥐고 (윗부분 = 배트 끝) 타석 자세를 잡은 뒤 '다음'을 눌러.</p>
+    <div class="calfl" id="calFl"></div>
+    <div class="row"><button class="go" id="calGo">다음</button></div>
+    <button class="btn" id="calX">나중에</button>
   </main>
 
   <main id="vBat" class="hide">
@@ -117,7 +129,7 @@ h1{font-size:26px;font-weight:900;line-height:1.2}
 <script>
 (() => {
   const $ = (id) => document.getElementById(id);
-  const show = (id) => { for (const v of ['vJoin', 'vWait', 'vBat', 'vPitch']) $(v).classList.toggle('hide', v !== id); };
+  const show = (id) => { for (const v of ['vJoin', 'vWait', 'vBat', 'vPitch', 'vCal']) $(v).classList.toggle('hide', v !== id); };
   const vib = (p) => { try { navigator.vibrate && navigator.vibrate(p); } catch (e) { } };
   const LS = (k, d) => { try { const v = localStorage.getItem('hrpad_' + k); return v == null ? d : JSON.parse(v); } catch (e) { return d; } };
   const LSset = (k, v) => { try { localStorage.setItem('hrpad_' + k, JSON.stringify(v)); } catch (e) { } };
@@ -163,12 +175,13 @@ h1{font-size:26px;font-weight:900;line-height:1.2}
       if (m.t === 'ice' && m.c && pc) { pc.addIceCandidate(m.c).catch(() => { }); return; }
       if (m.t === 'peer') { setConn(!!m.host, m.host ? 'PC 연결됨' : 'PC 꺼져 있음'); if (!m.host) { setRole('wait'); rtcReset(); } else if (!direct) rtcStart(); }
       else if (m.t === 'png') { send({ t: 'pog', h: m.h, p: performance.now() }); if (!direct) setConn(true, 'PC 연결됨 (서버 경유)'); }
-      else if (m.t === 'hs') { if (!hs.st) send({ t: 'assist', v: assist }); hs = m; setRole(m.st); paintHS(); }
+      else if (m.t === 'hs') { if (!hs.st) { send({ t: 'assist', v: assist }); const po = LS('padOff', null); if (po != null) send({ t: 'cal', off: po, pk: Math.round(avgPk) }); } hs = m; setRole(m.st); paintHS(); }
       else if (m.t === 'ack') onAck(m);
       else if (m.t === 'fb') fb(m.k === 'pitch' ? 'pFb' : 'bFb', m.txt, m.col, m.vib);
     }
   }
   function setRole(r) {
+    if (cal) { st = r; return; } // 보정 중엔 화면 그대로
     if (r === st && !$('vJoin').classList.contains('hide') === false) { /* 같은 화면 */ }
     if (r === 'bat' && st !== 'bat') setTimeout(() => { if (st === 'bat' && !burst) stance = { ...ori }; }, 350); // 매 투구 시작 자세 = 가운데
     st = r; show(r === 'bat' ? 'vBat' : r === 'pitch' ? 'vPitch' : 'vWait');
@@ -201,6 +214,7 @@ h1{font-size:26px;font-weight:900;line-height:1.2}
   function onMotion(e) {
     const r = rate(e), now = performance.now();
     if (r > 0) { hasMotion = true; lastMotionT = now; }
+    if (cal && cal.step === 2) { detect(r, now, 300, 300, (b) => calSwing(b)); return; }
     if (st === 'bat') {
       if (r > meterPk || now - meterT > 900) { meterPk = r; meterT = now; paintMeter(r); }
       detect(r, now, thr()[0] * 0.6, 300, (b) => {
@@ -312,6 +326,33 @@ h1{font-size:26px;font-weight:900;line-height:1.2}
   $('bChal').onclick = $('pChal').onclick = $('wChal').onclick = () => { send({ t: 'chal' }); vib([20, 30, 20]); fb(st === 'pitch' ? 'pFb' : 'bFb', '챌린지 신청!', '#9fd4ff'); };
   $('tapSwing').onclick = () => { send({ t: 'swing', at: performance.now(), pk: 800, mode: 'contact' }); fb('bFb', '스윙!', '#ffcf3f'); };
 
+  // ── [11-24] 보정: ① 타석 자세 ② 초록으로 번쩍이면 휘두르기 ×3 → '맞혔다고 느끼는 순간'과 각속도 정점의 차이 + 내 스윙 세기 ──
+  let cal = null;
+  function calStart() { cal = { step: 1, tries: [], pks: [] }; show('vCal'); $('calT').textContent = '타석 자세로 쥐어'; $('calS').textContent = "핸드폰을 배트처럼 세로로 두 손으로 쥐고 (윗부분 = 배트 끝) 타석 자세를 잡은 뒤 '다음'을 눌러."; $('calGo').classList.remove('hide'); }
+  function calFlash() {
+    if (!cal) return;
+    $('calT').textContent = `초록으로 번쩍이면 휘둘러! (${cal.tries.length + 1}/3)`; $('calS').textContent = '공을 친다고 생각하고, 번쩍이는 순간 배트가 공에 닿게.';
+    const d = 1400 + Math.random() * 1600;
+    cal.timer = setTimeout(() => { if (!cal) return; cal.flashAt = performance.now(); $('calFl').classList.add('on'); vib(20); setTimeout(() => $('calFl').classList.remove('on'), 140); cal.wait = setTimeout(() => { if (cal && cal.flashAt) { cal.flashAt = 0; $('calS').textContent = '못 잡았어 — 조금 더 세게 휘둘러봐'; setTimeout(calFlash, 900); } }, 1500); }, d);
+  }
+  function calSwing(b) {
+    if (!cal || cal.step !== 2 || !cal.flashAt) return;
+    const off = b.at - cal.flashAt; cal.flashAt = 0; clearTimeout(cal.wait);
+    if (off < -350 || off > 600) { $('calS').textContent = '타이밍이 너무 달라 — 다시'; setTimeout(calFlash, 900); return; }
+    cal.tries.push(off); cal.pks.push(b.pk); vib(30);
+    if (cal.tries.length < 3) { $('calS').textContent = `좋아! ${Math.round(off)}ms`; setTimeout(calFlash, 1000); return; }
+    const t = cal.tries.slice().sort((a, c) => a - c)[1], pk = cal.pks.reduce((a, c) => a + c, 0) / cal.pks.length;
+    avgPk = pk; LSset('avgPk', Math.round(pk)); LSset('padOff', Math.round(t)); send({ t: 'cal', off: Math.round(t), pk: Math.round(pk) });
+    cal.step = 3; $('calT').textContent = '보정 끝!'; $('calS').textContent = `타이밍 ${t >= 0 ? '+' : ''}${Math.round(t)}ms · 스윙 세기 ${Math.round(pk)}°/s 기준으로 맞췄어.`; $('calGo').textContent = '확인'; $('calGo').classList.remove('hide');
+  }
+  $('calGo').onclick = () => {
+    if (!cal) return;
+    if (cal.step === 1) { stance = { ...ori }; cal.step = 2; $('calGo').classList.add('hide'); calFlash(); }
+    else if (cal.step === 3) { cal = null; $('calGo').textContent = '다음'; setRole(st); show(st === 'bat' ? 'vBat' : st === 'pitch' ? 'vPitch' : 'vWait'); }
+  };
+  $('calX').onclick = () => { if (cal) { clearTimeout(cal.timer); clearTimeout(cal.wait); } cal = null; LSset('calSkip', 1); show(st === 'bat' ? 'vBat' : st === 'pitch' ? 'vPitch' : 'vWait'); };
+  $('wCal').onclick = () => calStart();
+
   // ── 시작: iOS는 버튼을 눌러야 센서 권한을 물어볼 수 있음 ──
   $('start').onclick = async () => {
     code = $('code').value.toUpperCase().replace(/[^A-Z0-9]/g, '');
@@ -324,6 +365,7 @@ h1{font-size:26px;font-weight:900;line-height:1.2}
     try { navigator.wakeLock && (await navigator.wakeLock.request('screen')); } catch (x) { }
     document.addEventListener('visibilitychange', async () => { if (!document.hidden) try { navigator.wakeLock && (await navigator.wakeLock.request('screen')); } catch (x) { } });
     setRole('wait'); connect(); aimLoop();
+    if (!LS('padOff', null) && !LS('calSkip', 0)) setTimeout(calStart, 600); // 처음이면 보정부터
   };
   if (code0.length === 6) $('start').focus();
 })();
