@@ -218,8 +218,12 @@ export function createMotion(api) {
   const bq = [0, 0, 0, 1];
   M.batQ = () => {
     const q = M.oriQ; if (!q || performance.now() - M.oriT > 250) return null;
+    // 기준 자세에서 많이 돌아간 상태(스윙 뒤 팔로스루 등)면 몸 연동을 서서히 끄고 기본 자세로 — 60°부터 줄여 100°면 0
+    const ang = 2 * Math.acos(Math.min(1, Math.abs(q[3]))), fade = Math.max(0, Math.min(1, (1.75 - ang) / 0.7));
+    if (fade <= 0.01 || performance.now() < (M.curFreeze || 0)) { bq[0] = bq[1] = bq[2] = 0; bq[3] = 1; return null; }
     let d = bq[0] * q[0] + bq[1] * q[1] + bq[2] * q[2] + bq[3] * q[3]; const sg = d < 0 ? -1 : 1;
-    for (let i = 0; i < 4; i++) bq[i] += (q[i] * sg - bq[i]) * 0.55;
+    const tq = fade < 1 ? [q[0] * sg * fade, q[1] * sg * fade, q[2] * sg * fade, 1 - (1 - Math.abs(q[3])) * fade] : [q[0] * sg, q[1] * sg, q[2] * sg, q[3] * sg];
+    for (let i = 0; i < 4; i++) bq[i] += (tq[i] - bq[i]) * 0.55;
     const n = Math.hypot(bq[0], bq[1], bq[2], bq[3]) || 1; for (let i = 0; i < 4; i++) bq[i] /= n;
     return bq;
   };
