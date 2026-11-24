@@ -94,7 +94,7 @@ export function createMotion(api) {
 
   // ── 핸드폰 ──
   function onPad(m) {
-    if (m.t === 'ori') { M.ori = [+m.b || 0, +m.g || 0]; if (!(performance.now() < M.curFreeze)) M.curRaw = [M.ori[1], M.ori[0]]; M.oriQ = Array.isArray(m.q) && m.q.length === 4 ? m.q.map(Number) : null; M.oriT = performance.now(); }
+    if (m.t === 'ori') { M.ori = [+m.b || 0, +m.g || 0]; if (!(performance.now() < M.curFreeze)) M.curRaw = isFinite(m.cx) ? [m.cx * 22, m.cy * 22] : [M.ori[1], M.ori[0]]; /* 새 핸드폰 페이지는 배트 끝 방향으로 계산한 조준값(cx,cy)을 보냄 */ M.oriQ = Array.isArray(m.q) && m.q.length === 4 ? m.q.map(Number) : null; M.oriT = performance.now(); }
     else if (m.t === 'chk') { const S = api.S(), role = api.role(); if (S && S.mo && role.batter && S.ph === 'pitching' && S.p && api.simNow() > S.p.t0 && api.net()) { api.net().send({ t: 'chk' }); api.toast('체크스윙'); } }
     else if (m.t === 'sws') { // 휘두르기 시작: 정점(=임팩트)은 보통 시작 뒤 ~60ms → 그 시각으로 화면 스윙만 먼저
       const S = api.S(), role = api.role();

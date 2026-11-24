@@ -87,8 +87,8 @@ h1{font-size:26px;font-weight:900;line-height:1.2}
     <div class="fb" id="bFb"></div>
     <div class="row"><button class="btn" id="bBunt">번트</button><button class="btn" id="bChal" disabled>ABS 챌린지</button></div>
     <div class="row"><button class="btn" data-g="1">직구 노림</button><button class="btn" data-g="2">변화구</button><button class="btn" data-g="3">오프스피드</button></div>
-    <div class="row"><button class="btn" id="bStance">타석 자세 맞추기</button></div>
-    <p class="small">핸드폰 윗부분이 배트 끝 쪽이 되게 두 손으로 쥐어. 낮은 공은 낮게, 높은 공은 높게 휘둘러야 정타.</p>
+    <div class="row"><button class="btn" id="bStance">자세 맞추기</button><button class="btn" id="bFlipY">위아래 반대</button><button class="btn" id="bFlipX">좌우 반대</button></div>
+    <p class="small">핸드폰을 배트처럼 세로로 쥐어 (윗부분 = 배트 끝). 배트 끝을 좌우·앞뒤로 기울여 초록 점을 공 오는 곳에 맞추고 휘둘러. 반대로 움직이면 '반대' 버튼.</p>
     <button class="btn hide" id="tapSwing">탭으로 스윙 (센서 없음)</button>
   </main>
 
@@ -160,6 +160,7 @@ h1{font-size:26px;font-weight:900;line-height:1.2}
   }
   function setRole(r) {
     if (r === st && !$('vJoin').classList.contains('hide') === false) { /* 같은 화면 */ }
+    if (r === 'bat' && st !== 'bat') setTimeout(() => { if (st === 'bat' && !burst) stance = { ...ori }; }, 350); // 매 투구 시작 자세 = 가운데
     st = r; show(r === 'bat' ? 'vBat' : r === 'pitch' ? 'vPitch' : 'vWait');
     if (r === 'nomo') { $('wRole').textContent = '일반 모드'; $('wTxt').textContent = '이 경기는 키보드·마우스로 해'; $('wSub').textContent = '핸드폰으로 하려면 PC에서 "모션 플레이"로 시작하거나 방 만들 때 조작 방식을 모션으로 골라줘.'; }
     else if (r === 'wait') { $('wRole').textContent = '대기'; $('wTxt').textContent = hs.st === 'wait' && hs.ph ? '수비 중 · CPU가 수비해' : 'PC에서 경기를 시작해줘'; $('wSub').textContent = '타석에 서거나 마운드에 오르면 이 화면이 바뀌어. 수비는 CPU가 해.'; }
@@ -224,11 +225,17 @@ h1{font-size:26px;font-weight:900;line-height:1.2}
     return [sx * cy * cz - cx * sy * sz, cx * sy * cz + sx * cy * sz, cx * cy * sz + sx * sy * cz, cx * cy * cz - sx * sy * sz]; }
   function qmul(a, b) { return [a[3] * b[0] + a[0] * b[3] + a[1] * b[2] - a[2] * b[1], a[3] * b[1] - a[0] * b[2] + a[1] * b[3] + a[2] * b[0], a[3] * b[2] + a[0] * b[1] - a[1] * b[0] + a[2] * b[3], a[3] * b[3] - a[0] * b[0] - a[1] * b[1] - a[2] * b[2]]; }
   const qinv = (q) => [-q[0], -q[1], -q[2], q[3]];
+  const qrot = (q, v) => { const p = qmul(qmul(q, [v[0], v[1], v[2], 0]), qinv(q)); return [p[0], p[1], p[2]]; };
+  // [11-24] 배트처럼 세로로 쥔 핸드폰: 기울기(오일러 각)는 세웠을 때 꼬임 → 3D 회전으로 '배트 끝(핸드폰 윗부분)'이 기울어진 쪽을 계산
+  //  타석 자세 기준: 끝이 좌우(x)로 간 만큼 → 커서 좌우, 앞뒤(z)로 간 만큼 → 커서 위아래. 22°면 존 끝
+  let flipX = LS('flipX', false), flipY = LS('flipY', false);
+  const S22 = Math.sin(22 * Math.PI / 180);
+  function batAim(qr) { const d = qrot(qr, [0, 1, 0]); const cx = Math.max(-1.7, Math.min(1.7, d[0] / S22)) * (flipX ? -1 : 1), cy = Math.max(-1.7, Math.min(1.7, d[2] / S22)) * (flipY ? -1 : 1); return [cx, cy]; }
   // [실시간 배트] 타석에선 1초에 30번 '타석 자세 기준' 기울기를 보냄 → PC 배트가 따라 움직임
   let stance = null, oriT = 0;
   function resetStance() { stance = { ...ori }; fb('bFb', '자세 맞춤!', '#4fd18b', 20); }
-  setInterval(() => { if (st !== 'bat' || !hasOri) return; if (!stance) stance = { ...ori }; const qr = qmul(qinv(quat(stance)), quat(ori));
-    { const cx = Math.max(-1.7, Math.min(1.7, (ori.g - stance.g) / 22)), cy = Math.max(-1.7, Math.min(1.7, (ori.b - stance.b) / 22)); if (!burst) $('mzDot').style.transform = `translate(${cx * 30}px,${-cy * 35}px)`; } /* 핸드폰에도 조준점 */ send({ t: 'ori', b: +(ori.b - stance.b).toFixed(1), g: +(ori.g - stance.g).toFixed(1), q: qr.map((v) => +v.toFixed(4)) }); }, 33); // [위 방식] 타석 자세 기준 3D 회전 전체
+  setInterval(() => { if (st !== 'bat' || !hasOri) return; if (!stance) stance = { ...ori }; const qr = qmul(qinv(quat(stance)), quat(ori)); const [cx, cy] = batAim(qr);
+    if (!burst) $('mzDot').style.transform = `translate(${cx * 30}px,${-cy * 35}px)`; /* 핸드폰에도 조준점 */ send({ t: 'ori', b: +(ori.b - stance.b).toFixed(1), g: +(ori.g - stance.g).toFixed(1), q: qr.map((v) => +v.toFixed(4)), cx: +cx.toFixed(3), cy: +cy.toFixed(3) }); }, 33); // [위 방식] 타석 자세 기준 3D 회전 전체
   let hasOri = false; addEventListener('deviceorientation', (e) => { if (e.beta != null) hasOri = true; });
 
   // ── 투구: 누르고 기울여 조준 → 손 떼면 조준 고정 → 휘둘러 던지기 ──
@@ -280,6 +287,10 @@ h1{font-size:26px;font-weight:900;line-height:1.2}
   function paintSens() { document.querySelectorAll('[data-s]').forEach((b) => b.classList.toggle('on', +b.dataset.s === sens)); }
   paintSens();
   $('bStance').onclick = () => resetStance();
+  const paintFlip = () => { $('bFlipX').classList.toggle('on', flipX); $('bFlipY').classList.toggle('on', flipY); };
+  $('bFlipX').onclick = () => { flipX = !flipX; LSset('flipX', flipX); paintFlip(); };
+  $('bFlipY').onclick = () => { flipY = !flipY; LSset('flipY', flipY); paintFlip(); };
+  paintFlip();
   $('bBunt').onclick = () => { send({ t: 'bunt' }); vib(10); };
   $('bChal').onclick = $('pChal').onclick = $('wChal').onclick = () => { send({ t: 'chal' }); vib([20, 30, 20]); fb(st === 'pitch' ? 'pFb' : 'bFb', '챌린지 신청!', '#9fd4ff'); };
   $('tapSwing').onclick = () => { send({ t: 'swing', at: performance.now(), pk: 800, mode: 'contact' }); fb('bFb', '스윙!', '#ffcf3f'); };
