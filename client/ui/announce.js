@@ -10,6 +10,7 @@ let bannerT = 0, bannerAt = 0, bannerBig = false, flushT = 0;
 const bannerQ = [];
 export function banner(text, big, hr) {
   const now = performance.now();
+  if (!hr && $('absRev') && $('absRev').classList.contains('show')) return; // [11-24] ABS 판독 중엔 가운데 배너 안 띄움 (판독 장면을 가렸음)
   if (!hr && !(big && !bannerBig) && now - bannerAt < MIN_MS && $('banner').classList.contains('show')) {
     if (bannerQ.length > 2) bannerQ.shift();
     bannerQ.push([text, big, hr]);

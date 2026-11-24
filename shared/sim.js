@@ -698,7 +698,7 @@ export class Game {
     if (!over) this.chalLeft[c.team] = Math.max(0, (this.chalLeft[c.team] || 0) - 1); // 실패하면 1개 잃음 (성공하면 유지)
     this.absEv = { id: ++this.seq, pid: c.pid, x: c.x, y: c.y, z: c.z, s: c.truth ? 1 : 0, c: c.call ? 1 : 0, abs: 1, rev: 1, over: over ? 1 : 0, by: p.name };
     this.ev('absReview', { pid: c.pid, call: c.call ? 1 : 0, truth: c.truth ? 1 : 0, over: over ? 1 : 0, team: c.team, by: p.name, left: this.chalLeft[c.team], x: c.x, y: c.y, z: c.z });
-    this.say(`${p.name} ABS 챌린지!`, true);
+    this.say(`${p.name} ABS 챌린지!`, false); // [11-24] 큰 배너가 판독 장면을 오래 가렸음 → 작게 (판독 화면에 ABS CHALLENGE 제목이 따로 있음)
     this.pause(5.2, 'chalDone');
   }
   // [ABS] 지금 타자의 존: 리얼 = KBO ABS(키 비례), 캐주얼(R.abs === false) = 기존 넓은 존
