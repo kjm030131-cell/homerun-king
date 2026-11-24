@@ -59,6 +59,8 @@ export function createUI(ctx) {
     clearInterval(roomsIv);
     if (sc === 'lobby' && !OFFLINE) { loadRooms(); roomsIv = setInterval(() => { if (!document.hidden) loadRooms(true); }, 6000); }
     if (sc !== 'game' && sc !== 'over') { closeModal('menuM'); show('tab', false); clearBanner(); resetHUD(); }
+    if (sc === 'title' && prev && prev !== 'title') $('title').classList.add('open'); // 로비·모드에서 돌아오면 닉네임 패널 바로
+    if (sc === 'modes') setTimeout(() => { const c = document.querySelector('#modes .mode.cur') || document.querySelector('#modes .mode'); c && c.focus({ preventScroll: true }); }, 60);
     ctx.onScreen(sc);
     bus.emit('ui:screen', { name: sc }); // [ui] 사운드 파트용
   }
@@ -100,7 +102,17 @@ export function createUI(ctx) {
     if (urlRoom && !OFFLINE && /^[A-Z0-9]{4}$/i.test(urlRoom)) { setScreen('lobby'); tryJoin(urlRoom.toUpperCase()); return; } // 초대 링크로 왔으면 바로 그 방
     setScreen('modes');
   };
-  $('nick').onkeydown = (e) => { e.stopPropagation(); if (e.key === 'Enter') $('bPlay').click(); };
+  $('nick').onkeydown = (e) => { e.stopPropagation(); if (e.key === 'Enter') $('bPlay').click(); if (e.key === 'Escape') closeTitle(); };
+  // [ui 11-24] 콘솔식 타이틀: 처음엔 로고 + PRESS ANY KEY만, 아무 키·클릭 → 닉네임 패널 (이름 있으면 플레이 버튼에 포커스 → Enter 한 번)
+  function openTitle() {
+    const t = $('title'); if (t.classList.contains('open')) return;
+    t.classList.add('open'); ctx.unlockAudio();
+    setTimeout(() => { $('nick').value.trim() ? $('bPlay').focus() : $('nick').focus(); }, 30);
+  }
+  function closeTitle() { $('title').classList.remove('open'); document.activeElement && document.activeElement.blur(); }
+  ui.openTitle = openTitle;
+  $('title').addEventListener('pointerdown', (e) => { if (!$('title').classList.contains('open') && !e.target.closest('button,input')) { e.preventDefault(); openTitle(); } });
+  if (urlRoom && !OFFLINE) requestAnimationFrame(openTitle);
   for (const id of ['bSettings', 'lbSettings']) $(id).onclick = openSettings;
   for (const id of ['bHelp', 'lbHelp']) $(id).onclick = () => openModal('helpM');
   // [motion] 모션 컨트롤 창: 메뉴에서 열면 연결 설정만, '모션 플레이'로 열면 경기 설정 + 플레이 볼
@@ -329,7 +341,15 @@ export function createUI(ctx) {
       for (const id of ['helpM', 'setM', 'clubM', 'pwM', 'soloM', 'createM']) if (isShown(id)) { closeModal(id); return true; }
       if (screen === 'game' || screen === 'over') { isShown('menuM') ? closeModal('menuM') : openMenu(); return true; }
       if (screen === 'modes') { setScreen('title'); return true; }
+      if (screen === 'lobby') { setScreen('modes'); return true; }
+      if (screen === 'title' && $('title').classList.contains('open')) { closeTitle(); return true; }
       return false;
+    }
+    if (screen === 'title' && !$('title').classList.contains('open') && !e.metaKey && !e.ctrlKey && !e.altKey) { e.preventDefault(); openTitle(); return true; }
+    if (screen === 'modes' && (e.key === 'ArrowLeft' || e.key === 'ArrowRight' || e.key === 'ArrowUp' || e.key === 'ArrowDown')) {
+      const cards = [...document.querySelectorAll('#modes .mode')]; const i = cards.indexOf(document.activeElement);
+      const d = e.key === 'ArrowLeft' || e.key === 'ArrowUp' ? -1 : 1;
+      cards[i < 0 ? 0 : (i + d + cards.length) % cards.length].focus(); e.preventDefault(); return true;
     }
     if (screen !== 'game' && screen !== 'over') return false;
     if (e.key === 'Enter') { openChat(); e.preventDefault(); return true; }

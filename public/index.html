@@ -4,11 +4,12 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no,viewport-fit=cover">
 <meta name="theme-color" content="#0c1736">
-<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 64'%3E%3Ccircle cx='32' cy='32' r='30' fill='%23f3f4ee'/%3E%3Cpath d='M14 12c8 10 8 30 0 40M50 12c-8 10-8 30 0 40' stroke='%23e5363a' stroke-width='3' fill='none'/%3E%3C/svg%3E">
-<title>홈런왕</title>
+<link rel="icon" type="image/png" href="./assets/ui/logo64.png">
+<title>WALK-OFF · 끝내기</title>
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-<link href="https://fonts.googleapis.com/css2?family=Barlow+Condensed:ital,wght@0,600;0,700;0,800;1,700;1,800&family=Black+Han+Sans&family=Noto+Sans+KR:wght@400;500;700;900&family=Oswald:wght@500;600;700&display=swap" rel="stylesheet">
+<link href="https://fonts.googleapis.com/css2?family=Big+Shoulders+Display:ital,wght@0,700;0,800;0,900;1,800;1,900&family=Barlow+Condensed:ital,wght@0,600;0,700;0,800;1,700;1,800&family=Black+Han+Sans&family=Noto+Sans+KR:wght@400;500;700;900&family=Oswald:wght@500;600;700&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/gh/orioncactus/pretendard@v1.3.9/dist/web/variable/pretendardvariable-dynamic-subset.min.css">
 <style>
 /* ═══ 홈런왕 UI — 스포츠 중계 그래픽 ═══
    색: 중계 남색(ink) · 파울라인 분필(chalk) · 전광판 전구(bulb) · 공 실밥(seam) · 잔디(turf)
@@ -766,6 +767,125 @@ body{word-break:keep-all}
 
 /* [11-24] "어떤 야구 할래?"가 가운데 사선에 걸려 잘려 보이던 것 → 알약 바탕 */
 #modes .mhead{padding:8px 20px;border-radius:999px;background:rgba(8,14,30,.82);backdrop-filter:blur(8px);-webkit-backdrop-filter:blur(8px);border:1px solid rgba(255,255,255,.14);color:#f3f1ea;box-shadow:0 8px 24px -10px rgba(0,0,0,.6);z-index:5;white-space:nowrap}
+/* ═══ [11-24] WALK-OFF 홈화면 개편 ═══
+   방향: 'KBO판 더쇼' — 실사 사진 + 평평한 중계 그래픽. 글로우·유리·과한 그라데이션 없이.
+   브랜드: 영문 워드마크 WALK-OFF(Big Shoulders Display) + 한글 '끝내기'(Pretendard). 남색·분필·골드 한 가지 포인트.
+   이미지: public/assets/ui/ (원본은 assets-src/ui/, GPT 생성) — home_bg 메인 배경, cut_* 선수 컷아웃, mode_* 모드 카드, act_* 로비 카드, menu_bg 메뉴 배경, loading 대기실 배경 */
+:root{--gold:#c9a227;--brand:'Big Shoulders Display','Barlow Condensed','Oswald',sans-serif;--kr:'Pretendard Variable','Pretendard','Noto Sans KR',system-ui,sans-serif}
+.ico{width:20px;height:20px;flex:none;fill:none;stroke:currentColor;stroke-width:1.75;stroke-linecap:round;stroke-linejoin:round}
+
+/* 워드마크 */
+.wm{font-family:var(--brand);font-weight:900;font-style:italic;text-transform:uppercase;letter-spacing:-.01em;line-height:.82;color:var(--chalk)}
+.wm i{font-style:inherit;color:var(--gold);margin:0 .02em}
+
+/* ── 타이틀 ── */
+#title{display:block;padding:0;overflow:hidden;background:#071025}
+#title .t-bg{position:absolute;inset:0;background:url(./assets/ui/home_bg.jpg) 62% 50%/cover no-repeat;transform:scale(1.04);transition:transform 12s ease-out}
+#title.enter .t-bg{animation:tBg 14s ease-out both}
+@keyframes tBg{from{transform:scale(1.1)}to{transform:scale(1.02)}}
+#title:before{content:'';position:absolute;inset:0;z-index:1;background:linear-gradient(90deg,rgba(7,16,37,.96) 0%,rgba(7,16,37,.86) 30%,rgba(7,16,37,.35) 55%,rgba(7,16,37,0) 72%),linear-gradient(0deg,rgba(7,16,37,.92) 0%,rgba(7,16,37,0) 38%)}
+#title .t-hero{position:absolute;z-index:2;right:max(2vw,calc(50% - 760px));bottom:0;height:min(94vh,1180px);width:auto;max-width:56vw;object-fit:contain;object-position:bottom right;filter:drop-shadow(-24px 0 40px rgba(0,0,0,.45));pointer-events:none}
+#title.enter .t-hero{animation:heroIn 1s var(--ease) .1s both}
+@keyframes heroIn{from{opacity:0;transform:translateX(50px)}to{opacity:1;transform:none}}
+#title .tbox{position:absolute;z-index:3;left:max(28px,5vw);bottom:max(40px,9vh);width:min(560px,calc(100% - 56px));padding:0}
+#title .brand{display:flex;align-items:center;gap:clamp(14px,1.6vw,24px);margin-bottom:34px}
+#title .brand-em{width:clamp(78px,8.5vw,128px);height:auto;flex:none}
+#title .logo{all:unset;display:block;font-family:var(--brand);font-weight:900;font-style:italic;text-transform:uppercase;font-size:clamp(76px,9.6vw,148px);line-height:.8;letter-spacing:-.015em;color:var(--chalk);white-space:nowrap}
+#title .logo i{font-style:inherit;color:var(--gold);margin:0 .015em}
+#title.enter .logo{animation:logoIn .9s var(--ease) both}
+#title .logo-kr{display:flex;align-items:center;gap:12px;margin-top:12px;font-family:var(--kr);font-weight:800;font-size:clamp(15px,1.3vw,19px);letter-spacing:.55em;color:#d9deea}
+#title .logo-kr:before{content:'';width:34px;height:2px;background:var(--gold)}
+#title .tsub{font-family:var(--kr);color:#c3cadb;font-size:16px;line-height:1.7;margin:0 0 26px;max-width:30em;word-break:keep-all}
+#title .lbl{font-family:var(--kr);letter-spacing:.02em}
+#title .nickrow{max-width:470px}
+#title .nickrow .inp{font-family:var(--kr);border-radius:2px 0 0 2px;background:rgba(7,16,37,.72);border-color:rgba(255,255,255,.22);font-size:17px;padding:15px 16px}
+#title .nickrow .inp:focus{border-color:var(--gold)}
+#title .nickrow .go{margin-left:0;clip-path:none;border-radius:0 2px 2px 0;background:var(--chalk);color:#071025;font-family:var(--kr);font-weight:900;letter-spacing:.04em;padding:0 34px}
+#title .nickrow .go:hover{filter:none;background:#fff;box-shadow:inset 0 -3px 0 var(--gold)}
+#title .tlinks{gap:22px}
+#title .tlink{display:inline-flex;align-items:center;gap:7px;font-family:var(--kr);font-weight:700;color:#aab3c8}
+#title .tlink .ico{width:17px;height:17px}
+#title .tlink:hover{color:var(--chalk)}
+#title .ver{z-index:3;font-family:var(--brand);font-weight:700;font-size:14px;letter-spacing:.18em;color:rgba(243,244,238,.5)}
+#title .ver b{color:var(--gold);font-weight:800}
+@media (max-width:760px){
+  #title .t-hero{max-width:none;height:62vh;right:-12vw;opacity:.35}
+  #title .tbox{bottom:max(24px,5vh)}
+  #title .brand-em{display:none}
+  #title .logo{font-size:16vw}
+  #title .ver{top:max(16px,env(safe-area-inset-top));bottom:auto;font-size:11px;letter-spacing:.12em}
+}
+
+/* ── 모드 선택: 사진 카드 두 장 ── */
+#modes{display:flex;flex-direction:column;align-items:center;justify-content:center;gap:26px;padding:72px max(24px,4vw) 40px;overflow:auto;background:linear-gradient(0deg,rgba(7,16,37,.94),rgba(7,16,37,.72)),url(./assets/ui/menu_bg.jpg) center/cover no-repeat}
+#modes .foul{display:none}
+#modes .mhead{all:unset;display:flex;flex-direction:column;align-items:center;gap:6px;font-family:var(--kr);font-weight:800;font-size:clamp(24px,2.4vw,34px);letter-spacing:-.01em;color:var(--chalk);text-align:center}
+#modes .mhead small{font-family:var(--brand);font-weight:800;font-style:italic;font-size:15px;letter-spacing:.3em;color:var(--gold)}
+#modes .mcards{display:grid;grid-template-columns:repeat(2,minmax(0,420px));gap:22px;width:100%;justify-content:center}
+#modes .mode{all:unset;box-sizing:border-box;position:relative;display:flex;flex-direction:column;justify-content:flex-end;min-height:min(64vh,620px);border-radius:4px;overflow:hidden;cursor:pointer;background:#0b1630;color:var(--chalk);box-shadow:0 30px 60px -30px rgba(0,0,0,.8);outline:1px solid rgba(255,255,255,.1);outline-offset:-1px;transition:transform .35s var(--ease),outline-color .2s}
+#modes .mode:focus-visible{outline:2px solid var(--gold)}
+#modes .mode .mph{position:absolute;inset:0;width:100%;height:100%;object-fit:cover;object-position:50% 22%;transition:transform .8s var(--ease)}
+#modes .mode:after{content:'';position:absolute;inset:0;background:linear-gradient(0deg,rgba(7,16,37,.98) 0%,rgba(7,16,37,.9) 34%,rgba(7,16,37,.15) 70%,rgba(7,16,37,0))}
+#modes .mode .mbody{position:relative;z-index:1;display:flex;flex-direction:column;align-items:flex-start;padding:28px 30px 30px}
+#modes .mode .mbody:before{content:'';width:44px;height:3px;margin-bottom:16px;background:var(--chalk)}
+#modes .mode.casual .mbody:before{background:var(--gold)}
+#modes .mode .mt{margin-bottom:22px;display:flex;align-items:baseline;gap:14px;font-family:var(--brand);font-weight:900;font-style:italic;font-size:clamp(48px,4.4vw,70px);line-height:.85;letter-spacing:-.01em;text-transform:uppercase}
+#modes .mode .mt small{display:inline;white-space:nowrap;font-family:var(--kr);font-style:normal;font-weight:700;font-size:15px;letter-spacing:.04em;margin:0;opacity:.75}
+#modes .mode p{font-family:var(--kr);font-size:15px;line-height:1.65;margin:14px 0 12px;max-width:none;opacity:.88;word-break:keep-all}
+#modes .mode ul{list-style:none;display:flex;flex-direction:column;gap:6px;font-family:var(--kr);font-size:13.5px;font-weight:500;margin:0 0 22px;color:#b8c1d6}
+#modes .mode li{padding-left:16px;position:relative}
+#modes .mode li:before{content:'';position:absolute;left:0;top:.66em;width:8px;height:2px;background:currentColor;opacity:.7}
+#modes .mode .pick{display:inline-flex;align-items:center;gap:10px;clip-path:none;border-radius:2px;padding:12px 26px;font-family:var(--kr);font-weight:900;font-size:15px;background:var(--chalk);color:#071025;transition:transform .35s var(--ease)}
+#modes .mode.casual .pick{background:var(--gold);color:#071025}
+#modes .mode.cur .pick:after{content:'지난번 선택';font-size:12px;font-weight:700;margin-left:2px;opacity:.6}
+#modes .mode:hover{transform:translateY(-6px);outline-color:rgba(255,255,255,.28);filter:none}
+#modes .mode:hover .mph{transform:scale(1.05)}
+#modes .mode:hover .mt,#modes .mode:hover .pick{transform:none}
+#modes.enter .mode.real,#modes.enter .mode.casual{animation:rise .6s var(--ease) both}
+#modes.enter .mode.casual{animation-delay:.07s}
+#modes.enter .mhead{animation:fadeIn .5s ease both}
+#mBack{display:inline-flex;align-items:center;gap:6px}
+@media (max-width:760px){
+  #modes{justify-content:flex-start}
+  #modes .mcards{grid-template-columns:1fr}
+  #modes .mode{min-height:300px}
+  #modes .mode .mph{object-position:50% 18%}
+  #modes .mode p{display:block}
+  #modes .mode ul{display:none}
+}
+
+/* ── 로비: 메뉴 배경 + 카드마다 사진 ── */
+#lobby{background:linear-gradient(90deg,rgba(7,16,37,.94),rgba(7,16,37,.72)),url(./assets/ui/menu_bg.jpg) center/cover no-repeat}
+#lobby .topbar .mini.wm{font-family:var(--brand);font-size:34px;margin-right:10px}
+#lobby .chip .ico{width:16px;height:16px}
+#lobby .act{position:relative;overflow:hidden;isolation:isolate}
+#lobby .act:before{content:'';position:absolute;z-index:-1;top:0;right:0;bottom:0;left:auto;width:50%;background:var(--ph) 50% 22%/cover no-repeat;-webkit-mask-image:linear-gradient(90deg,transparent,#000 75%);mask-image:linear-gradient(90deg,transparent,#000 75%);opacity:.5;transition:opacity .3s,transform .6s var(--ease)}
+#lobby .act:hover:before{width:50%;opacity:.8;transform:scale(1.04)}
+#lobby .act .aic{width:30px;height:30px;fill:none;stroke:currentColor;stroke-width:1.6;stroke-linecap:round;stroke-linejoin:round}
+#lobby .act b{font-family:var(--kr);font-weight:800;letter-spacing:-.02em}
+#lobby .act span{font-family:var(--kr)}
+#bSolo{--ph:url(./assets/ui/act_solo.jpg)}
+#bMotionPlay{--ph:url(./assets/ui/act_motion.jpg)}
+#bCreate{--ph:url(./assets/ui/act_room.jpg)}
+#lobby .act.motion b:after{background:var(--gold);color:#071025}
+
+/* ── 대기실 배경 ── */
+#room{background:linear-gradient(90deg,rgba(7,16,37,.92),rgba(7,16,37,.84)),url(./assets/ui/loading.jpg) right center/cover no-repeat}
+
+/* ── 경기 시작 띠 도장 ── */
+#wipe .stamp small{font-family:var(--brand);font-style:italic;font-weight:900;font-size:22px;letter-spacing:.24em;color:var(--gold)}
+/* ── 콘솔식: PRESS ANY KEY → 로그인 패널, 키 안내 바 ── */
+#title .t-press{font-family:var(--brand);font-weight:800;font-size:clamp(18px,1.6vw,24px);letter-spacing:.42em;color:var(--chalk);animation:tPress 2.2s ease-in-out infinite}
+@keyframes tPress{0%,100%{opacity:.35}50%{opacity:1}}
+#title .t-login{display:none}
+#title.open .t-press{display:none}
+#title.open .t-login{display:block;animation:rise .45s var(--ease) both}
+#title:not(.open){cursor:pointer}
+.keybar{position:absolute;left:50%;bottom:max(16px,env(safe-area-inset-bottom));transform:translateX(-50%);display:flex;gap:26px;font-family:var(--kr);font-size:13px;font-weight:600;color:#9aa5bd;white-space:nowrap}
+.keybar span{display:inline-flex;align-items:center;gap:7px}
+.keybar .k{font-style:normal;font-family:var(--brand);font-weight:800;font-size:12px;letter-spacing:.06em;min-width:24px;padding:3px 7px;text-align:center;color:#071025;background:var(--chalk);border-radius:2px}
+#modes .mode:focus-visible,#modes .mode:focus{outline:2px solid var(--gold);transform:translateY(-6px)}
+@media (hover:none),(max-width:760px){.keybar{display:none}}
 </style>
 <script type="importmap">
 { "imports": { "three": "https://cdn.jsdelivr.net/npm/three@0.160.0/build/three.module.js", "three/addons/": "https://cdn.jsdelivr.net/npm/three@0.160.0/examples/jsm/" } }
@@ -775,55 +895,66 @@ body{word-break:keep-all}
 <canvas id="c"></canvas>
 
 <!-- ═══ 타이틀 ═══ -->
-<div id="wipe" aria-hidden="true"><i class="b1"></i><i class="b2"></i><i class="b3"></i><span class="stamp"><b>PLAY BALL</b><small>홈런왕</small></span></div>
+<div id="wipe" aria-hidden="true"><i class="b1"></i><i class="b2"></i><i class="b3"></i><span class="stamp"><b>PLAY BALL</b><small>WALK-OFF</small></span></div>
 <section id="title" class="screen">
+  <div class="t-bg" aria-hidden="true"></div>
+  <img class="t-hero" id="tHero" src="./assets/ui/cut_batter.webp" alt="" aria-hidden="true">
+  <script>/* 들어올 때마다 타자 또는 투수 */ if (Math.random() < .5) document.getElementById('tHero').src = './assets/ui/cut_pitcher.webp';</script>
   <div class="tbox">
-    <h1 class="logo">홈런왕</h1>
-    <svg class="seams" viewBox="0 0 420 20" preserveAspectRatio="none" aria-hidden="true"><path d="M0 10 Q210 -2 420 10" stroke="currentColor" stroke-width="1.5" fill="none" opacity=".5"/><g stroke="currentColor" stroke-width="2.4" stroke-linecap="round" fill="none"><path d="M14 5l6 5-6 5M44 4l6 5-6 5M74 3.5l6 5-6 5M104 3l6 5-6 5M134 2.5l6 5-6 5M164 2l6 5-6 5M194 2l6 5-6 5M224 2l6 5-6 5M254 2l6 5-6 5M284 2.5l6 5-6 5M314 3l6 5-6 5M344 3.5l6 5-6 5M374 4l6 5-6 5M404 5l6 5-6 5"/></g></svg>
-    <p class="tsub">친구들이랑 치고, 던지고, 뛰고, 잡는 3D 야구.<br>빈 자리는 CPU가 채워.</p>
+    <div class="brand">
+      <img class="brand-em" src="./assets/ui/logo.webp" alt="">
+      <div><h1 class="logo">WALK<i>-</i>OFF</h1><div class="logo-kr">끝내기</div></div>
+    </div>
+    <div class="t-press" id="tPress" aria-hidden="true">PRESS ANY KEY</div>
+    <div class="t-login" id="tLogin">
     <label class="lbl" for="nick">닉네임</label>
     <div class="nickrow"><input id="nick" class="inp" maxlength="12" placeholder="경기장에서 쓸 이름" autocomplete="off"><button id="bPlay" class="go">플레이</button></div>
     <div class="err" id="err" role="alert"></div>
-    <div class="tlinks"><button id="bSettings" class="tlink">설정</button><button id="bHelp" class="tlink">조작법</button><button id="bMotion" class="tlink">모션 컨트롤</button></div>
+    <div class="tlinks"><button id="bSettings" class="tlink"><svg class="ico" viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="3"/><path d="M12 2.5v2.2M12 19.3v2.2M2.5 12h2.2M19.3 12h2.2M5.3 5.3l1.6 1.6M17.1 17.1l1.6 1.6M5.3 18.7l1.6-1.6M17.1 6.9l1.6-1.6"/></svg>설정</button><button id="bHelp" class="tlink"><svg class="ico" viewBox="0 0 24 24" aria-hidden="true"><rect x="2.5" y="6" width="19" height="12" rx="2"/><path d="M6.5 10h1M10 10h1M13.5 10h1M17 10h.5M7.5 14h9"/></svg>조작법</button><button id="bMotion" class="tlink"><svg class="ico" viewBox="0 0 24 24" aria-hidden="true"><rect x="8" y="3" width="8" height="15" rx="1.8"/><path d="M11 15.5h2M4.6 8.5a5.5 5.5 0 0 0 0 7M19.4 8.5a5.5 5.5 0 0 1 0 7"/></svg>모션 컨트롤</button></div>
+    </div>
   </div>
-  <div class="ver">HOMERUN KING · SEASON 1</div>
+  <div class="ver">JAMSIL BASEBALL STADIUM · <b>SEASON 2026</b></div>
 </section>
 
 <!-- ═══ 모드 선택 ═══ -->
 <section id="modes" class="screen hide">
-  <button class="mode real" data-rules="real">
-    <span class="mt">리얼<small>모드</small></span>
-    <p>실제 야구에 가까운 규칙과 물리. 구종과 타이밍을 읽어야 친다.</p>
-    <ul><li>정식 볼카운트, 주루, 중계 플레이</li><li>타구 판단과 수비 위치가 승부를 가름</li><li>제대로 붙어보고 싶을 때</li></ul>
-    <span class="pick">리얼 모드로</span>
-  </button>
-  <button class="mode casual" data-rules="casual">
-    <span class="mt">캐주얼<small>모드</small></span>
-    <p>짧은 판, 쉬운 조작. 친구랑 들어가자마자 웃긴 장면이 나온다.</p>
-    <ul><li>넓은 판정, 빠른 진행</li><li>처음 해보는 친구도 바로 칠 수 있게</li><li>세부 규칙은 대기실에서 확인</li></ul>
-    <span class="pick">캐주얼 모드로</span>
-  </button>
-  <i class="foul" aria-hidden="true"></i>
-  <div class="mhead">어떤 야구 할래?</div>
-  <button id="mBack" class="chip">처음으로</button>
+  <div class="mhead"><small>SELECT MODE</small>모드 선택</div>
+  <div class="mcards">
+    <button class="mode real" data-rules="real">
+      <img class="mph" src="./assets/ui/mode_real.jpg" alt="">
+      <span class="mbody">
+        <span class="mt">Real<small>리얼 모드</small></span>
+        <span class="pick">선택</span>
+      </span>
+    </button>
+    <button class="mode casual" data-rules="casual">
+      <img class="mph" src="./assets/ui/mode_casual.jpg" alt="">
+      <span class="mbody">
+        <span class="mt">Casual<small>캐주얼 모드</small></span>
+        <span class="pick">선택</span>
+      </span>
+    </button>
+  </div>
+  <div class="keybar" aria-hidden="true"><span><i class="k">←</i><i class="k">→</i>이동</span><span><i class="k">Enter</i>선택</span><span><i class="k">Esc</i>뒤로</span></div>
+  <button id="mBack" class="chip"><svg class="ico" viewBox="0 0 24 24" aria-hidden="true"><path d="M14.5 6l-6 6 6 6"/></svg>처음으로</button>
 </section>
 
 <!-- ═══ 로비 ═══ -->
 <section id="lobby" class="screen hide">
   <div class="topbar">
-    <span class="mini">홈런왕</span>
+    <span class="mini wm">WALK<i>-</i>OFF</span>
     <button id="lbRules" class="chip mode-chip" title="모드 바꾸기">리얼 모드</button>
     <span class="sp"></span>
     <button id="lbName" class="chip" title="닉네임 바꾸기">닉네임</button>
-    <button id="lbSettings" class="chip">설정</button>
-    <button id="lbHelp" class="chip">조작법</button>
-    <button id="lbMotion" class="chip">모션 컨트롤</button>
+    <button id="lbSettings" class="chip"><svg class="ico" viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="3"/><path d="M12 2.5v2.2M12 19.3v2.2M2.5 12h2.2M19.3 12h2.2M5.3 5.3l1.6 1.6M17.1 17.1l1.6 1.6M5.3 18.7l1.6-1.6M17.1 6.9l1.6-1.6"/></svg>설정</button>
+    <button id="lbHelp" class="chip"><svg class="ico" viewBox="0 0 24 24" aria-hidden="true"><rect x="2.5" y="6" width="19" height="12" rx="2"/><path d="M6.5 10h1M10 10h1M13.5 10h1M17 10h.5M7.5 14h9"/></svg>조작법</button>
+    <button id="lbMotion" class="chip"><svg class="ico" viewBox="0 0 24 24" aria-hidden="true"><rect x="8" y="3" width="8" height="15" rx="1.8"/><path d="M11 15.5h2M4.6 8.5a5.5 5.5 0 0 0 0 7M19.4 8.5a5.5 5.5 0 0 1 0 7"/></svg>모션 컨트롤</button>
   </div>
   <div class="lbody">
     <div class="acts-l">
-      <button id="bSolo" class="act pri"><svg viewBox="0 0 48 48" class="aic"><path d="M8 40 L32 16" stroke="currentColor" stroke-width="5" stroke-linecap="round"/><path d="M30 18 L40 8" stroke="currentColor" stroke-width="9" stroke-linecap="round"/><circle cx="12" cy="14" r="5" fill="none" stroke="currentColor" stroke-width="2.5"/></svg><b>혼자 하기</b><span>CPU 경기 · 홈런 더비 · 타격 연습</span></button>
-      <button id="bMotionPlay" class="act motion"><svg viewBox="0 0 48 48" class="aic"><rect x="16" y="6" width="16" height="30" rx="3" fill="none" stroke="currentColor" stroke-width="3"/><path d="M8 18 Q4 24 8 30 M40 18 Q44 24 40 30 M12 21 Q10 24 12 27 M36 21 Q38 24 36 27" stroke="currentColor" stroke-width="2.5" fill="none" stroke-linecap="round"/><path d="M20 42 h8" stroke="currentColor" stroke-width="3" stroke-linecap="round"/></svg><b>모션 플레이</b><span>핸드폰·웹캠으로 진짜 휘두르고 던지기</span></button>
-      <button id="bCreate" class="act mp"><svg viewBox="0 0 48 48" class="aic"><circle cx="17" cy="17" r="6" fill="none" stroke="currentColor" stroke-width="3"/><circle cx="33" cy="19" r="5" fill="none" stroke="currentColor" stroke-width="3"/><path d="M6 38 q11-14 22 0 M26 36 q7-10 16 2" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round"/></svg><b>방 만들기</b><span>방 코드가 생겨. 친구한테 보내면 바로 들어와</span></button>
+      <button id="bSolo" class="act pri"><svg viewBox="0 0 24 24" class="aic" aria-hidden="true"><path d="M3.6 20.4l1.5-1.5M5.9 17.4l1.7 1.7M6.2 17.8l9.3-9.3c1.4-1.4 3.2-2 4-1.2s.2 2.6-1.2 4l-9.3 9.3"/><circle cx="18" cy="18.2" r="2.3"/></svg><b>혼자 하기</b><span>CPU 경기 · 홈런 더비 · 타격 연습</span></button>
+      <button id="bMotionPlay" class="act motion"><svg viewBox="0 0 24 24" class="aic" aria-hidden="true"><rect x="8" y="3" width="8" height="15" rx="1.8"/><path d="M11 15.5h2M4.6 8.5a5.5 5.5 0 0 0 0 7M19.4 8.5a5.5 5.5 0 0 1 0 7M10 21h4"/></svg><b>모션 플레이</b><span>핸드폰 · 웹캠</span></button>
+      <button id="bCreate" class="act mp"><svg viewBox="0 0 24 24" class="aic" aria-hidden="true"><circle cx="9" cy="8.5" r="3.2"/><path d="M3 19.5a6 6 0 0 1 12 0"/><circle cx="17" cy="9.5" r="2.5"/><path d="M15.6 14.4A4.8 4.8 0 0 1 21.5 19"/></svg><b>방 만들기</b><span>방 코드로 친구 초대</span></button>
       <div class="joinbox mp">
         <label class="lbl" for="code">방 코드로 참가</label>
         <div class="row"><input id="code" class="inp" maxlength="4" placeholder="ABCD" autocomplete="off"><button id="bJoin" class="go">참가</button></div>

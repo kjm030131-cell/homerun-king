@@ -16,7 +16,9 @@ if (entries.length) {
   const js = readFileSync(root + 'public/app.js', 'utf8');
   let html = readFileSync(root + 'public/index.html', 'utf8');
   const adDir = root + 'public/assets/ads/';
-  html = html.replace('./assets/ui/keyart.jpg', 'data:image/jpeg;base64,' + readFileSync(root + 'public/assets/ui/keyart.jpg').toString('base64'));
+  // [ui 11-24] 홈화면 이미지(./assets/ui/*)는 전부 인라인 — HTML·CSS·인라인 스크립트 안 경로 모두
+  const MIME = { jpg: 'image/jpeg', jpeg: 'image/jpeg', png: 'image/png', webp: 'image/webp' };
+  html = html.replace(/\.\/assets\/ui\/([\w.-]+\.(jpe?g|png|webp))/g, (m, f, ext) => { const p = root + 'public/assets/ui/' + f; return existsSync(p) ? `data:${MIME[ext]};base64,` + readFileSync(p).toString('base64') : m; });
   const tex = {};
   for (const k of ['dirt', 'grass', 'crowd', 'sky_day', 'sky_night']) { const f = root + `public/assets/tex/${k}.jpg`; if (existsSync(f)) tex[k.replace('_d', 'D').replace('_n', 'N')] = { url: 'data:image/jpeg;base64,' + readFileSync(f).toString('base64'), avg: TEX_AVG[k] }; }
   const faces = FACE_SKINS.map((skin, i) => ({ url: 'data:image/jpeg;base64,' + readFileSync(root + `public/assets/tex/face${i}.jpg`).toString('base64'), skin }));
