@@ -187,3 +187,7 @@ node tools/test/shot.mjs tools/test/steps/smoke.mjs test-shots/   # 스크린샷
 - v19: 체공시간까지 맞춘 물리, 사람 타자 타구 보정(팝업↓), 판정 폭↑, 외야 가속↓
 - v20: 렌더 최적화(삼각형 -89%, 드로우콜 -30%), fps 표시
 - 11-18: GitHub 이전 — CI 배포, 단위 테스트 12개, 장면 테스트 도구, 이 문서
+- 11-24: **홈화면 개편 + 게임 이름 WALK-OFF(끝내기)** — 타이틀(잠실 야간 사진 + 타자/투수 컷아웃 랜덤 + 워드마크), 모드 선택(사진 카드 2장), 로비 카드 사진·배경, 대기실 배경, 라인 SVG 아이콘.
+  폰트: 영문 워드마크 Big Shoulders Display(구글 폰트), 한글 Pretendard(jsDelivr). CSS는 index.html 맨 아래 `[11-24] WALK-OFF 홈화면 개편` 블록.
+  이미지: `public/assets/ui/`(웹용으로 줄인 것), 원본은 `assets-src/ui/`(GPT 생성, 경기 HUD 레퍼런스·카드 프레임·이펙트 원본도 같이 보관). 혼자하기판은 build.mjs 가 `./assets/ui/*` 를 전부 인라인.
+  사용자 요청: 홈화면에 설명 문구(AI 같은 소개 문장) 넣지 말 것. 아이콘은 GPT 이미지 말고 코드(SVG)로.
