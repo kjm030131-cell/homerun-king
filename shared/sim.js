@@ -2139,7 +2139,7 @@ export class Game {
         const fr = r.b - Math.floor(r.b);
         const toNext = (1 - fr) * BASE_D, fromPrev = fr * BASE_D;
         // [11-24] 베이스에 발이 닿은 범위: 서서 0.7m, 슬라이딩 0.95m (예전엔 베이스 정중앙 좌표에 정확히 있어야 해서 세이프 직후 살짝 지나쳐도 태그아웃)
-        const reach = this.play.kind === 'pick' ? 0.3 : r.slide ? 0.95 : 0.7; // 견제 귀루는 손으로 짚는 접전 → 좁게
+        const reach = this.play.kind === 'pick' ? 0 : r.slide ? 0.95 : 0.7; // 견제 귀루는 예전처럼 엄격하게(0.3m만 줘도 평소 견제사가 2%까지 떨어짐)
         const onBase = r.b === Math.floor(r.b) || Math.min(toNext, fromPrev) < reach
           // 1루 오버런: 타자주자가 1루를 밟고 지나친 건 바로 돌아오면 아웃 아님 (2루로 가려 하지 않는 한)
           || (r.overrun && r.target <= 1);
