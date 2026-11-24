@@ -78,6 +78,9 @@ const adURLs = (window.HR_ASSETS && window.HR_ASSETS.ads) || Array.from({ length
 const TEX = (window.HR_ASSETS && window.HR_ASSETS.tex) || {
   dirt: { url: './assets/tex/dirt.jpg', avg: TEX_AVG.dirt },
   grass: { url: './assets/tex/grass.jpg', avg: TEX_AVG.grass },
+  mound: { url: './assets/tex/mound.jpg', avg: TEX_AVG.mound }, // [stadium 11-24] 마운드·불펜 흙
+  track: { url: './assets/tex/track.jpg', avg: TEX_AVG.track }, // 워닝트랙
+  wallpad: { url: './assets/tex/wallpad.jpg' }, // 외야 펜스 패딩
   crowd: { url: './assets/tex/crowd.jpg' },
   skyDay: { url: './assets/tex/sky_day.jpg' },
   skyNight: { url: './assets/tex/sky_night.jpg' },

@@ -20,7 +20,8 @@ if (entries.length) {
   const MIME = { jpg: 'image/jpeg', jpeg: 'image/jpeg', png: 'image/png', webp: 'image/webp' };
   html = html.replace(/\.\/assets\/ui\/([\w.-]+\.(jpe?g|png|webp))/g, (m, f, ext) => { const p = root + 'public/assets/ui/' + f; return existsSync(p) ? `data:${MIME[ext]};base64,` + readFileSync(p).toString('base64') : m; });
   const tex = {};
-  for (const k of ['dirt', 'grass', 'crowd', 'sky_day', 'sky_night']) { const f = root + `public/assets/tex/${k}.jpg`; if (existsSync(f)) tex[k.replace('_d', 'D').replace('_n', 'N')] = { url: 'data:image/jpeg;base64,' + readFileSync(f).toString('base64'), avg: TEX_AVG[k] }; }
+  for (const k of ['dirt', 'grass', 'crowd', 'sky_day', 'sky_night', 'mound', 'track', 'wallpad']) { const f = root + `public/assets/tex/${k}.jpg`; if (existsSync(f)) tex[k.replace('_d', 'D').replace('_n', 'N')] = { url: 'data:image/jpeg;base64,' + readFileSync(f).toString('base64'), avg: TEX_AVG[k] }; }
+  { const f = root + 'public/assets/tex/stadium_concrete.jpg'; if (existsSync(f)) tex.concrete = { url: 'data:image/jpeg;base64,' + readFileSync(f).toString('base64') }; } // [stadium 11-24]
   const faces = FACE_SKINS.map((skin, i) => ({ url: 'data:image/jpeg;base64,' + readFileSync(root + `public/assets/tex/face${i}.jpg`).toString('base64'), skin }));
   const mf = root + 'public/assets/models/body.bin';
   const model = existsSync(mf) ? 'data:application/octet-stream;base64,' + readFileSync(mf).toString('base64') : null;

@@ -88,6 +88,8 @@ export function createMaterials(opt) {
   load('facade', (t) => { M.facade.map = t; M.facade.needsUpdate = true; });
   load('concrete', (t) => { for (const m of [M.concrete, M.concreteDark, M.downlight]) { m.map = t; m.needsUpdate = true; } });
   load('roof', (t) => { M.roof.map = t; M.roof.needsUpdate = true; });
+  // [stadium 11-24] 외야 펜스 패딩 사진: 펜스 uv = (호 길이/4m, 높이) → 사진 한 장(패널 6개)이 8m
+  load('wallpad', (t) => { t.repeat.set(0.5, 1); t.wrapT = THREE.ClampToEdgeWrapping; M.pad.map = t; M.pad.color.set('#ffffff'); const d = dim.find((x) => x.m === M.pad); if (d) d.base.set('#ffffff'); M.pad.needsUpdate = true; });
   M.setNight = (night) => {
     for (const d of dim) d.m.color.copy(d.base).multiplyScalar(night ? d.nightK : 1);
     M.facade.emissiveIntensity = night ? 0.9 : 0;

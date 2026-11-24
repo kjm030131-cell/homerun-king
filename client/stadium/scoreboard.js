@@ -21,7 +21,7 @@ export function buildScoreboard(world, M, ads) {
     const fm = new THREE.Mesh(mergeGeometries(frame), M.steelDark); fm.userData.sh = 'big'; world.add(fm);
     const scr = new THREE.Mesh(new THREE.PlaneGeometry(SB.w, SB.h), new THREE.MeshBasicMaterial({ map: sbTex, toneMapped: false, name: 'scoreboard' }));
     scr.position.set(0, SB.y, SB.z); scr.rotation.y = Math.PI; scr.userData.keep = true; world.add(scr);
-    const top = textMesh('HOMERUN KING BALLPARK', 3.0, { color: '#ffd23a', bg: '#0b0f18', px: 96 });
+    const top = textMesh('JAMSIL BASEBALL STADIUM', 3.0, { color: '#ffd23a', bg: '#0b0f18', px: 96 });
     top.position.set(0, SB.y + SB.h / 2 + 4.6, SB.z + 0.15); top.rotation.y = Math.PI; world.add(top);
     // 보조 화면 = 회전 LED 광고 (ad12~22)
     for (const sx of [-1, 1]) {
@@ -48,7 +48,7 @@ export function buildScoreboard(world, M, ads) {
     } else {
       // 라인스코어
       g.fillStyle = '#0d2a1a'; g.fillRect(0, 0, W, 70);
-      g.fillStyle = '#ffd23a'; g.font = '700 44px Oswald, sans-serif'; g.textAlign = 'left'; g.fillText('HOMERUN KING', 30, 37);
+      g.fillStyle = '#ffd23a'; g.font = '700 44px Oswald, sans-serif'; g.textAlign = 'left'; g.fillText('WALK-OFF', 30, 37);
       const inns = Math.max(9, s && s.ls ? Math.max(s.ls[0].length, s.ls[1].length) : 9);
       const x0 = 300, cw = Math.min(78, (W * 0.62 - x0) / inns);
       g.font = '700 38px Oswald, sans-serif'; g.fillStyle = '#8fa1c4'; g.textAlign = 'center';
@@ -92,7 +92,7 @@ export function buildScoreboard(world, M, ads) {
       // 하단 띠
       g.fillStyle = '#0b1120'; g.fillRect(0, H - 70, W, 70);
       g.fillStyle = '#9fb0d0'; g.font = '700 34px "Noto Sans KR", sans-serif'; g.textAlign = 'left';
-      g.fillText(extra.ticker || '홈런왕 볼파크 · 홈런왕 리그', 30, H - 35);
+      g.fillText(extra.ticker || '잠실 야구장 · WALK-OFF 리그', 30, H - 35);
     }
     // LED 격자
     g.fillStyle = 'rgba(0,0,0,.18)'; for (let y = 0; y < H; y += 4) g.fillRect(0, y, W, 1); for (let x = 0; x < W; x += 4) g.fillRect(x, 0, 1, H);
