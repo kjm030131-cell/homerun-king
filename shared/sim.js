@@ -1717,7 +1717,7 @@ export class Game {
     st.rbi += n;
     this.say(`${n >= 4 ? '만루 홈런!!!' : n > 1 ? `${n}점 홈런!` : '솔로 홈런!'} ${dist}m`);
     this.hrEv = { id: ++this.seq, dist, name: this.batter.name, n };
-    for (const r of this.runners) delete r.batter;
+    for (const r of this.runners) { delete r.batter; delete r.overrun; }
     this.play = null;
     this.pause(clamp(arrive + HR_GREET, 8, 11.2), this.outs >= 3 ? 'half' : 'next'); // [trot] 홈런 리플레이 + 타자가 홈까지 (전: 8초 고정 → 타자가 3루 근처에서 다음 타석으로 사라짐)
   }
@@ -1794,7 +1794,7 @@ export class Game {
       } else if (P.err && !/아웃/.test(this.msg)) this.say('실책으로 출루');
     } else if (br && br.out && this.ball.bunt && P.runs === 0 && this.alive().some((r) => r.target > r.start)) this.say('희생번트 성공');
     this.stat().rbi += P.err ? 0 : Math.max(0, P.runs);
-    for (const r of this.runners) delete r.batter;
+    for (const r of this.runners) { delete r.batter; delete r.overrun; }
     // [bugs] 3아웃이면 남은 주자는 그 자리에 멈춤 (전엔 1루로 뛰던 타자주자가 결과 화면 동안 홈플레이트로 순간이동)
     for (const r of this.alive()) { if (this.outs >= 3) { r.target = Math.min(4, Math.max(1, Math.ceil(r.b))); continue; } /* target 은 항상 정수(클라가 BASES[target] 로 씀) */ if (r.b !== Math.floor(r.b)) r.target = Math.floor(r.b); r.b = r.target; }
     this.play = null;
@@ -2131,17 +2131,21 @@ export class Game {
       for (const r of this.alive()) {
         if (r.trot) continue;
         const k = r.target;
-        if ((r.forced || r.mustReturn) && r.b !== k) {
+        if ((r.forced || r.mustReturn) && Math.abs(r.b - k) * BASE_D > 0.45) { // [11-24] 발이 베이스에 닿았으면(0.45m) 세이프
           const base = BASES[k % 4];
           if (dist2(f.x, f.z, base[0], base[1]) < 1.3) { this.outRunner(r, 'force'); if (!this.play) return; continue; }
         }
         // 베이스 위에 있어야 세이프: 서 있는 베이스(정수) 또는 슬라이딩으로 발이 닿은 경우만
         const fr = r.b - Math.floor(r.b);
         const toNext = (1 - fr) * BASE_D, fromPrev = fr * BASE_D;
-        const onBase = r.b === Math.floor(r.b) || (r.slide && (r.target > r.b ? toNext < 0.9 : fromPrev < 0.9));
+        // [11-24] 베이스에 발이 닿은 범위: 서서 0.7m, 슬라이딩 0.95m (예전엔 베이스 정중앙 좌표에 정확히 있어야 해서 세이프 직후 살짝 지나쳐도 태그아웃)
+        const reach = this.play.kind === 'pick' ? 0.3 : r.slide ? 0.95 : 0.7; // 견제 귀루는 손으로 짚는 접전 → 좁게
+        const onBase = r.b === Math.floor(r.b) || Math.min(toNext, fromPrev) < reach
+          // 1루 오버런: 타자주자가 1루를 밟고 지나친 건 바로 돌아오면 아웃 아님 (2루로 가려 하지 않는 한)
+          || (r.overrun && r.target <= 1);
         if (!onBase) {
           const [rx, rz] = runnerXZ(r.b);
-          if (dist2(f.x, f.z, rx, rz) < 1.45) { this.outRunner(r, 'tag'); if (!this.play) return; }
+          if (dist2(f.x, f.z, rx, rz) < 1.2) { this.outRunner(r, 'tag'); if (!this.play) return; } // 글러브가 닿는 거리 (예전 1.45m는 너무 넉넉)
         }
       }
     }
@@ -2170,7 +2174,7 @@ export class Game {
     }
     this.play.result = 'gr';
     if (this.ball.batted) { this.hits[this.half]++; const st = this.stat(); st.h++; st.rbi += this.play.runs; this.ev('hit', { bases: 2, gr: 1, rbi: this.play.runs, name: this.batter.name, bid: this.batter.id || null }); }
-    for (const r of this.runners) delete r.batter;
+    for (const r of this.runners) { delete r.batter; delete r.overrun; }
     this.play = null;
     this.ball.ghost = true;
     this.endPA(2.0);
@@ -2302,9 +2306,10 @@ export class Game {
           const airBall = b.batted && !b.bounced && b.vy > -2 && bestPt && bestPt[1] > 0.4;
           if (airBall && chaser >= 0 && chaser < 6) {
             for (const o of [7, 6, 8]) if (P.tiArr[o] != null && P.tiArr[o] <= bestT + 0.4 && P.tiArr[o] < 6) { chaser = o; bestT = P.tiArr[o]; bestPt = P.ptArr[o]; break; }
-          } else if (airBall && (chaser === 6 || chaser === 8) && P.tiArr[7] != null && P.tiArr[7] <= bestT + 0.3) { chaser = 7; bestT = P.tiArr[7]; bestPt = P.ptArr[7]; }
+          } else if (airBall && (chaser === 6 || chaser === 8) && P.tiArr[7] != null && P.tiArr[7] < 6 && P.tiArr[7] <= bestT + 0.75) { chaser = 7; bestT = P.tiArr[7]; bestPt = P.ptArr[7]; } // [11-24] 중견수 우선권: 0.75초 안이면 중견수 (예전 0.3초라 좌·우익수가 중견수 공을 가져감)
           const prev = P.chaser;
-          if (prev >= 0 && prev !== chaser && P.tiArr[prev] != null && P.tiArr[prev] < 6 && P.tiArr[prev] <= bestT + 0.3 && prev !== b.thrower) { chaser = prev; bestT = P.tiArr[prev]; bestPt = P.ptArr[prev]; }
+          const cfCall = airBall && chaser === 7 && (prev === 6 || prev === 8); // 중견수가 '마이볼' 하면 앞서 쫓던 코너 외야수도 양보
+          if (!cfCall && prev >= 0 && prev !== chaser && P.tiArr[prev] != null && P.tiArr[prev] < 6 && P.tiArr[prev] <= bestT + 0.3 && prev !== b.thrower) { chaser = prev; bestT = P.tiArr[prev]; bestPt = P.ptArr[prev]; }
           if (chaser >= 0) {
             let gx = bestPt[0], gz = bestPt[2];
             // 타구 판단: 처음엔 낙구 지점을 정확히 모름(특히 앞뒤 거리) → 시간이 지나며 보정. 사람이 직접 조작 중이면 적용 안 함
@@ -2504,7 +2509,8 @@ export class Game {
         }
       }
       if (r.b === r.target || (r.slide && this.now - r.slide > 1.2)) r.slide = 0;
-      if (r.b === r.target) { r.forced = false; r.mustReturn = false; }
+      if (r.b === r.target) { r.forced = false; r.mustReturn = false; if (r.batter && r.target === 1) r.overrun = true; }
+      if (r.overrun && r.target >= 2) r.overrun = false; // 2루로 가려는 순간부터는 보통 주자
       if (r.b >= 4 && !r.scored) { r.scored = true; this.addRun(r); this.say('득점!', false); continue; }
       if (this.now < r.manual) continue;
       let ahead = null, behind = null;
