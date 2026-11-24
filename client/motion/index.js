@@ -29,6 +29,7 @@ export function createMotion(api) {
   const M = {
     pad: null, cam: null, code: store.get('padCode', null) || newPadCode(),
     mirror: !!store.get('motionMir', false), // 웹캠 좌우 반전
+    padOff: store.get('motionPadOff', 80), // [11-24] 핸드폰 보정: '맞혔다고 느끼는 순간' 대비 각속도 정점이 늦는 시간(ms)
     assist: store.get('motionAssist', 0.6), // [11-24] 조준 도움: 공 쪽으로 끌어주는 비율 (세로 그립으로 정확히 맞추기 어려워서 기본 60%)
     calib: store.get('motionCal', 0), // 타이밍 보정(ms, +면 더 늦게 친 걸로)
     auto: store.get('motionAuto', 0), elMean: store.get('motionEl', -12), ori: null, oriT: 0, // [11-23] 자동 보정(ms): 스윙마다 내 평균 타이밍 쪽으로 조금씩
@@ -47,7 +48,7 @@ export function createMotion(api) {
     const S = api.S(), role = api.role();
     if (!S || !S.mo || !role.batter || S.ph !== 'pitching' || !S.p) return S && !S.mo ? 'nomo' : 'skip';
     // 각속도 정점은 '맞혔다고 느끼는 순간'보다 늦음 → 기본 80ms 앞당김 + 자동 보정 + 수동 보정
-    const lagMs = performance.now() - atLocalMs - M.calib - M.auto + (src === 'cam' ? M.camLag : 80);
+    const lagMs = performance.now() - atLocalMs - M.calib - M.auto + (src === 'cam' ? M.camLag : M.padOff);
     const t = api.simNow() - lagMs / 1000;
     if (t < S.p.t0 - 0.05) return 'early'; // 공 놓기 전 동작(준비 동작)은 무시
     const p = S.p, sd = src === 'cam' ? 0.07 : 0.055;
@@ -56,6 +57,7 @@ export function createMotion(api) {
     const ca = src === 'pad' ? M.cursorAt(atLocalMs - 150) : null;
     if (ca) {
       const as = M.assist, ax = ca[0] + (p.tx - ca[0]) * as + gauss() * 0.02, ay2 = ca[1] + (p.ty - ca[1]) * as + gauss() * 0.02;
+      { const oy = ay2 - p.ty, ox = ax - p.tx; M.lastAim = Math.hypot(ox, oy) < 0.09 ? '조준 딱' : Math.abs(oy) > Math.abs(ox) ? (oy > 0 ? '배트가 공보다 위' : '배트가 공보다 아래') : (ox > 0 ? '배트가 공보다 오른쪽' : '배트가 공보다 왼쪽'); }
       api.swing(strong ? 'power' : 'contact', { t, aim: [ax, ay2], vis: visT() });
       M.log.push({ src, lag: Math.round(lagMs), dt: Math.round((t - p.arrive) * 1000), cur: 1 }); if (M.log.length > 20) M.log.shift();
       M.lastLag = Math.round(lagMs);
@@ -96,12 +98,13 @@ export function createMotion(api) {
   // ── 핸드폰 ──
   function onPad(m) {
     if (m.t === 'ori') { M.ori = [+m.b || 0, +m.g || 0]; if (!(performance.now() < M.curFreeze)) M.curRaw = isFinite(m.cx) ? [m.cx * 22, m.cy * 22] : [M.ori[1], M.ori[0]]; /* 새 핸드폰 페이지는 배트 끝 방향으로 계산한 조준값(cx,cy)을 보냄 */ M.oriQ = Array.isArray(m.q) && m.q.length === 4 ? m.q.map(Number) : null; M.oriT = performance.now(); }
+    else if (m.t === 'cal') { const o = +m.off; if (isFinite(o) && o > -350 && o < 600) { M.padOff = o; store.set('motionPadOff', o); M.auto = 0; store.set('motionAuto', 0); api.toast(`스윙 보정 적용 (${o >= 0 ? '+' : ''}${Math.round(o)}ms)`); } }
     else if (m.t === 'assist') { const v = +m.v; if (v >= 0 && v <= 0.9) { M.assist = v; store.set('motionAssist', v); } }
     else if (m.t === 'chk') { const S = api.S(), role = api.role(); if (S && S.mo && role.batter && S.ph === 'pitching' && S.p && api.simNow() > S.p.t0 && api.net()) { api.net().send({ t: 'chk' }); api.toast('체크스윙'); } }
     else if (m.t === 'sws') { // 휘두르기 시작: 정점(=임팩트)은 보통 시작 뒤 ~60ms → 그 시각으로 화면 스윙만 먼저
       const S = api.S(), role = api.role();
       M.curFreeze = performance.now() + 700; // 휘두르는 동안 커서 고정
-      if (S && S.mo && role.batter && S.ph === 'pitching' && S.p) { const lag = performance.now() - M.pad.toLocal(m.at) - M.calib - M.auto + 80; const t = api.simNow() - lag / 1000 + 0.06; if (t >= S.p.t0) api.preSwing(t); }
+      if (S && S.mo && role.batter && S.ph === 'pitching' && S.p) { const lag = performance.now() - M.pad.toLocal(m.at) - M.calib - M.auto + M.padOff; const t = api.simNow() - lag / 1000 + 0.06; if (t >= S.p.t0) api.preSwing(t); }
     } else if (m.t === 'swing') { const r = swing(M.pad.toLocal(m.at), m.mode === 'power', 'pad', +m.el); M.pad.send({ t: 'ack', k: 'swing', r, lag: r === 'ok' ? M.lastLag : null, auto: Math.round(M.auto), h: r === 'ok' ? M.lastH : null }); M.lastH = null; }
     else if (m.t === 'grip') { M.grip = !!m.on; if (!m.on) { M.aim = null; api.setAim(null); } }
     else if (m.t === 'aim') { M.aim = [clamp(+m.x || 0, -1.6, 1.6), clamp(+m.y || 0, -1.6, 1.6)]; }
@@ -192,7 +195,17 @@ export function createMotion(api) {
     syncAuto();
     const on = M.active();
     show('motionBadge', on && api.screen() === 'game');
-    if (on) setText('motionBadgeT', [(M.pad && M.pad.pads) ? '📱 핸드폰' : '', (M.cam && M.cam.on) ? '📷 웹캠' : ''].filter(Boolean).join(' · ') + (S && S.mo === 2 ? ' · 스크린야구' : S && S.mo === 3 ? ' · 배팅만' : ' · 수비 자동'));
+    // [11-24] 웹캠 인식 상태: 어깨·팔·골반·다리가 얼마나 잘 보이는지 평균 → 좋음/약함/안 됨, 안 되면 알려줌
+    let camQ = '';
+    if (M.cam && M.cam.on && M.pose && M.pose.ready) {
+      const lm = M.pose.now(); let q = 0;
+      if (lm) { const K = [11, 12, 13, 14, 15, 16, 23, 24, 25, 26]; for (const i of K) q += lm[i][3] ?? 1; q /= K.length; }
+      camQ = !lm ? '인식 안 됨' : q > 0.75 ? '인식 좋음' : q > 0.5 ? '인식 약함' : '인식 안 됨';
+      const n2 = performance.now();
+      if (camQ === '인식 좋음') M.badSince = 0; else if (!M.badSince) M.badSince = n2;
+      if (M.badSince && n2 - M.badSince > 1500 && n2 - (M.badToast || 0) > 6000 && api.screen() === 'game') { M.badToast = n2; api.toast(!lm ? '몸이 안 보여 — 카메라에서 2~3m 떨어져 전신이 나오게 서줘' : '인식이 약해 — 밝은 곳에서, 머리부터 발까지 화면에 나오게'); }
+    }
+    if (on) setText('motionBadgeT', [(M.pad && M.pad.pads) ? '📱 핸드폰' : '', (M.cam && M.cam.on) ? '📷 웹캠' + (camQ ? ' ' + camQ : '') : ''].filter(Boolean).join(' · ') + (S && S.mo === 2 ? ' · 스크린야구' : S && S.mo === 3 ? ' · 배팅만' : ' · 수비 자동'));
     const camOn = !!(M.cam && M.cam.on);
     if (M.cam) M.cam.paused = !!(M.pose && M.pose.ready);
     const pn = performance.now(), paintNow = pn - (M.paintT || 0) > 66; if (paintNow) M.paintT = pn; // [perf] 미리보기 15fps
@@ -208,7 +221,10 @@ export function createMotion(api) {
   bus.on('localSwing', (e) => {
     if (!M.pad || !M.pad.pads) return;
     const late = e.dt > 0, ms = Math.abs(e.dt);
-    const txt = e.contact ? (e.q > 0.8 ? '정타! 제대로 맞았다' : '맞혔다!') : ms > 140 ? (late ? `늦었어 (${ms}ms)` : `빨랐어 (${ms}ms)`) : '헛스윙';
+    // [11-24] 맞는 기준을 보여줌: 타이밍(±60ms 정타 · ±145ms 안 맞힘) + 조준(초록 점이 공과 겹치는지)
+    const tm = ms <= 60 ? '타이밍 딱' : `${late ? '늦음' : '빠름'} ${ms}ms`;
+    const txt = (e.contact ? (e.q > 0.8 ? '정타! ' : '맞혔다 · ') : '헛스윙 · ') + tm + (M.lastAim ? ' · ' + M.lastAim : '');
+    api.toast(txt); M.lastAim = null;
     const hi = M.lastSwingY != null && S0() && S0().p ? (M.lastSwingY > S0().p.ty + 0.12 ? ' · 공 위로 지나감' : M.lastSwingY < S0().p.ty - 0.12 ? ' · 공 아래로 지나감' : '') : '';
     // 타격감: 정타 = 길고 묵직하게, 맞힘 = 짧게 두 번, 헛스윙 = 아주 짧게
     M.pad.send({ t: 'fb', k: 'swing', txt: txt + (e.contact ? '' : hi), col: e.contact ? '#4fd18b' : '#ff8a80', vib: e.contact ? (e.q > 0.8 ? [90, 30, 140] : [35, 40, 35]) : 15 });
