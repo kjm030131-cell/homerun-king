@@ -1,7 +1,7 @@
 // [ui] 경기 HUD: 스코어버그, 매치업, 역할 안내, 와인드업 신호, 볼카운트, 구종, 게이지, 키 안내, 핑/fps, 스윙 분석, 등장 카드
 // 성능: 매 프레임 부르지만 DOM은 값이 바뀔 때만 건드린다(setText/cls 캐시). 바 길이는 transform(scale)로만 → 레이아웃 재계산 없음.
 import { $, esc, show, setText, setHTML, cls, style, replay } from './dom.js';
-import { cfg, TOUCH } from './settings.js';
+import { cfg, TOUCH, store } from './settings.js';
 import { career, avgStr, eraStr, ipStr } from './career.js';
 import { teamColor } from './results.js';
 import { clubOf, emblemURL } from '../emblem.js';
@@ -10,6 +10,7 @@ import { pciPath } from '../game/batting.js'; // [gameplay] PCI 모양
 
 const clamp = (v, a, b) => Math.max(a, Math.min(b, v));
 const OF = ['LF', 'CF', 'RF'];
+let hintLast = '';
 
 // 와인드업 단계 (sim WINDUP 1.85s 기준, anim pitchK 시간표와 같은 구간)
 const CUE = [[0, '셋 포지션'], [0.35, '다리 들기'], [1.25, '정점, 준비'], [1.45, '스트라이드']];
@@ -76,7 +77,7 @@ export function hudFrame(c, role, f) {
   show('pcue', cueOn);
 
   // 큰 볼카운트 (타석/투구 중)
-  const bigOn = (role.batter || role.pitcher) && pitchPhase && s.cnt && !derby;
+  const bigOn = false; // [11-24] 왼쪽 위 점수판과 같은 볼카운트가 두 번 떠서 지저분했음 → 점수판 것만
   show('bigcount', bigOn);
   if (bigOn) { setDots('bigcount', s.cnt); cls('bigcount', 'pit', !!role.pitcher); } // [bugs] 투수일 땐 왼쪽으로 — 오른쪽 구종 바와 겹쳐 S·O 가 가려졌음(창 높이 800 이하)
 
@@ -89,9 +90,9 @@ export function hudFrame(c, role, f) {
   show('ptype', !!pt); if (pt) setHTML('ptype', pt);
 
   // 타격 모드 태그 · 번트 버튼
-  show('modeTag', f.aimOn && f.swingMode !== 'contact');
+  show('modeTag', f.aimOn && f.swingMode !== 'contact' && !s.mo); // [11-24] 모션 경기엔 마우스 모드 표시 없음
   if (f.aimOn) { $('modeTag').className = f.swingMode; setText('modeTag', f.swingMode === 'bunt' ? '번트' : '강타'); }
-  const showBunt = role.batter && pitchPhase && !derby;
+  const showBunt = role.batter && pitchPhase && !derby && !s.mo; // 모션 경기는 핸드폰 번트 버튼
   show('buntBtn', showBunt);
   if (showBunt) { cls('buntBtn', 'on', f.bunt); setHTML('buntBtn', f.bunt ? '<span class="kbd">B</span>번트 해제' : '<span class="kbd">B</span>번트 자세'); }
 
@@ -190,7 +191,7 @@ export function hudFrame(c, role, f) {
   setText('bugRules', c.rules === 'casual' ? '캐주얼' : '리얼'); cls('bugRules', 'casual', c.rules === 'casual');
   // [physics] 바람: 화면 위 = 중견수 쪽, 왼쪽 = 좌익수 쪽(+x). 외야로 불면 뜬공이 더 뻗음
   const wd = s.wd || [0, 0], wsp = Math.hypot(wd[0], wd[1]);
-  show('muW', !derby);
+  show('muW', !derby && wsp >= 1); // [11-24] 바람이 거의 없으면 안 보임
   if (!derby && $('muW')._k !== wd.join()) {
     $('muW')._k = wd.join();
     const out = wd[1] / (wsp || 1);
@@ -261,7 +262,10 @@ export function hudFrame(c, role, f) {
   else if (role.offense) { title = '공격 대기'; keysL = [['R', '도루'], ['T', '빠른 채팅'], ['Tab', '기록']]; tip = runnersOn ? '도루는 투구 직전에. 너무 일찍 누르면 견제당해요' : ''; }
   else keysL = [['Tab', '기록'], ['T', '빠른 채팅'], ['Esc', '메뉴']];
   if (TOUCH) keysL = []; // 터치 기기는 화면 버튼으로
-  setHTML('hint', (title ? `<b class="ht">${title}</b>` : '') + keysL.map(([k, l]) => `<span class="hk"><span class="kbd">${k}</span>${l}</span>`).join('') + (tip ? `<span class="tip">${tip}</span>` : ''));
+  if (title && title !== hintLast) { hintLast = title; const m = store.get('hintSeen', {}) || {}; m[title] = (m[title] || 0) + 1; store.set('hintSeen', m); }
+  const hmini = !!title && ((store.get('hintSeen', {}) || {})[title] || 0) > 4 && !window.__hintFull; // [11-24] 익숙해지면 작게
+  cls('hint', 'mini', hmini);
+  setHTML('hint', (title ? `<b class="ht">${title}</b>` : '') + (hmini ? '<span class="hk hmore"><span class="kbd">H</span>조작법</span>' : '') + keysL.map(([k, l]) => `<span class="hk"><span class="kbd">${k}</span>${l}</span>`).join('') + (tip ? `<span class="tip">${tip}</span>` : ''));
   show('hint', !!(title || keysL.length || tip));
 }
 function setDots(root, cnt) {
