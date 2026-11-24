@@ -26,7 +26,7 @@ export function emblemCanvas(i, size = 128) {
   g.restore();
   // 글자
   g.fillStyle = '#fff'; g.textAlign = 'center'; g.textBaseline = 'middle';
-  g.font = '700 italic 66px Oswald, "Arial Narrow", Impact, sans-serif';
+  g.font = `700 italic ${C.k.length > 2 ? 40 : C.k.length > 1 ? 52 : 66}px Oswald, "Arial Narrow", Impact, sans-serif`;
   g.lineWidth = 7; g.strokeStyle = shade(C.c1, -0.45); g.strokeText(C.k, 64, 62); g.fillText(C.k, 64, 62);
   g.font = '700 13px Oswald, "Arial Narrow", sans-serif'; g.fillStyle = C.c2 === '#1a1a1f' ? '#fff' : C.c2;
   g.fillText(C.en, 64, 104);

@@ -64,7 +64,7 @@ function logoTex(k, fg, stroke) {
   if (logoCache.has(key)) return logoCache.get(key);
   const c = document.createElement('canvas'); c.width = c.height = 64;
   const g = c.getContext('2d');
-  g.font = '700 italic 54px Oswald, "Arial Narrow", Impact, sans-serif'; g.textAlign = 'center'; g.textBaseline = 'middle';
+  g.font = `700 italic ${k.length > 2 ? 30 : k.length > 1 ? 40 : 54}px Oswald, "Arial Narrow", Impact, sans-serif`; g.textAlign = 'center'; g.textBaseline = 'middle';
   g.lineWidth = 6; g.strokeStyle = stroke; g.strokeText(k, 32, 35); g.fillStyle = fg; g.fillText(k, 32, 35);
   const t = new THREE.CanvasTexture(c); t.colorSpace = THREE.SRGBColorSpace; t.anisotropy = 4;
   logoCache.set(key, t); return t;

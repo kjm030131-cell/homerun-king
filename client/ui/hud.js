@@ -211,7 +211,7 @@ export function hudFrame(c, role, f) {
     setText('muBatS', myst ? `${myst[3] - myst[9]}타수 ${myst[4]}안타${myst[5] ? ' ' + myst[5] + '홈런' : ''}` : '첫 타석');
     show('muP', true);
     const pf = s.fl.find((x) => x[0] === 'P');
-    setText('muPit', (pf && c.nameOf(pf[4])) || (pf && pf[4] === c.myId ? c.myName : 'CPU'));
+    setText('muPit', (pf && c.nameOf(pf[4])) || (pf && pf[4] === c.myId ? c.myName : (s.cp && !s.cp[7] && s.cp[0]) || 'CPU'));
     style('staBar', 'transform', `scaleX(${((s.sta ?? 100) / 100).toFixed(2)})`);
     cls('staBar', 'low', (s.sta ?? 100) < 35);
     setText('muPc', `${s.pc || 0}구`);

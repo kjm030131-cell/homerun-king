@@ -1,4 +1,4 @@
-import { CLUBS } from './clubs.js';
+import { CLUBS, batterOf, starterOf } from './clubs.js';
 import { RULES, rulesOf } from './rules.js';
 export { RULES, rulesOf };
 // sim.js — 홈런왕 규칙/물리 엔진 (서버 Durable Object와 브라우저 연습모드 공용)
@@ -437,7 +437,7 @@ export function handOf(bats) { return bats === 'L' ? -1 : bats === 'S' ? -PITCHE
 export function cpuBats(club, team, slot) { const k = ((club | 0) * 7 + slot * 5 + (team === 'home' ? 3 : 0)) % 14; return k < 4 ? 'L' : k === 4 ? 'S' : 'R'; }
 
 export const DEFAULT_SETTINGS = {
-  name: '', mode: 'game', innings: 3, derbyOuts: 10, diff: 1, max: 12, pub: true, teams: ['서울 나이츠', '부산 하버스'],
+  name: '', mode: 'game', innings: 3, derbyOuts: 10, diff: 1, max: 12, pub: true, teams: [CLUBS[0].name, CLUBS[1].name],
   size: 0, // 팀당 인원 제한 (0=자유, 1·2·3 = 1:1·2:2·3:3)
   lineup: 'humans', // humans: 사람만 돌아가며 타격 · nine: 9인 타순(빈 타순은 CPU)
   mo: 0, // [motion] 0 일반(키보드·마우스) · 1 모션 플레이(핸드폰·웹캠으로 투구+타격) · 2 스크린야구(타격만, 투구·수비 CPU) · 3 배팅만(내 타석만, 상대 공격은 건너뜀)
@@ -711,6 +711,7 @@ export class Game {
     return [r2(Math.sin(a) * sp), r2(Math.cos(a) * sp)];
   }
   start() {
+    this._spSeed = null; /* [KBO] 경기마다 선발 로테이션 새로 */
     this.phase = 'starting';
     this.score = [0, 0];
     this.inning = 1; this.half = 0;
@@ -785,15 +786,15 @@ export class Game {
     if (this.set.lineup === 'nine' && this.mode === 'game') {
       const id = (this.lineup[team] || [])[slot - 1];
       const h = id && this.players.get(id);
-      this.batter = h ? { id: h.id, name: h.name, n, slot } : { id: null, name: `CPU ${slot}번`, n, slot };
+      this.batter = h ? { id: h.id, name: h.name, n, slot } : { id: null, name: this.cpuName(team, slot), n, slot };
     } else if (hs.length) {
       const h = hs[this.lineIdx[team] % hs.length];
       this.batter = { id: h.id, name: h.name, n, slot: (this.lineIdx[team] % hs.length) + 1 };
     } else {
-      this.batter = { id: null, name: `CPU ${slot}번`, n, slot };
+      this.batter = { id: null, name: this.cpuName(team, slot), n, slot };
     }
     { const pl = this.batter.id && this.players.get(this.batter.id); this.batter.ht = pl && pl.ht ? clamp(pl.ht, 1.6, 2.05) : this.batter.id ? 1.8 : r2(cpuHeight(team + slot + (this.set.clubs ? this.set.clubs.join() : ''))); } // [ABS] 타자 키(m)
-    this.batter.h = handOf(this.batter.id ? this.players.get(this.batter.id)?.bats : cpuBats(this.set.clubs ? this.set.clubs[team === 'home' ? 1 : 0] : 0, team, slot)); // [lefty] 1 우타 · -1 좌타 (스냅샷 s.bat.h)
+    this.batter.h = handOf(this.batter.id ? this.players.get(this.batter.id)?.bats : (this.batter.id ? null : batterOf(this.set.clubs ? this.set.clubs[team === 'home' ? 1 : 0] : 0, slot)?.bats) || cpuBats(this.set.clubs ? this.set.clubs[team === 'home' ? 1 : 0] : 0, team, slot)); // [lefty] 1 우타 · -1 좌타 (스냅샷 s.bat.h)
     this.lineIdx[team]++;
     if (this.set.pitRot === 'batter' && this.mode === 'game' && this.fielders.length && n > 1) this.rotatePitcher();
     [this.balls, this.strikes] = this.mode === 'game' ? this.R.startCount : [0, 0];
@@ -1268,7 +1269,9 @@ export class Game {
     return st;
   }
   // ── 투수 기록: 타석 단위로 아웃·실점·피안타·탈삼진·볼넷을 그 타석의 투수에게 붙임 ──
-  pitcherName() { const pc = this.pitcherCtrl(); return this.isLive(pc) ? this.players.get(pc).name : `${this.set.teams[this.half === 0 ? 1 : 0]} 투수`; }
+  // [KBO] CPU 타자·투수 실명 (shared/kbo.js 로스터, 가상 구단이면 기존 이름)
+  cpuName(team, slot) { const b = batterOf(this.set.clubs ? this.set.clubs[team === 'home' ? 1 : 0] : 0, slot); return b ? b.name : `CPU ${slot}번`; }
+  pitcherName() { const pc = this.pitcherCtrl(); if (this.isLive(pc)) return this.players.get(pc).name; const ti = this.half === 0 ? 1 : 0, c = this.set.clubs ? this.set.clubs[ti] : ti; if (this._spSeed == null) this._spSeed = (Math.random() * 1e4) | 0; return starterOf(c, this._spSeed + c) || `${this.set.teams[ti]} 투수`; }
   pstat(key, name, team) {
     let p = this.pstats.get(key);
     if (!p) { p = { id: key.startsWith('cpu') ? null : key, name, team, outs: 0, r: 0, h: 0, k: 0, bb: 0, hr: 0, bf: 0 }; this.pstats.set(key, p); }
