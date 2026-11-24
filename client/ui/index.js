@@ -178,7 +178,7 @@ export function createUI(ctx) {
     closeModal('motionM'); ctx.unlockAudio(); showErr('');
     const team = segVal('mTeam') || 'away', sv = store.get('solo', {}) || {};
     soloRules = cfg.rules;
-    ctx.startLocal(ctx.myName, { rules: cfg.rules, fld: 'auto', hitEase: store.get('hitEase', 1), tod: store.get('tod', 'night'), mode: 'game', mo: segVal('mKind') === 'screen' ? 2 : 1, inn: +segVal('mInn') || 3, diff: sv.diff ?? 1, team, pos: 'any', clubs: team === 'away' ? [soloClub.me, soloClub.op] : [soloClub.op, soloClub.me] });
+    ctx.startLocal(ctx.myName, { rules: cfg.rules, fld: 'auto', hitEase: store.get('hitEase', 1), tod: store.get('tod', 'night'), mode: 'game', mo: { screen: 2, bat: 3 }[segVal('mKind')] || 1, inn: +segVal('mInn') || 3, diff: sv.diff ?? 1, team, pos: 'any', clubs: team === 'away' ? [soloClub.me, soloClub.op] : [soloClub.op, soloClub.me] });
     setScreen('game');
   };
   $('bSolo').onclick = () => { if (!getName()) return; ctx.unlockAudio(); paintSoloClubs(); oLoad(); openModal('soloM'); };

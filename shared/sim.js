@@ -440,7 +440,7 @@ export const DEFAULT_SETTINGS = {
   name: '', mode: 'game', innings: 3, derbyOuts: 10, diff: 1, max: 12, pub: true, teams: ['서울 나이츠', '부산 하버스'],
   size: 0, // 팀당 인원 제한 (0=자유, 1·2·3 = 1:1·2:2·3:3)
   lineup: 'humans', // humans: 사람만 돌아가며 타격 · nine: 9인 타순(빈 타순은 CPU)
-  mo: 0, // [motion] 0 일반(키보드·마우스) · 1 모션 플레이(핸드폰·웹캠으로 투구+타격) · 2 스크린야구(타격만, 투구·수비 CPU)
+  mo: 0, // [motion] 0 일반(키보드·마우스) · 1 모션 플레이(핸드폰·웹캠으로 투구+타격) · 2 스크린야구(타격만, 투구·수비 CPU) · 3 배팅만(내 타석만, 상대 공격은 건너뜀)
   pitRot: 'inning', // inning: 이닝마다 투수 교대 · batter: 타자마다 교대 · fixed: 고정 · cpu: CPU 투수
   fieldCtl: 'auto', // auto: 공 가까운 수비수로 자동 전환(기본, 11-19: 'pos' 기본이면 혼자하기 수비 때 투수만 잡혀 아무것도 못 함) · pos: 내 포지션만
   clubs: [0, 1],
@@ -649,8 +649,8 @@ export class Game {
       this.ev('modeChange', { rules: s.rules, innings: s.innings });
     }
     if (m.timeLim != null) s.timeLim = clamp(m.timeLim | 0, 0, 60);
-    if (m.mo != null) s.mo = clamp(m.mo | 0, 0, 2);
-    if (s.mo === 2) s.pitRot = 'cpu'; // 스크린야구: 투수는 CPU
+    if (m.mo != null) s.mo = clamp(m.mo | 0, 0, 3);
+    if (s.mo >= 2) s.pitRot = 'cpu'; // 스크린야구·배팅만: 투수는 CPU
     if (s.mo) s.fieldCtl = 'auto';
     if (this.R.forceAutoField) s.fieldCtl = 'auto';
   }
@@ -1807,6 +1807,13 @@ export class Game {
   tick(dt) {
     this.now += dt;
     setWind(this.wind);
+    // [11-24] 배팅만(mo 3): 공격하는 쪽에 사람이 없으면(상대 공격) 그 이닝은 바로 넘김 — 실제 점수처럼 0점이 가장 많게
+    if (this.set.mo === 3 && this.mode === 'game' && this.phase === 'pitch' && !this.humans(this.batTeam).some((h) => h.conn)) {
+      const r = [0, 0, 0, 0, 0, 0, 1, 1, 1, 2, 3][Math.floor(Math.random() * 11)];
+      this.score[this.half] += r; this.halfRuns = r;
+      this.say(r ? `상대 공격 ${r}점` : '상대 공격 무득점', false);
+      this.endHalf(); return;
+    }
     // 포수 미트에 공 들어감 (안 맞은 투구): 사운드 '팡' · 포수 포구 모션용
     if (this.pitchCatch && this.now >= this.pitchCatch.at) {
       const pc = this.pitchCatch; this.pitchCatch = null;

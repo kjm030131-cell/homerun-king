@@ -332,7 +332,7 @@ export class ClipAnimator {
       // [motion] 핸드폰 기울기 → 배트 각도 (손목 기준으로 배트를 돌리고 다른 손은 그립 IK가 따라감). 스윙 중엔 스윙 면 기울기만 약하게
       if (P.bat) { const b = P.bat; if (!b.userData.q0) b.userData.q0 = b.quaternion.clone();
         const o = c.batOff, k = swinging ? 0 : 1, Q = c.batQ; // [11-24] 스윙 중엔 핸드폰 회전 끔 (실제 스윙은 핸드폰이 반 바퀴 넘게 돌아 캐릭터가 빙글빙글 돌았음)
-        if (Q && k > 0) { _bq2.set(Q[0], Q[1], Q[2], Q[3]); if (k < 1) _bq2.slerp(_bqI, 1 - k); b.quaternion.copy(b.userData.q0).multiply(_bq2); C.motionBody(b, top, k); } // [위 방식] 핸드폰 3D 방향 그대로 + 상체가 따라감
+        if (Q && k > 0) { _bq2.set(Q[0], Q[1], Q[2], Q[3]); if (k < 1) _bq2.slerp(_bqI, 1 - k); b.quaternion.copy(b.userData.q0).multiply(_bq2); } // [11-24] 상체 비틀기는 끔(몸이 배배 꼬였음) — 배트만 손에 쥔 채 작게 // [위 방식] 핸드폰 3D 방향 그대로 + 상체가 따라감
         else if (o && k > 0) { _be.set(clamp(o[0], -0.95, 0.95) * k, 0, clamp(o[1], -0.8, 0.8) * k); b.quaternion.copy(b.userData.q0).multiply(_bq.setFromEuler(_be)); } else b.quaternion.copy(b.userData.q0); }
       if (c.pose) C.motionPose(c.pose, 1, !!c.poseMir); // [motion] 웹캠 전신: 내 몸 그대로
       if (P.bat && P.bat.visible && this.gripW > 0.01) C.grip(P.bat, side, top, this.gripW); }

@@ -29,6 +29,7 @@ export function createMotion(api) {
   const M = {
     pad: null, cam: null, code: store.get('padCode', null) || newPadCode(),
     mirror: !!store.get('motionMir', false), // 웹캠 좌우 반전
+    assist: store.get('motionAssist', 0.6), // [11-24] 조준 도움: 공 쪽으로 끌어주는 비율 (세로 그립으로 정확히 맞추기 어려워서 기본 60%)
     calib: store.get('motionCal', 0), // 타이밍 보정(ms, +면 더 늦게 친 걸로)
     auto: store.get('motionAuto', 0), elMean: store.get('motionEl', -12), ori: null, oriT: 0, // [11-23] 자동 보정(ms): 스윙마다 내 평균 타이밍 쪽으로 조금씩
     camLag: 90, // 웹캠 캡처 지연(ms) 기본값
@@ -54,7 +55,7 @@ export function createMotion(api) {
     // [11-24] 핸드폰만: 휘두르기 직전(0.15초 전) 커서 위치로 스윙 — 배트 위치를 공 오는 곳에 맞춰 놓고 치기 (공 쪽으로 20%만 도와줌)
     const ca = src === 'pad' ? M.cursorAt(atLocalMs - 150) : null;
     if (ca) {
-      const ax = ca[0] + (p.tx - ca[0]) * 0.2 + gauss() * 0.02, ay2 = ca[1] + (p.ty - ca[1]) * 0.2 + gauss() * 0.02;
+      const as = M.assist, ax = ca[0] + (p.tx - ca[0]) * as + gauss() * 0.02, ay2 = ca[1] + (p.ty - ca[1]) * as + gauss() * 0.02;
       api.swing(strong ? 'power' : 'contact', { t, aim: [ax, ay2], vis: visT() });
       M.log.push({ src, lag: Math.round(lagMs), dt: Math.round((t - p.arrive) * 1000), cur: 1 }); if (M.log.length > 20) M.log.shift();
       M.lastLag = Math.round(lagMs);
@@ -95,6 +96,7 @@ export function createMotion(api) {
   // ── 핸드폰 ──
   function onPad(m) {
     if (m.t === 'ori') { M.ori = [+m.b || 0, +m.g || 0]; if (!(performance.now() < M.curFreeze)) M.curRaw = isFinite(m.cx) ? [m.cx * 22, m.cy * 22] : [M.ori[1], M.ori[0]]; /* 새 핸드폰 페이지는 배트 끝 방향으로 계산한 조준값(cx,cy)을 보냄 */ M.oriQ = Array.isArray(m.q) && m.q.length === 4 ? m.q.map(Number) : null; M.oriT = performance.now(); }
+    else if (m.t === 'assist') { const v = +m.v; if (v >= 0 && v <= 0.9) { M.assist = v; store.set('motionAssist', v); } }
     else if (m.t === 'chk') { const S = api.S(), role = api.role(); if (S && S.mo && role.batter && S.ph === 'pitching' && S.p && api.simNow() > S.p.t0 && api.net()) { api.net().send({ t: 'chk' }); api.toast('체크스윙'); } }
     else if (m.t === 'sws') { // 휘두르기 시작: 정점(=임팩트)은 보통 시작 뒤 ~60ms → 그 시각으로 화면 스윙만 먼저
       const S = api.S(), role = api.role();
@@ -190,7 +192,7 @@ export function createMotion(api) {
     syncAuto();
     const on = M.active();
     show('motionBadge', on && api.screen() === 'game');
-    if (on) setText('motionBadgeT', [(M.pad && M.pad.pads) ? '📱 핸드폰' : '', (M.cam && M.cam.on) ? '📷 웹캠' : ''].filter(Boolean).join(' · ') + (S && S.mo === 2 ? ' · 스크린야구' : ' · 수비 자동'));
+    if (on) setText('motionBadgeT', [(M.pad && M.pad.pads) ? '📱 핸드폰' : '', (M.cam && M.cam.on) ? '📷 웹캠' : ''].filter(Boolean).join(' · ') + (S && S.mo === 2 ? ' · 스크린야구' : S && S.mo === 3 ? ' · 배팅만' : ' · 수비 자동'));
     const camOn = !!(M.cam && M.cam.on);
     if (M.cam) M.cam.paused = !!(M.pose && M.pose.ready);
     const pn = performance.now(), paintNow = pn - (M.paintT || 0) > 66; if (paintNow) M.paintT = pn; // [perf] 미리보기 15fps
@@ -225,6 +227,9 @@ export function createMotion(api) {
     const tq = fade < 1 ? [q[0] * sg * fade, q[1] * sg * fade, q[2] * sg * fade, 1 - (1 - Math.abs(q[3])) * fade] : [q[0] * sg, q[1] * sg, q[2] * sg, q[3] * sg];
     for (let i = 0; i < 4; i++) bq[i] += (tq[i] - bq[i]) * 0.55;
     const n = Math.hypot(bq[0], bq[1], bq[2], bq[3]) || 1; for (let i = 0; i < 4; i++) bq[i] /= n;
+    // 배트는 손에 쥔 채 25°까지만 따라감 (크게 돌리면 배트를 안 쥔 것처럼 보였음)
+    const a = 2 * Math.acos(Math.min(1, Math.abs(bq[3]))), MAX = 0.44;
+    if (a > MAX) { const k = MAX / a, s0 = Math.sin(a / 2), s1 = Math.sin(MAX / 2), sg2 = bq[3] < 0 ? -1 : 1; return [bq[0] / s0 * s1 * sg2, bq[1] / s0 * s1 * sg2, bq[2] / s0 * s1 * sg2, Math.cos(MAX / 2)]; }
     return bq;
   };
   // [11-24] 핸드폰 조준 커서: 타석 자세 기준 좌우 기울기 → 좌우, 앞뒤 기울기 → 높낮이 (22°면 존 끝)
