@@ -52,6 +52,12 @@ three r160을 Node에서 돌려(DOM 스텁) 장면을 만들고, 보이는 메�
 4. 잔디 무늬가 걸을 때 반짝이거나 깨지지 않는지, 관중이 멀리서 사라지거나 깜빡이지 않는지.
 5. 광고: 외야 펜스(ad01~11 고정), 파울 벽·3층 리본·전광판 옆(ad12~22 회전).
 
+## 4-1. [11-24] 잠실 텍스처 교체 (GPT 생성, 원본 assets-src/stadium/)
+- 그라운드: `grass.jpg`, `dirt.jpg`(내야), `mound.jpg`(마운드·불펜, dirtMat 전용 uniform), `track.jpg`(워닝트랙 — 셰이더에서 sim `fenceR/standR` 식으로 펜스 앞 4.5m·파울 벽 앞 2.8m 구간만). 평균색은 `client/texinfo.js` TEX_AVG.
+- 외야 펜스 패딩 `wallpad.jpg`(사진 한 장 = 8m), 콘크리트 `stadium_concrete.jpg`(OPTIONAL_TEX on).
+- 원경 `sky_day.jpg`/`sky_night.jpg`: [원본(롯데타워) | 타워 지운 거울본] 이어 붙인 4096px 띠, 실린더(높이 1400, y 610)에 2번 반복 → 타워는 좌중간 뒤와 반대편에 1개씩. 사진이 뜨면 절차적 상자 빌딩·3D 롯데타워는 숨김.
+- 관중 사진(crowd_home/away/general)은 아직 안 씀 — 지금 관중은 1인 빌보드 방식이라 관중 개편 때.
+
 ## 5. 텍스처 (선택 — 없으면 절차적 생성으로 폴백)
 파일을 `public/assets/tex/`에 넣고 `client/stadium/index.js`의 `OPTIONAL_TEX`에서 해당 항목 `on: true`로 바꾸면 적용. (기존 grass/dirt/sky_day/sky_night/ads는 그대로 사용 중 — 교체하고 싶을 때만 아래 프롬프트.)
 GPT 이미지 생성 후 지정 해상도로 줄여서(jpg 품질 85) 넣는다. 각 프롬프트는 그대로 복사해서 쓰면 된다.

@@ -113,24 +113,33 @@ export function buildField(world, opt, Q) {
   const U = {
     detail: { value: detailTex }, pGrass: { value: detailTex }, pDirt: { value: detailTex },
     gAvg: { value: new THREE.Vector3(0.5, 0.5, 0.5) }, dAvg: { value: new THREE.Vector3(0.5, 0.5, 0.5) }, hasG: { value: 0 }, hasD: { value: 0 },
+    pTrack: { value: detailTex }, tAvg: { value: new THREE.Vector3(0.5, 0.5, 0.5) }, hasT: { value: 0 }, // [stadium 11-24] 워닝트랙 사진
     uMow: { value: 0.11 }, // 예초 무늬 세기
   };
+  const UM = { ...U, pDirt: { value: detailTex }, dAvg: { value: new THREE.Vector3(0.5, 0.5, 0.5) }, hasD: { value: 0 }, hasT: { value: 0 } }; // 마운드·불펜(dirtMat)용: 흙만 마운드 사진
   const loader = new THREE.TextureLoader();
   for (const [k, info] of Object.entries(opt.tex || {})) {
-    if (!info || !info.url || (k !== 'grass' && k !== 'dirt')) continue;
+    if (!info || !info.url || !['grass', 'dirt', 'mound', 'track'].includes(k)) continue;
     loader.load(info.url, (t) => {
       t.wrapS = t.wrapT = THREE.RepeatWrapping; t.colorSpace = THREE.NoColorSpace; t.anisotropy = 8; t.needsUpdate = true;
-      if (k === 'grass') { U.pGrass.value = t; U.gAvg.value.set(...(info.avg || [0.5, 0.5, 0.5])); U.hasG.value = 1; }
-      else { U.pDirt.value = t; U.dAvg.value.set(...(info.avg || [0.5, 0.5, 0.5])); U.hasD.value = 1; }
+      const avg = info.avg || [0.5, 0.5, 0.5];
+      if (k === 'grass') { U.pGrass.value = t; U.gAvg.value.set(...avg); U.hasG.value = 1; }
+      else if (k === 'dirt') { U.pDirt.value = t; U.dAvg.value.set(...avg); U.hasD.value = 1; if (!UM.hasD.value) { UM.pDirt.value = t; UM.dAvg.value.set(...avg); UM.hasD.value = 1; } }
+      else if (k === 'mound') { UM.pDirt.value = t; UM.dAvg.value.set(...avg); UM.hasD.value = 2; }
+      else { U.pTrack.value = t; U.tAvg.value.set(...avg); U.hasT.value = 1; }
     }, undefined, () => {});
   }
   const H = BASES[1][1];
-  const onCompile = (sh) => {
-    Object.assign(sh.uniforms, U);
+  const mkCompile = (UU) => (sh) => {
+    Object.assign(sh.uniforms, UU);
     sh.vertexShader = inject(sh.vertexShader, '#include <common>', '#include <common>\nvarying vec2 vWxz;');
     sh.vertexShader = inject(sh.vertexShader, '#include <fog_vertex>', '#include <fog_vertex>\nvWxz = (modelMatrix * vec4(transformed, 1.0)).xz;');
     sh.fragmentShader = inject(sh.fragmentShader, '#include <common>', `#include <common>
 uniform sampler2D detail; uniform sampler2D pGrass; uniform sampler2D pDirt; uniform vec3 gAvg; uniform vec3 dAvg; uniform float hasG; uniform float hasD; uniform float uMow;
+uniform sampler2D pTrack; uniform vec3 tAvg; uniform float hasT;
+// 워닝트랙 경계 = shared/sim.js fenceR/standR 와 같은 식 (펜스 앞 4.5m, 파울 지역 벽 앞 2.8m)
+float hrFenceR(float a){ a = min(abs(a), 0.78539816); return 100.0 + 25.0 * pow(max(0.0, cos(2.0 * a)), 0.8); }
+float hrStandR(float ph){ float a = abs(ph); if (a <= 0.78539816) return hrFenceR(ph); if (a > 2.35619449) return 18.0 + 4.0 * (3.14159265 - a) / 0.78539816; return max(18.0, min(100.0, 22.0 / sin(a - 0.78539816))); }
 varying vec2 vWxz;
 // 안티에일리어싱 사각파: 멀어서 줄무늬가 픽셀보다 작아지면 저절로 0으로 수렴 (모아레 없음)
 float hrSq(float x) { float fw = max(fwidth(x), 1e-4); return clamp(sin(3.14159265 * x) / (3.14159265 * fw * 1.2), -1.0, 1.0); }`);
@@ -145,7 +154,12 @@ float hrSq(float x) { float fw = max(fwidth(x), 1e-4); return clamp(sin(3.141592
  vec3 g1 = texture2D(pGrass, p * 0.42).rgb / gAvg, g2 = texture2D(pGrass, p * 0.11 + 0.37).rgb / gAvg;
  vec3 d1 = texture2D(pDirt, p * 0.55).rgb / dAvg, d2 = texture2D(pDirt, p * 0.13 + 0.61).rgb / dAvg;
  vec3 gm = mix(vec3(0.8 + 0.3 * dt1), mix(g1, g2, 0.35), hasG);
- vec3 dm = mix(vec3(0.8 + 0.3 * dt1), mix(d1, d2, 0.3), hasD);
+ vec3 dm = mix(vec3(0.8 + 0.3 * dt1), mix(d1, d2, 0.3), min(hasD, 1.0));
+ if (hasD > 1.5) dm = mix(texture2D(pDirt, p * 0.9).rgb, texture2D(pDirt, p * 0.21 + 0.4).rgb, 0.3) / dAvg; // 마운드: 더 잘게
+ { float ph = atan(p.x, p.y), rr = length(p); float edge = abs(ph) <= 0.78539816 ? hrFenceR(ph) - 4.5 : hrStandR(ph) - 2.8;
+   float tr = smoothstep(edge - 0.25, edge + 0.25, rr) * hasT;
+   vec3 t1 = texture2D(pTrack, p * 0.5).rgb / tAvg, t2 = texture2D(pTrack, p * 0.12 + 0.2).rgb / tAvg;
+   dm = mix(dm, mix(t1, t2, 0.3), tr); }
  vec3 m = mix(gm, dm, isDirt);
  m = mix(m, vec3(0.95 + 0.06 * dt1), isLine);
  diffuseColor.rgb *= clamp(m, 0.45, 1.7) * (1.0 + 0.16 * (dt2 - 0.5));
@@ -161,7 +175,7 @@ float hrSq(float x) { float fw = max(fwidth(x), 1e-4); return clamp(sin(3.141592
  diffuseColor.rgb *= 1.0 + uMow * mow * isGrass;
 }`);
   };
-  fieldMat.onBeforeCompile = onCompile;
+  fieldMat.onBeforeCompile = mkCompile(U);
   fieldMat.customProgramCacheKey = () => 'hr-field';
   { // 그라운드 = 관중석 경계선 안쪽만
     const pts = [], N = 360;
@@ -173,7 +187,7 @@ float hrSq(float x) { float fw = max(fwidth(x), 1e-4); return clamp(sin(3.141592
   }
   // 흙 재질(마운드·불펜) — 같은 셰이더, 단색 흙
   const dirtMat = new THREE.MeshStandardMaterial({ color: DIRT, roughness: 1 });
-  dirtMat.onBeforeCompile = onCompile; dirtMat.customProgramCacheKey = () => 'hr-field';
+  dirtMat.onBeforeCompile = mkCompile(UM); dirtMat.customProgramCacheKey = () => 'hr-field';
   const chalk = new THREE.MeshStandardMaterial({ color: CHALK, roughness: 0.8 });
   { // 마운드 (높이 25cm)
     // [model] 단면을 바깥(지면) → 가운데(정상) 순서로: LatheGeometry 는 점 순서로 면 방향이 정해짐. 전엔 가운데 → 바깥이라 면·노멀이

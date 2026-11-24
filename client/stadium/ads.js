@@ -12,7 +12,7 @@ export function createAds(urls) {
   const canvas = document.createElement('canvas'); canvas.width = CW * COLS; canvas.height = CH * ROWS;
   const g = canvas.getContext('2d');
   const tex = new THREE.CanvasTexture(canvas); tex.colorSpace = THREE.SRGBColorSpace; tex.anisotropy = 8;
-  const fallback = [['#0f3d2a', '#ffd23a', 'HOMERUN KING'], ['#1e4f8c', '#ffffff', 'PLAY BALL'], ['#b52a2f', '#ffffff', 'BALLPARK'], ['#202835', '#ff9b3d', 'SEOUL NIGHT']];
+  const fallback = [['#0b1b33', '#c9a227', 'WALK-OFF'], ['#1e4f8c', '#ffffff', 'PLAY BALL'], ['#b52a2f', '#ffffff', 'BALLPARK'], ['#202835', '#ff9b3d', 'SEOUL NIGHT']];
   const drawFallback = (i) => {
     const [bg, fg, t] = fallback[i % fallback.length], x = (i % COLS) * CW, y = Math.floor(i / COLS) * CH;
     g.fillStyle = bg; g.fillRect(x, y, CW, CH); g.fillStyle = fg; g.font = '900 46px Oswald, sans-serif'; g.textAlign = 'center'; g.textBaseline = 'middle'; g.fillText(t, x + CW / 2, y + CH / 2 + 2);

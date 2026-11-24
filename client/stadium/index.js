@@ -31,7 +31,7 @@ export const STADIUM_Q = {
 // 파일을 넣었으면 해당 값을 true 로 → 없으면 절차적 텍스처로 그림(404 요청 안 보냄)
 export const OPTIONAL_TEX = {
   facade: { file: 'stadium_facade.jpg', on: false },
-  concrete: { file: 'stadium_concrete.jpg', on: false },
+  concrete: { file: 'stadium_concrete.jpg', on: true }, // [stadium 11-24]
   roof: { file: 'stadium_roof.jpg', on: false },
   crowdAtlas: { file: 'crowd_atlas.png', on: false },
   fieldLogo: { file: 'field_logo.png', on: false },

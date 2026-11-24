@@ -80,7 +80,7 @@ export function buildEnv(world, opt, Q, M) {
     for (let i = 0; i < Q.cityBoxes; i++) { const a = R() * Math.PI * 2, r = 900 + R() * 900; placeBox(Math.cos(a) * r, Math.sin(a) * r + 40, 30 + R() * 40, 30 + Math.pow(R(), 2) * 120, 25 + R() * 20, R() * 3, i % 3); }
     // 강 건너 스카이라인
     for (let i = 0; i < Q.cityBoxes; i++) { const x = -2600 + R() * 5200, z = 1560 + R() * 600, w = 30 + R() * 50, h = 30 + Math.pow(R(), 2) * 140; placeBox(x, z, w, h, 30, 0, i % 3); }
-    groups.forEach((gs, i) => { if (!gs.length) return; const mat = new THREE.MeshBasicMaterial({ map: winTexs[i], color: '#c0c6d4', name: 'city' + i }); const m = new THREE.Mesh(mergeGeometries(gs), mat); m.userData.sh = 'none'; world.add(m); refs.winMats.push(mat); });
+    groups.forEach((gs, i) => { if (!gs.length) return; const mat = new THREE.MeshBasicMaterial({ map: winTexs[i], color: '#c0c6d4', name: 'city' + i }); const m = new THREE.Mesh(mergeGeometries(gs), mat); m.userData.sh = 'none'; m.userData.keep = true; world.add(m); refs.winMats.push(mat); (refs.city ||= []).push(m); }); // keep: 스카이라인 사진이 뜨면 숨김(병합 제외)
   }
   // ── 롯데월드타워 (남동쪽 약 2.3km, 555m) — 잠실 랜드마크 ──
   {
@@ -88,10 +88,10 @@ export function buildEnv(world, opt, Q, M) {
     const body = new THREE.LatheGeometry(prof, 4); body.rotateY(Math.PI / 4);
     const strips = canvasTex(64, 512, (g, w, h) => { g.fillStyle = '#0a0e17'; g.fillRect(0, 0, w, h); for (let y = 0; y < h; y += 5) { g.fillStyle = `rgba(255,225,170,${0.3 + R() * 0.5})`; g.fillRect(2, y, w - 4, 2); } g.fillStyle = 'rgba(160,210,255,.85)'; g.fillRect(0, 0, 3, h); g.fillRect(w - 3, 0, 3, h); });
     const twm = new THREE.MeshBasicMaterial({ map: strips, fog: false, color: '#c9d3e6', name: 'tower' });
-    const tw = new THREE.Mesh(body, twm); tw.position.set(-1620, -2, -1640); world.add(tw);
-    refs.tower = { m: twm, night: strips, day: canvasTex(64, 512, (g, w, h) => { const gr = g.createLinearGradient(0, 0, w, 0); gr.addColorStop(0, '#8fa3bb'); gr.addColorStop(0.5, '#d6e0ea'); gr.addColorStop(1, '#7d90a8'); g.fillStyle = gr; g.fillRect(0, 0, w, h); for (let y = 0; y < h; y += 6) { g.fillStyle = 'rgba(40,60,90,.18)'; g.fillRect(0, y, w, 1); } }) };
+    const tw = new THREE.Mesh(body, twm); tw.position.set(-1620, -2, -1640); tw.userData.keep = true; world.add(tw);
+    refs.tower = { mesh: tw, m: twm, night: strips, day: canvasTex(64, 512, (g, w, h) => { const gr = g.createLinearGradient(0, 0, w, 0); gr.addColorStop(0, '#8fa3bb'); gr.addColorStop(0.5, '#d6e0ea'); gr.addColorStop(1, '#7d90a8'); g.fillStyle = gr; g.fillRect(0, 0, w, h); for (let y = 0; y < h; y += 6) { g.fillStyle = 'rgba(40,60,90,.18)'; g.fillRect(0, y, w, 1); } }) };
     const beacon = new THREE.Sprite(new THREE.SpriteMaterial({ map: glowTex(), color: '#ff5a4a', transparent: true, blending: THREE.AdditiveBlending, fog: false, depthWrite: false }));
-    beacon.scale.set(40, 40, 1); beacon.position.set(-1620, 558, -1640); world.add(beacon); refs.nightOnly.push(beacon);
+    beacon.scale.set(40, 40, 1); beacon.position.set(-1620, 558, -1640); world.add(beacon); refs.nightOnly.push(beacon); refs.tower.beacon = beacon;
   }
   // ── 한강 (북쪽 +z) + 다리 + 강변 불빛 ──
   {
@@ -111,14 +111,17 @@ export function buildEnv(world, opt, Q, M) {
   }
   // ── 원경 파노라마 사진 (서울 스카이라인, 낮/밤) — 위쪽은 하늘과 섞이게 알파 ──
   {
-    const am = canvasTex(4, 256, (g, w, h) => { const gr = g.createLinearGradient(0, 0, 0, h); gr.addColorStop(0, '#000'); gr.addColorStop(0.42, '#000'); gr.addColorStop(0.62, '#fff'); gr.addColorStop(1, '#fff'); g.fillStyle = gr; g.fillRect(0, 0, w, h); });
-    const pano = new THREE.Mesh(new THREE.CylinderGeometry(3000, 3000, 640, 64, 1, true), new THREE.MeshBasicMaterial({ color: '#ffffff', side: THREE.BackSide, fog: false, transparent: true, opacity: 0, depthWrite: false, alphaMap: am, name: 'pano' }));
-    pano.position.y = 250; pano.renderOrder = -1; world.add(pano);
+    // [stadium 11-24] 새 스카이라인(롯데타워)이 위쪽까지 보이게 알파 구간을 올림(전 0.42→0.62, 지금 0.05→0.16)
+    const am = canvasTex(4, 256, (g, w, h) => { const gr = g.createLinearGradient(0, 0, 0, h); gr.addColorStop(0, '#000'); gr.addColorStop(0.05, '#000'); gr.addColorStop(0.16, '#fff'); gr.addColorStop(1, '#fff'); g.fillStyle = gr; g.fillRect(0, 0, w, h); });
+    const pano = new THREE.Mesh(new THREE.CylinderGeometry(3000, 3000, 1400, 96, 1, true), new THREE.MeshBasicMaterial({ color: '#ffffff', side: THREE.BackSide, fog: false, transparent: true, opacity: 0, depthWrite: false, alphaMap: am, name: 'pano' }));
+    pano.position.y = 610; pano.renderOrder = -1; world.add(pano); // [stadium 11-24] 1400m 높이: 사진 지평선 ≈ 고각 4°(외야석 위로 아파트), 타워 끝 ≈ 20° (전 640m·y250 은 관중석에 다 가려졌음)
     refs.pano = pano;
     const L = new THREE.TextureLoader();
     for (const k of ['skyDay', 'skyNight']) {
       const info = opt.tex && opt.tex[k]; if (!info || !info.url) continue;
-      L.load(info.url, (t) => { t.colorSpace = THREE.SRGBColorSpace; t.wrapS = THREE.MirroredRepeatWrapping; t.repeat.set(6, 1); t.anisotropy = 4; refs[k] = t; if (refs.onPano) refs.onPano(); }, undefined, () => {});
+      // [stadium 11-24] 잠실 스카이라인: 파일 = [원본(롯데타워) | 타워 지운 거울본] 이어 붙인 띠(이음매 없음, 타워 1개). 한 바퀴에 2번 → 타워는 180° 떨어져 한 화면엔 1개.
+      //  실린더 u=0 이 중견수 방향(+z), u 는 3루 쪽(+x)으로 증가. 타워가 좌중간 뒤(u≈0.056)에 오게: off = 띠 속 타워 x - 0.111 (낮 0.355, 밤 0.331)
+      L.load(info.url, (t) => { t.colorSpace = THREE.SRGBColorSpace; t.wrapS = THREE.RepeatWrapping; t.repeat.set(2, 1); t.offset.x = (k === 'skyNight' ? 0.331 : 0.355) - 0.111; t.anisotropy = 8; refs[k] = t; if (refs.onPano) refs.onPano(); }, undefined, () => {});
     }
   }
   // ── 하늘 돔: 그라데이션 + 해 번짐 + 구름(낮) / 지평선 도시 불빛(밤) ──
@@ -173,6 +176,10 @@ export function buildEnv(world, opt, Q, M) {
     else { U.top.value.set('#2a66c8'); U.mid.value.set('#79aee6'); U.hor.value.set('#d9e6f0'); }
     const pt = refs[night ? 'skyNight' : 'skyDay'];
     if (pt) { refs.pano.material.map = pt; refs.pano.material.opacity = 1; refs.pano.material.needsUpdate = true; }
+    if (pt && refs.tower.mesh.visible) { // 사진(스카이라인·롯데타워)이 있으니 상자 빌딩·3D 타워는 숨김 — 사진 앞에 회색 상자가 겹쳐 보였음
+      refs.tower.mesh.visible = false; refs.tower.beacon.visible = false; refs.nightOnly.splice(refs.nightOnly.indexOf(refs.tower.beacon), 1);
+      for (const m of refs.city || []) m.visible = false;
+    }
     refs.river.m.map = night ? refs.river.nightMap : null; refs.river.m.color.set(night ? '#8fa0c0' : '#5d7f9e'); refs.river.m.needsUpdate = true;
     for (const m of refs.winMats) { if (!m.userData.nightMap) m.userData.nightMap = m.map; const dt = dayWindowTex(); dt.repeat.copy(m.userData.nightMap.repeat); m.map = night ? m.userData.nightMap : dt; m.needsUpdate = true; }
     refs.tower.m.map = night ? refs.tower.night : refs.tower.day; refs.tower.m.needsUpdate = true;
