@@ -71,3 +71,18 @@ test('모션 플레이 방(mo=1): 모두 수비 자동 · 스크린야구(mo=2):
     if (mo === 2) assert.equal(humanPitch, 0, '스크린야구인데 사람이 투구'); else assert.ok(humanPitch > 3, `모션 플레이 사람 투구 ${humanPitch}`);
   }
 });
+
+test('배팅만(mo=3): 상대 공격은 바로 넘어가고 내 타석만 계속', () => {
+  const g = new Game({ emit: () => {}, sendTo: () => {} });
+  g.addPlayer('me', '나'); const me = g.players.get('me'); me.team = 'home'; me.pos = 'any';
+  g.applySettings({ mode: 'game', innings: 3, mo: 3 });
+  g.start();
+  let myPA = 0, oppPitches = 0;
+  for (let i = 0; i < 60 * 60 * 6 && g.phase !== 'over'; i++) {
+    if (g.phase === 'pitching' && g.batTeam !== 'home') oppPitches++;
+    if (g.phase === 'pitching' && g.batTeam === 'home' && g.pitch && !g.pitch.swung && g.now > g.pitch.arrive - 0.01) { myPA++; g.handle('me', { t: 'swing', pid: g.pitch.id, dt: 0, ax: 0, ay: 0, mode: 'contact' }); }
+    g.tick(1 / 60);
+  }
+  assert.equal(oppPitches, 0, '상대 공격 투구가 있었음');
+  assert.ok(myPA > 5, `내 스윙 ${myPA}`);
+});

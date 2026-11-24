@@ -456,7 +456,7 @@ export class Character {
     }
     if (vis(0) > 0.5) aimBone(B.Neck, B.Head, new THREE.Vector3().subVectors(_P[0], mid(11, 12)), w * 0.6);
     // 팔·다리
-    for (const [bn, tn, a, b] of [['LeftArm', 'LeftForeArm', 11, 13], ['LeftForeArm', 'LeftHand', 13, 15], ['RightArm', 'RightForeArm', 12, 14], ['RightForeArm', 'RightHand', 14, 16],
+    for (const [bn, tn, a, b] of [['LeftArm', 'LeftForeArm', 11, 13], ['LeftForeArm', 'LeftHand', 13, 15], ['RightArm', 'RightForeArm', 12, 14], ['RightForeArm', 'RightHand', 14, 16], // 팔·다리 모두 잘 보일 때만
       ['LeftUpLeg', 'LeftLeg', 23, 25], ['LeftLeg', 'LeftFoot', 25, 27], ['RightUpLeg', 'RightLeg', 24, 26], ['RightLeg', 'RightFoot', 26, 28]]) { const vv = Math.min(vis(a), vis(b)); if (vv > 0.45) aimBone(B[bn], B[tn], v(a, b), w * Math.min(1, (vv - 0.45) / 0.25)); } // 안 보이는 관절(화면 밖 다리 등)은 원래 동작
   }
   _blob() {

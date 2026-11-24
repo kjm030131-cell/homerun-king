@@ -87,6 +87,7 @@ h1{font-size:26px;font-weight:900;line-height:1.2}
     <div class="fb" id="bFb"></div>
     <div class="row"><button class="btn" id="bBunt">번트</button><button class="btn" id="bChal" disabled>ABS 챌린지</button></div>
     <div class="row"><button class="btn" data-g="1">직구 노림</button><button class="btn" data-g="2">변화구</button><button class="btn" data-g="3">오프스피드</button></div>
+    <div class="sens">조준 도움 <button class="btn" data-as="0.8">강</button><button class="btn" data-as="0.6">중</button><button class="btn" data-as="0.3">약</button></div>
     <div class="row"><button class="btn" id="bStance">자세 맞추기</button><button class="btn" id="bFlipY">위아래 반대</button><button class="btn" id="bFlipX">좌우 반대</button></div>
     <p class="small">핸드폰을 배트처럼 세로로 쥐어 (윗부분 = 배트 끝). 배트 끝을 좌우·앞뒤로 기울여 초록 점을 공 오는 곳에 맞추고 휘둘러. 반대로 움직이면 '반대' 버튼.</p>
     <button class="btn hide" id="tapSwing">탭으로 스윙 (센서 없음)</button>
@@ -153,7 +154,7 @@ h1{font-size:26px;font-weight:900;line-height:1.2}
       if (m.t === 'ice' && m.c && pc) { pc.addIceCandidate(m.c).catch(() => { }); return; }
       if (m.t === 'peer') { setConn(!!m.host, m.host ? 'PC 연결됨' : 'PC 꺼져 있음'); if (!m.host) { setRole('wait'); rtcReset(); } else if (!direct) rtcStart(); }
       else if (m.t === 'png') { send({ t: 'pog', h: m.h, p: performance.now() }); if (!direct) setConn(true, 'PC 연결됨 (서버 경유)'); }
-      else if (m.t === 'hs') { hs = m; setRole(m.st); paintHS(); }
+      else if (m.t === 'hs') { if (!hs.st) send({ t: 'assist', v: assist }); hs = m; setRole(m.st); paintHS(); }
       else if (m.t === 'ack') onAck(m);
       else if (m.t === 'fb') fb(m.k === 'pitch' ? 'pFb' : 'bFb', m.txt, m.col, m.vib);
     }
@@ -283,8 +284,10 @@ h1{font-size:26px;font-weight:900;line-height:1.2}
     if (b.dataset.t) { hs.type = b.dataset.t; paintHS(); send({ t: 'type', v: b.dataset.t }); vib(10); }
     if (b.dataset.g) { send({ t: 'guess', g: b.dataset.g }); vib(10); }
     if (b.dataset.s) { sens = +b.dataset.s; LSset('sens', sens); paintSens(); }
+    if (b.dataset.as) { assist = +b.dataset.as; LSset('assist', assist); send({ t: 'assist', v: assist }); paintSens(); }
   });
-  function paintSens() { document.querySelectorAll('[data-s]').forEach((b) => b.classList.toggle('on', +b.dataset.s === sens)); }
+  let assist = LS('assist', 0.6);
+  function paintSens() { document.querySelectorAll('[data-s]').forEach((b) => b.classList.toggle('on', +b.dataset.s === sens)); document.querySelectorAll('[data-as]').forEach((b) => b.classList.toggle('on', +b.dataset.as === assist)); }
   paintSens();
   $('bStance').onclick = () => resetStance();
   const paintFlip = () => { $('bFlipX').classList.toggle('on', flipX); $('bFlipY').classList.toggle('on', flipY); };

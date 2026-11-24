@@ -3,7 +3,7 @@
 //  - 스윙: 두 손목 가운데 속도가 꼭짓점 찍는 순간 = 맞는 순간, 그때 손 높이 = 스윙 높이
 const VER = '0.10.14';
 const CDN = `https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@${VER}`;
-const MODEL = 'https://storage.googleapis.com/mediapipe-models/pose_landmarker/pose_landmarker_lite/float16/1/pose_landmarker_lite.task';
+const MODEL = 'https://storage.googleapis.com/mediapipe-models/pose_landmarker/pose_landmarker_full/float16/1/pose_landmarker_full.task';
 const dynImport = new Function('u', 'return import(u)'); // 빌드 도구가 CDN 주소를 묶으려 하지 않게
 
 export function createPose(video, onSwing) {
