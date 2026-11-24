@@ -106,13 +106,13 @@ export function createMotion(api) {
       M.curFreeze = performance.now() + 700; // 휘두르는 동안 커서 고정
       if (S && S.mo && role.batter && S.ph === 'pitching' && S.p) { const lag = performance.now() - M.pad.toLocal(m.at) - M.calib - M.auto + M.padOff; const t = api.simNow() - lag / 1000 + 0.06; if (t >= S.p.t0) api.preSwing(t); }
     } else if (m.t === 'swing') { const r = swing(M.pad.toLocal(m.at), m.mode === 'power', 'pad', +m.el); M.pad.send({ t: 'ack', k: 'swing', r, lag: r === 'ok' ? M.lastLag : null, auto: Math.round(M.auto), h: r === 'ok' ? M.lastH : null }); M.lastH = null; }
-    else if (m.t === 'grip') { M.grip = !!m.on; if (!m.on) { M.aim = null; api.setAim(null); } }
+    else if (m.t === 'grip') { M.grip = !!m.on; if (m.on) { if (!M.gripT) M.gripT = performance.now(); } else { M.aim = null; api.setAim(null); M.gripT = 0; } } // gripT: 투수 와인드업 시작 시각
     else if (m.t === 'aim') { M.aim = [clamp(+m.x || 0, -1.6, 1.6), clamp(+m.y || 0, -1.6, 1.6)]; }
     else if (m.t === 'type') { if (TYPES_KO[m.v]) api.setType(m.v); M.hsT = 0; }
     else if (m.t === 'pitch') {
       const a = zoneAim(clamp(+m.x || 0, -1.6, 1.6), clamp(+m.y || 0, -1.6, 1.6));
       const ok = pitch(a, padPower(+m.pk || 0), TYPES_KO[m.type] ? m.type : null);
-      M.grip = false; M.aim = null; api.setAim(null);
+      M.grip = false; M.aim = null; api.setAim(null); M.gripT = 0;
       M.pad.send({ t: 'ack', k: 'pitch', r: ok ? 'ok' : 'skip', lv: Math.round(padPower(+m.pk || 0) * 100) });
     } else if (m.t === 'bunt') api.key('b');
     else if (m.t === 'chal') api.key('c');
@@ -159,7 +159,7 @@ export function createMotion(api) {
 
   // 연결 상태를 서버에 알림 → 방 대기실에 '📱 연결됨' 표시 (수비 자동은 모션 플레이 방 설정이 정함)
   function syncAuto() { const on = M.connected(); if (M.autoSent !== on && api.net()) { M.autoSent = on; api.net().send({ t: 'pad', on }); } }
-  M.resetNet = () => { M.autoSent = null; };
+  M.resetNet = () => { M.autoSent = null; M.st = { n: 0, hit: 0, good: 0, dtSum: 0 }; }; // 새 경기마다 기록 초기화
 
   function paint() {
     const P = M.pad;
@@ -205,7 +205,7 @@ export function createMotion(api) {
       if (camQ === '인식 좋음') M.badSince = 0; else if (!M.badSince) M.badSince = n2;
       if (M.badSince && n2 - M.badSince > 1500 && n2 - (M.badToast || 0) > 6000 && api.screen() === 'game') { M.badToast = n2; api.toast(!lm ? '몸이 안 보여 — 카메라에서 2~3m 떨어져 전신이 나오게 서줘' : '인식이 약해 — 밝은 곳에서, 머리부터 발까지 화면에 나오게'); }
     }
-    if (on) setText('motionBadgeT', [(M.pad && M.pad.pads) ? '📱 핸드폰' : '', (M.cam && M.cam.on) ? '📷 웹캠' + (camQ ? ' ' + camQ : '') : ''].filter(Boolean).join(' · ') + (S && S.mo === 2 ? ' · 스크린야구' : S && S.mo === 3 ? ' · 배팅만' : ' · 수비 자동'));
+    if (on) setText('motionBadgeT', [(M.pad && M.pad.pads) ? '📱 핸드폰' : '', (M.cam && M.cam.on) ? '📷 웹캠' + (camQ ? ' ' + camQ : '') : ''].filter(Boolean).join(' · ') + (S && S.mo === 2 ? ' · 스크린야구' : S && S.mo === 3 ? ' · 배팅만' : ' · 수비 자동') + (M.st.n ? ` │ 스윙 ${M.st.n} · 맞힘 ${Math.round(M.st.hit / M.st.n * 100)}% · 정타 ${M.st.good} · 타이밍 ±${Math.round(M.st.dtSum / M.st.n)}ms` : ''));
     const camOn = !!(M.cam && M.cam.on);
     if (M.cam) M.cam.paused = !!(M.pose && M.pose.ready);
     const pn = performance.now(), paintNow = pn - (M.paintT || 0) > 66; if (paintNow) M.paintT = pn; // [perf] 미리보기 15fps
@@ -218,7 +218,10 @@ export function createMotion(api) {
   };
   // 스윙 결과를 핸드폰에도 (맞으면 진동)
   const S0 = () => api.S();
+  // [11-24] 스윙 기록 (연습장·경기): 스윙 수, 맞힘, 정타, 평균 타이밍 오차
+  M.st = { n: 0, hit: 0, good: 0, dtSum: 0 };
   bus.on('localSwing', (e) => {
+    if (api.mg()) { const T = M.st; T.n++; if (e.contact) T.hit++; if (e.contact && e.q > 0.8) T.good++; T.dtSum += Math.abs(e.dt || 0); }
     if (!M.pad || !M.pad.pads) return;
     const late = e.dt > 0, ms = Math.abs(e.dt);
     // [11-24] 맞는 기준을 보여줌: 타이밍(±60ms 정타 · ±145ms 안 맞힘) + 조준(초록 점이 공과 겹치는지)

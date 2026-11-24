@@ -744,7 +744,7 @@ function initMotion() {
       swing: (mode, opt) => doSwing(mode, opt),
       preT: () => (S && S.p ? swingPre[S.p.id] : undefined),
       preSwing: (t) => { if (S && S.p && S.ph === 'pitching' && !swungLocal[S.p.id] && !swingPre[S.p.id]) swingPre[S.p.id] = t; },
-      pitch: (aim, lv) => { if (!S || S.ph !== 'pitch') return; if (intro) endIntro(); gauge = { t0: nowP(), aim, type: pitchType }; sendPitch(lv); },
+      pitch: (aim, lv) => { if (!S || S.ph !== 'pitch') return; if (intro) endIntro(); gauge = { t0: nowP(), aim, type: pitchType, q: 1 }; sendPitch(lv); }, // q: 모션 투구(정점에서 바로 스트라이드)
       setAim: (a) => { if (!a) return; tmpV.set(a[0], a[1], 0).project(camera); const k = cfg.sens / 100 || 1; mouseRaw.set(clamp(tmpV.x / k, -1, 1), clamp(tmpV.y / k, -1, 1)); },
       aimNow: () => aimPoint() || [0, 0.8],
       type: () => pitchType, types: () => PITCH_KEYS.slice(0, 6), setType: (k) => { if (PITCH_KEYS.includes(k)) setPitchType(k); },
@@ -778,8 +778,8 @@ function pitchClick() {
   }
 }
 function sendPitch(lv) {
-  net.send({ t: 'pitch', type: gauge.type, tx: gauge.aim[0], ty: gauge.aim[1], power: lv });
-  if (!net.local) pred.pitch = pitchPred(S, simNow(), rtt / 1000); // [net] 클릭 순간 와인드업 시작 → 서버 투구가 오면 릴리스 전까지 서버 시간표로 합류
+  net.send({ t: 'pitch', type: gauge.type, tx: gauge.aim[0], ty: gauge.aim[1], power: lv, q: gauge.q ? 1 : 0 });
+  if (!net.local && !gauge.q) pred.pitch = pitchPred(S, simNow(), rtt / 1000); // [net] 클릭 순간 와인드업 시작 → 서버 투구가 오면 릴리스 전까지 서버 시간표로 합류
   const [pb0, pb1] = pBand(), pf = lv >= pb0 && lv <= pb1; // [gameplay] 모드별 퍼펙트 구간
   const txt = lv > 1.0 ? '과투구! 제구 흔들림' : pf ? '퍼펙트 투구! 공 끝 살아있다' : lv < 0.6 ? '힘 빠진 공' : '좋아';
   feedback(`${txt} (${Math.round(lv * 100)}%)`, pf ? '#4fd18b' : lv > 1 ? '#ff8a80' : '#ffcf3f');
@@ -959,6 +959,8 @@ function updateWorld(dt) {
       let k = -1;
       const tau = role.pitcher && pred.pitch ? windupTau(pred.pitch, s, t) : null; // [net] 내 투구 예측
       if (tau == null || s.ph === 'result') pred.pitch = null;
+      // [11-24] 모션 투구: 핸드폰을 누르고 있는 동안 레그킥 정점(1.45s)까지 가서 기다림 → 팔을 휘두르면 서버가 0.4초 뒤 릴리스(정점에서 이어짐)
+      if (role.pitcher && s.ph === 'pitch' && s.mo && motion && motion.gripT) k = pitchK(Math.min(1.45, (performance.now() - motion.gripT) / 1000));
       if (tau != null) k = tau >= 0 ? pitchK(tau) : -1;
       else if (s.p && (s.ph === 'pitching' || s.ph === 'result')) k = pitchK(t - (s.p.t0 - WINDUP));
       if (k > 1.15) k = -1;

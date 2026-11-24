@@ -953,7 +953,9 @@ export class Game {
     if (this.now < (this.pitchReady || 0)) { this.pendPitch = { id, m }; return; }
     this.pendPitch = null;
     const type = PITCH_KEYS.includes(m.type) ? m.type : 'FB';
+    this._quick = !!(m.q && this.set.mo); // [11-24] 모션 투구: 팔을 휘두른 순간 = 스트라이드 시작 → 0.4초 뒤 릴리스 (예전엔 그때부터 와인드업 1.85초라 한참 뒤에 던졌음)
     this.throwPitch(type, Number(m.tx) || 0, Number(m.ty) || 0.8, clamp(Number(m.power) || 0.8, 0, 1.15), true);
+    this._quick = false;
   }
 
   aiPitch() {
@@ -1008,7 +1010,7 @@ export class Game {
     // 체력 소모
     if (type !== 'BP') { st.sta = Math.max(0, st.sta - (0.9 + 1.1 * pw) * R.staminaMul); st.pc++; }
     const T = RELEASE[2] / speed / (this.mode === 'derby' ? 0.85 : this.D.pitchT) * (this.batterIsCPU() ? 1 : HIT_SLOW[this.set.hitEase] || 1);
-    const t0 = this.now + WINDUP;
+    const t0 = this.now + (this._quick ? 0.4 : WINDUP);
     const brkScale = (0.85 + 0.15 * pw) * (perfect ? R.perfectBonus.brk : 1) * (mistake && !['FB', 'TS'].includes(type) ? COMMAND.hang : 1);
     this.pitch = {
       id: ++this.seq, type, tx: r2(tx), ty: r2(ty), bx: r2(P.brk[0] * brkScale * (1 + gauss() * 0.08)), by: r2(P.brk[1] * brkScale * (1 + gauss() * 0.08)), k: P.k, dc: P.v < 125 ? 0.12 : P.v < 140 ? 0.06 : 0, t0: r2(t0),
