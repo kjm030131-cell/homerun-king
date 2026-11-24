@@ -886,6 +886,90 @@ body{word-break:keep-all}
 .keybar .k{font-style:normal;font-family:var(--brand);font-weight:800;font-size:12px;letter-spacing:.06em;min-width:24px;padding:3px 7px;text-align:center;color:#071025;background:var(--chalk);border-radius:2px}
 #modes .mode:focus-visible,#modes .mode:focus{outline:2px solid var(--gold);transform:translateY(-6px)}
 @media (hover:none),(max-width:760px){.keybar{display:none}}
+/* ═══ [11-24] 경기 HUD 개편 — 레퍼런스(assets-src/ui/ref_hud_*.jpg) 기준 ═══
+   평평한 남색 패널 + 골드 한 줄 포인트, 숫자는 Big Shoulders. 기울어진 띠(clip-path)·그라데이션 제거. 배치·로직은 그대로. */
+#hud{--hp:rgba(11,27,51,.95);--hp2:#13284a;--hl:rgba(255,255,255,.12)}
+/* 스코어버그 */
+#bug{height:66px;filter:drop-shadow(0 10px 24px rgba(0,0,0,.45));border-top:3px solid var(--gold);background:var(--hp)}
+#bug .tm{background:transparent;clip-path:none}
+#bug .tr{height:31.5px;padding-left:14px}
+#bug .tr:before{width:4px}
+#bug .tr + .tr{border-top:1px solid var(--hl)}
+#bug .tr span{font-family:var(--brand);font-weight:800;font-size:19px;letter-spacing:.02em;width:76px}
+#bug .tr strong{font-family:var(--brand);font-weight:900;font-size:24px;width:42px;background:#f3f4ee;color:#0b1b33}
+#bug .tr + .tr strong{border-top:1px solid rgba(11,27,51,.15)}
+#bug .tr.bat span{color:var(--chalk)}
+#bug .tr.bat:after{display:block;left:5px;border-left-color:var(--gold)}
+@keyframes scoreFlash{0%,35%{background:var(--gold);color:#0b1b33}100%{background:#f3f4ee;color:#0b1b33}}
+#bug .inn{width:50px;background:transparent;border-left:1px solid var(--hl);font-family:var(--brand);font-weight:900;font-size:28px}
+#bug .inn small{font-family:var(--kr);font-weight:800;color:var(--gold)}
+#bug .dia{background:transparent;border-left:1px solid var(--hl)}
+#bug .dia rect{fill:transparent;stroke:rgba(255,255,255,.7);stroke-width:1.5}
+#bug .dia rect.on{fill:var(--gold);stroke:var(--gold)}
+#bug .cnt{background:transparent;clip-path:none;border-left:1px solid var(--hl);padding:0 14px 0 12px;font-family:var(--brand);font-weight:800;font-size:13px}
+#bug .dots i{width:9px;height:9px;background:rgba(255,255,255,.18)}
+#bug .dots label{color:#9aa5bd}
+#bugRules{align-self:stretch;margin:0;display:flex;align-items:center;clip-path:none;padding:0 12px;font-family:var(--kr);font-size:11.5px;letter-spacing:.04em;background:transparent;color:var(--chalk);border-left:1px solid var(--hl)}
+#bugRules.casual{background:transparent;color:var(--gold)}
+/* 매치업 */
+.mu{background:var(--hp);border-left:3px solid var(--hl);font-family:var(--kr)}
+.mu b{font-family:var(--kr);color:#9aa5bd}
+.mu em{font-family:var(--brand);font-weight:700;font-size:15px}
+#muP{border-left-color:var(--gold)}
+/* 역할·안내 띠: 기울기 제거 */
+#role,#duty{clip-path:none;background:var(--hp);border-radius:0}
+#ptype{background:var(--hp);clip-path:none}
+#pcue .pc-b{background:var(--hp);border-color:var(--hl);height:8px}
+#pcue .pc-b i{background:linear-gradient(90deg,#3f6fd1,var(--gold) 72%,#d7263d)}
+#pcue.go .pc-t{color:var(--gold)}
+/* 큰 볼카운트 */
+#bigcount{background:var(--hp);border-right-color:var(--gold)}
+#bigcount.pit{border-left-color:var(--gold)}
+#bigcount b{font-family:var(--brand);color:#9aa5bd}
+/* 구종 목록: 레퍼런스처럼 줄마다 남색, 선택은 흰 줄 */
+#pitchbar{gap:0;width:212px;border:1px solid var(--hl);background:var(--hp);box-shadow:0 14px 30px -12px rgba(0,0,0,.6)}
+#pitchbar button{gap:10px;background:transparent;border-left:0;border-top:1px solid var(--hl);padding:10px 14px;font-family:var(--kr);font-size:14.5px}
+#pitchbar button:first-of-type{border-top:0}
+#pitchbar .sq + button{border-top:1px solid var(--hl)}
+#pitchbar button:hover{background:rgba(255,255,255,.06)}
+#pitchbar button.on{background:#f3f4ee;color:#0b1b33}
+#pitchbar button.on em{color:#0b1b33}
+#pitchbar button .kbd{background:transparent;color:#9aa5bd;box-shadow:none;border:1px solid var(--hl);font-family:var(--brand)}
+#pitchbar button.on .kbd{color:#0b1b33;border-color:rgba(11,27,51,.3)}
+#pitchbar button em{font-family:var(--brand);font-weight:700;font-size:15px}
+#pitchbar .pc{width:11px;height:11px}
+#pitchbar .rep{background:var(--gold);color:#0b1b33}
+#pitchbar .sq{background:rgba(0,0,0,.2);border-bottom:1px solid var(--hl);font-family:var(--kr)}
+/* 투구 게이지: 세로 → 화면 아래 가운데 가로 막대 (요소를 90° 돌림 — 채움·퍼펙트 구간 계산은 그대로) */
+#gauge{left:calc(50% - 15px);top:auto;bottom:-46px;width:30px;height:360px;transform:rotate(90deg);background:var(--hp);border:1px solid var(--hl);box-shadow:0 14px 30px -12px rgba(0,0,0,.6)}
+#gauge .fill{left:6px;right:6px;bottom:6px;top:6px;background:linear-gradient(0deg,#2f5fc4,#6f9cf0)}
+#gauge{z-index:2}
+#gauge .band{background:rgba(201,162,39,.38);border-top:2px solid var(--gold);border-bottom:2px solid var(--gold)}
+#gauge .over{background:rgba(215,38,61,.3)}
+#gaugeLbl{left:calc(50% + 196px);top:auto;bottom:122px;width:auto;text-align:left;font-family:var(--brand);font-weight:900;font-size:22px;text-shadow:0 2px 8px rgba(0,0,0,.6)}
+/* 스윙 분석 */
+#swa{background:var(--hp);border-top:3px solid var(--gold);font-family:var(--kr)}
+#swa .sw-h{font-family:var(--brand);font-weight:800;font-size:13px;letter-spacing:.14em;color:var(--gold)}
+#swa .sw-bar{height:12px;background:rgba(255,255,255,.08)}
+#swa .sw-win{background:rgba(201,162,39,.45)}
+#swa .sw-mk{background:#f3f4ee}
+#swa .sw-l b{font-family:var(--brand);color:var(--chalk)}
+#swa .sw-tip{color:var(--gold)}
+/* 타구 정보 */
+#hitinfo{background:var(--hp);border-right:0;border-left:4px solid var(--gold);padding:12px 18px;font-family:var(--kr)}
+#hitinfo b{font-family:var(--brand);font-weight:900;font-size:26px}
+#hitinfo span{color:#9aa5bd}
+/* 홈런 결과 패널 (레퍼런스 ref_hud_homerun) */
+#hrCard{position:absolute;left:0;top:50%;transform:translate(-105%,-50%);width:min(560px,46vw);padding:34px 40px 30px max(30px,4vw);background:var(--hp);border-right:3px solid var(--gold);box-shadow:30px 0 60px -30px rgba(0,0,0,.7);transition:transform .55s var(--ease)}
+#hrCard.show{transform:translate(0,-50%)}
+#hrCard h4{font-family:var(--brand);font-weight:900;font-style:italic;font-size:clamp(54px,6vw,96px);line-height:.85;letter-spacing:-.01em;color:var(--chalk);padding-bottom:14px;margin-bottom:14px;border-bottom:4px solid var(--gold);white-space:nowrap}
+#hrCard dl{display:grid;grid-template-columns:1fr auto;margin:0}
+#hrCard dt,#hrCard dd{margin:0;padding:10px 0;border-bottom:1px solid rgba(255,255,255,.18);font-family:var(--brand);font-weight:800;text-transform:uppercase}
+#hrCard dt{font-size:clamp(16px,1.5vw,22px);letter-spacing:.04em;color:#d6dbe6}
+#hrCard dd{text-align:right;font-weight:900;font-size:clamp(24px,2.4vw,36px);line-height:1}
+#hrCard dd small{font-size:.5em;font-weight:700;margin-left:4px;color:#d6dbe6;text-transform:none}
+body[data-screen=over] #hrCard{visibility:hidden}
+@media (max-width:760px){#hrCard{width:78vw;padding:22px 24px}#gauge{height:260px;bottom:-4px}#gaugeLbl{left:calc(50% + 146px);bottom:110px}}
 </style>
 <script type="importmap">
 { "imports": { "three": "https://cdn.jsdelivr.net/npm/three@0.160.0/build/three.module.js", "three/addons/": "https://cdn.jsdelivr.net/npm/three@0.160.0/examples/jsm/" } }
@@ -1074,6 +1158,7 @@ body{word-break:keep-all}
   <div id="fb"></div>
   <div id="cast"><i>중계</i><span></span></div>
   <div id="swa"><div class="sw-h">스윙 분석</div><div class="sw-row"><canvas width="120" height="120"></canvas><div class="sw-r"><div class="sw-l">타이밍 <b class="sw-tv"></b></div><div class="sw-bar"><i class="sw-win"></i><i class="sw-mid"></i><i class="sw-mk"></i></div><div class="sw-sc"><span>빠름</span><span>늦음</span></div><div class="sw-l">위치 <b class="sw-lv"></b></div></div></div><div class="sw-tip"></div></div>
+  <div id="hrCard" aria-live="polite"><h4>HOME RUN</h4><dl><dt>Exit Velo</dt><dd><i id="hrEv">-</i><small>km/h</small></dd><dt>Launch Angle</dt><dd><i id="hrLa">-</i><small>°</small></dd><dt>Distance</dt><dd><i id="hrD">-</i><small>m</small></dd></dl></div>
   <div id="hitinfo"><span>타구 속도</span><b><i id="hiEv">-</i><small>km/h</small></b><span>발사각</span><b><i id="hiLa">-</i><small>°</small></b><span>비거리</span><b><i id="hiD">-</i><small>m</small></b></div>
   <div id="tbar" class="hide"><span>송구 세기</span><b><i></i></b></div>
   <div id="pitchbar" class="hide"></div>

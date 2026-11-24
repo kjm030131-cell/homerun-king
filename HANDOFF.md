@@ -191,3 +191,6 @@ node tools/test/shot.mjs tools/test/steps/smoke.mjs test-shots/   # 스크린샷
   폰트: 영문 워드마크 Big Shoulders Display(구글 폰트), 한글 Pretendard(jsDelivr). CSS는 index.html 맨 아래 `[11-24] WALK-OFF 홈화면 개편` 블록.
   이미지: `public/assets/ui/`(웹용으로 줄인 것), 원본은 `assets-src/ui/`(GPT 생성, 경기 HUD 레퍼런스·카드 프레임·이펙트 원본도 같이 보관). 혼자하기판은 build.mjs 가 `./assets/ui/*` 를 전부 인라인.
   사용자 요청: 홈화면에 설명 문구(AI 같은 소개 문장) 넣지 말 것. 아이콘은 GPT 이미지 말고 코드(SVG)로.
+- 11-24: **경기 HUD 개편** (레퍼런스 `assets-src/ui/ref_hud_*.jpg`) — 스코어버그·매치업·구종 목록·스윙 분석·타구 정보를 평평한 남색 + 골드 포인트로, 투구 게이지는 화면 아래 가운데 가로 막대(#gauge 를 CSS로 90° 회전 — hud.js 계산은 그대로), 홈런이면 왼쪽에서 홈런 패널(#hrCard: 타구 속도·발사각·비거리).
+  이펙트: 흙먼지·공 궤적에 실사 텍스처(`client/fxtex.js`, data URI). CSS는 index.html 맨 아래 `[11-24] 경기 HUD 개편` 블록.
+  장면 테스트 `start` 단계는 닉네임이 없으면 혼자하기가 안 열림 → 스텝 앞에 `document.getElementById('nick').value='테스트'` 넣을 것.
