@@ -339,7 +339,15 @@ function handleMsg(m) {
 }
 
 // ═════════════ 화면 (UI 연결) ═════════════ [ui]
-function setScreen(sc) { ui.setScreen(sc); }
+function setScreen(sc) { ui.setScreen(sc); if (sc === 'game' && !shaderWarm) { shaderWarm = true; requestAnimationFrame(() => requestAnimationFrame(warmShaders)); } }
+// [11-24] 셰이더 미리 컴파일: 숨어 있는 물체(이펙트·판독 그래픽·낙구 표시 등)까지 잠깐 보이게 해서 경기 시작 때 한 번에 → 경기 중 처음 나올 때 멈칫(셰이더 컴파일 끊김) 없앰
+let shaderWarm = false;
+function warmShaders() {
+  const hidden = [];
+  scene.traverse((o) => { if (!o.visible && (o.isMesh || o.isLine || o.isPoints || o.isSprite || o.isGroup || o.isObject3D)) { hidden.push(o); o.visible = true; } });
+  try { const r = renderer.compileAsync ? renderer.compileAsync(scene, camera) : renderer.compile(scene, camera); if (r && r.catch) r.catch(() => { }); } catch (e) { console.warn('[warm]', e); }
+  for (const o of hidden) o.visible = false;
+}
 function toTitle() {
   if (net) { const n = net; net = null; n.close(); }
   clearInterval(pingIv);
