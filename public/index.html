@@ -970,6 +970,10 @@ body{word-break:keep-all}
 #hrCard dd small{font-size:.5em;font-weight:700;margin-left:4px;color:#d6dbe6;text-transform:none}
 body[data-screen=over] #hrCard{visibility:hidden}
 @media (max-width:760px){#hrCard{width:78vw;padding:22px 24px}#gauge{height:260px;bottom:-4px}#gaugeLbl{left:calc(50% + 146px);bottom:110px}}
+
+/* [11-24] 조작 안내 접힘 */
+#hint.mini .hk:not(.hmore), #hint.mini .tip{display:none}
+#hint.mini{padding:6px 12px;opacity:.75}
 </style>
 <script type="importmap">
 { "imports": { "three": "https://cdn.jsdelivr.net/npm/three@0.160.0/build/three.module.js", "three/addons/": "https://cdn.jsdelivr.net/npm/three@0.160.0/examples/jsm/" } }

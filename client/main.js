@@ -611,6 +611,7 @@ addEventListener('keydown', (e) => {
   keys[k] = true;
   if (e.code === 'Space') e.preventDefault();
   if (!S || screen !== 'game' || e.repeat) return;
+  if (k === 'h') { window.__hintFull = !window.__hintFull; return; } // [11-24] 조작 안내 펼치기/접기
   if (k === 'c' && canChallenge()) { net && net.send({ t: 'challenge' }); feedback('ABS 챌린지 신청!', '#5ab8ff'); return; } // [ABS]
   const role = getRole();
   // 타자
