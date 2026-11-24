@@ -413,7 +413,7 @@ export class Character {
     // 1) 몸통 비틀기: 배트 끝의 수평 방향 변화 × 배트가 누운 정도
     const horiz = 1 - Math.min(1, Math.abs(m_d.y));
     let yaw = Math.atan2(m_d.x, m_d.z) - Math.atan2(m_d0.x, m_d0.z); yaw = Math.atan2(Math.sin(yaw), Math.cos(yaw));
-    yaw = THREE.MathUtils.clamp(yaw * horiz * 0.8, -1.25, 1.25) * R.w;
+    yaw = THREE.MathUtils.clamp(yaw * horiz * 0.6, -0.7, 0.7) * R.w; // [11-24] 비틀기 범위 줄임 (±72° → ±40°)
     for (const n of ['Spine', 'Spine1', 'Spine2']) if (B[n]) rotWorld(B[n], m_UP, yaw / 3);
     // 2) 손: 몸통과 같이 돈 자리에서, 배트 끝이 간 반대쪽으로 조금(배트 손잡이가 몸 쪽으로) + 배트가 내려가면 손도 내려감
     const th = B[R.top === 'L' ? 'LeftHand' : 'RightHand'];
