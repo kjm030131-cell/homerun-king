@@ -99,6 +99,37 @@ function trimTrack(tr, a, b) {
   const out = new tr.constructor(tr.name, times.map((t) => t - a), vals);
   return out;
 }
+export function smoothTrack(tr, loop, passes = 0) {
+  const sz = tr.getValueSize(), T = tr.times, n = T.length, isQ = sz === 4;
+  if (n < 3 || (sz !== 4 && sz !== 3)) return tr;
+  let V = Float32Array.from(tr.values);
+  // 쿼터니언 부호 맞추기(q 와 -q 는 같은 회전 — 섞기 전에 이웃과 같은 쪽으로)
+  if (isQ) for (let i = 1; i < n; i++) { const o = i * 4, p = o - 4; if (V[o] * V[p] + V[o + 1] * V[p + 1] + V[o + 2] * V[p + 2] + V[o + 3] * V[p + 3] < 0) for (let k = 0; k < 4; k++) V[o + k] = -V[o + k]; }
+  const seam = loop && (() => { for (let k = 0; k < sz; k++) if (Math.abs(Math.abs(V[k]) - Math.abs(V[(n - 1) * sz + k])) > 2e-3) return false; return true; })();
+  const m = seam ? n - 1 : n; // 반복 + 이음매 같음 → 마지막 키는 첫 키와 같은 것
+  const at = (i) => { if (seam) i = ((i % m) + m) % m; else i = Math.max(0, Math.min(n - 1, i)); return i; };
+  const get = (A, i, k) => { const j = at(i); let v = A[j * sz + k]; if (isQ && seam && (i < 0 || i >= m)) { const a = at(i < 0 ? 0 : m - 1); let d = 0; for (let q = 0; q < 4; q++) d += A[j * 4 + q] * A[a * 4 + q]; if (d < 0) v = -v; } return v; };
+  for (let p = 0; p < passes; p++) {
+    const W = new Float32Array(V.length);
+    for (let i = 0; i < n; i++) for (let k = 0; k < sz; k++) W[i * sz + k] = (get(V, i - 1, k) + 2 * V[i * sz + k] + get(V, i + 1, k)) / 4;
+    if (seam) for (let k = 0; k < sz; k++) W[(n - 1) * sz + k] = W[k];
+    if (isQ) for (let i = 0; i < n; i++) { const o = i * 4, l = Math.hypot(W[o], W[o + 1], W[o + 2], W[o + 3]) || 1; for (let k = 0; k < 4; k++) W[o + k] /= l; }
+    V = W;
+  }
+  // 키 사이 가운데 점: Catmull-Rom (끝은 반복이면 감아서, 아니면 끝 키 복제)
+  const times = [], vals = [];
+  for (let i = 0; i < n; i++) {
+    times.push(T[i]); for (let k = 0; k < sz; k++) vals.push(V[i * sz + k]);
+    if (i === n - 1) break;
+    const dt = T[i + 1] - T[i]; if (dt < 1e-4) continue;
+    times.push(T[i] + dt / 2);
+    const mid = [];
+    for (let k = 0; k < sz; k++) { const p0 = i === 0 && !seam ? V[k] : get(V, i - 1, k), p1 = V[i * sz + k], p2 = V[(i + 1) * sz + k], p3 = i + 2 >= n && !seam ? V[(n - 1) * sz + k] : get(V, i + 2, k); mid.push((-p0 + 9 * p1 + 9 * p2 - p3) / 16); }
+    if (isQ) { const l = Math.hypot(mid[0], mid[1], mid[2], mid[3]) || 1; for (let k = 0; k < 4; k++) mid[k] /= l; }
+    vals.push(...mid);
+  }
+  return new tr.constructor(tr.name, times, vals);
+}
 export function prepClip(name, animations, T) {
   const cfg = CLIPS[name] || (CLIPS[name] = { loop: false, optional: true });
   const src = (animations || []).reduce((a, b) => (!a || b.duration > a.duration ? b : a), null);
@@ -136,6 +167,9 @@ export function prepClip(name, animations, T) {
     dx -= up.x * d; dy -= up.y * d; dz -= up.z * d;
     for (let k = 0; k < V.length; k += 3) { V[k] -= dx; V[k + 1] -= dy; V[k + 2] -= dz; }
   }
+  // [smooth] 원본(30fps) 키 사이를 곡선(Catmull-Rom)으로 한 번 더 채워 60fps 로 — 직선 보간이면 키마다 속도가 꺾여 빠른 동작이 '덜컥덜컥'
+  //  smooth: 반복 클립의 튀는 키 고르기(Fast_Run 왼팔 47°→1°→30° 처럼 고르지 않은 키) — [1,2,1] 원형 평균 n 번
+  tracks = tracks.map((t) => smoothTrack(t, !!cfg.loop, cfg.smooth | 0));
   const clip = new THREE.AnimationClip(name, -1, tracks);
   clip.optimize();
   const markers = { ...autoMarkers(name, clip, T), ...(cfg.markers || {}) };

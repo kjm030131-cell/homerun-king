@@ -141,7 +141,7 @@ function mirrorClip(lib, e) {
     M = { P, B, Pa: P.b.Hips.parent.getWorldQuaternion(new THREE.Quaternion()) }; MP.set(lib, M);
   }
   const { P, B, Pa } = M, names = P.names, dur = e.clip.duration;
-  const N = Math.max(1, Math.ceil(dur * 30)), times = [], vals = {}, hv = [], G = {}, Gp = {}, prev = {};
+  const N = Math.max(1, Math.ceil(dur * 60)), times = [] /* [smooth] 60fps (원본이 곡선으로 채워져 있음) */, vals = {}, hv = [], G = {}, Gp = {}, prev = {};
   for (const n of names) vals[n] = [];
   const act = P.mixer.clipAction(e.clip); act.reset(); act.play(); act.timeScale = 0;
   const inv = new THREE.Quaternion(), D = new THREE.Quaternion(), L = new THREE.Quaternion(), hw = new THREE.Vector3();

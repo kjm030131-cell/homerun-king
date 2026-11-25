@@ -193,7 +193,7 @@ const teamCache = new Map();
 const greet = []; // [trot] 홈런 트롯으로 홈을 밟은 주자: 홈 옆에서 기다렸다가 타자와 하이파이브 ({A, t0, i})
 const runnerPool = new Map(); // [qa] 주자 재사용 (poolKey → 배우 목록)
 function parkRunner(A) { scene.remove(A.p.root); if (A.poolKey) (runnerPool.get(A.poolKey) || runnerPool.set(A.poolKey, []).get(A.poolKey)).push(A); }
-function takeRunner(pk) { const l = runnerPool.get(pk); const A = l && l.pop(); if (!A || (usingNewCharacter() && !A.p.char)) return null; A.init = false; A.slideT = 0; A.p.root.visible = true; scene.add(A.p.root); return A; }
+function takeRunner(pk) { const l = runnerPool.get(pk); const A = l && l.pop(); if (!A || (usingNewCharacter() && !A.p.char)) return null; A.init = false; A.slideT = 0; A.wasVis = false; A.p.root.visible = true; scene.add(A.p.root); return A; }
 const cachedTeam = (k) => { const c = teamCache.get(k); return c && (!usingNewCharacter() || c.every((A) => A.p.char)) ? c : null; }; // 늦게 온 새 몸으로 못 바뀐 옛 몸 캐시는 버림
 function clearActors() {
   teamCache.clear(); runnerPool.clear();
@@ -505,7 +505,7 @@ function showCall(ev) {
   let best = null, bd = 1e9;
   for (const U of umps) { const d = Math.hypot(U.p.root.position.x - ev.x, U.p.root.position.z - ev.z); if (d < bd) { bd = d; best = U; } }
   if (best && (!best.home || ev.k === 4)) { best.callT = nowP(); best.callKind = ev.out ? 'out' : 'safe'; }
-  if (best && !best.home) best.p.root.rotation.y = Math.atan2(ev.x - best.p.root.position.x, ev.z - best.p.root.position.z);
+  if (best && !best.home) best.turnY = Math.atan2(ev.x - best.p.root.position.x, ev.z - best.p.root.position.z); // [smooth] 판정 방향으로 몸을 돌림(전: 순간 회전)
 }
 window.__showCall = showCall;
 function updateCalls() {
@@ -910,7 +910,7 @@ function place(A, x, z, ry, dt, k = 14) {
   r.position.x = nx; r.position.z = nz;
   r.position.y = groundY(r.position.x, r.position.z); // [model] 마운드(높이 25.9cm) 위에선 발이 마운드에 닿게
   let d = ry - r.rotation.y; d = Math.atan2(Math.sin(d), Math.cos(d));
-  r.rotation.y += d * Math.min(1, dt * 10);
+  { const st = d * Math.min(1, dt * 10), cap = 8.5 * dt; r.rotation.y += Math.abs(st) > cap ? Math.sign(st) * cap : st; } // [smooth] 몸 돌리는 속도 상한(~490°/s) — 방향이 뒤집힐 때 한 프레임에 30° 씩 팽이처럼 돌던 것
   const sp = Math.hypot(r.position.x - ox, r.position.z - oz) / Math.max(dt, 1e-3);
   A.spd = lerp(A.spd, sp, 0.25);
   return A.spd;
@@ -919,6 +919,7 @@ const ballPos = new THREE.Vector3();
 // 포수 → 투수 공 돌려주기 (연출용 공)
 const tossBall = new THREE.Mesh(new THREE.SphereGeometry(BALL_R * 1.4, 12, 10), new THREE.MeshStandardMaterial({ color: '#fbfaf5', roughness: 0.5 }));
 tossBall.visible = false; scene.add(tossBall);
+let batterHideT = -9; // [smooth]
 let lastPh = '', lastRes = null, tossT = -9, lastInn = '';
 const TOSS = { start: 0.35, dur: 0.75 };
 function updateWorld(dt) {
@@ -1011,7 +1012,7 @@ function updateWorld(dt) {
   const showBatter = pitchPhase || swingHold || (s.ph === 'result' && s.p && s.p.res !== 'hit' && !s.b);
   if (swingHold) { if (droppedBat.visible) { droppedBat.visible = false; droppedBat.userData.pend = 1; } } else if (droppedBat.userData.pend) { droppedBat.userData.pend = 0; droppedBat.visible = s.ph !== 'pitch'; } // [motion] 배트는 팔로스루 끝나고 땅에
   if (batter) {
-    batter.p.root.visible = showBatter && !(camMode === 'bat' && false);
+    { const v = showBatter && !(camMode === 'bat' && false); if (batter.p.root.visible && !v) batterHideT = tp; batter.p.root.visible = v; } // [smooth] batterHideT: 타자 → 주자 자세 이어 붙이기
     if (showBatter) {
       const bh = s.bat && s.bat.h < 0 ? -1 : 1; // [lefty] 좌타자: 1루 쪽(-x)에서 반대 방향 + 거울 클립·배트·헬멧 (카메라는 타자 x 부호로 자동 미러)
       if (batter.p.setHand) batter.p.setHand(bh); else batter.p.root.scale.x = bh; // 옛 몸은 통째 거울
@@ -1085,8 +1086,12 @@ function updateWorld(dt) {
     if (A.slideT) { slideK = (tp - A.slideT) / 0.6; if (slideK > 1.6 || (sp < 0.3 && slideK > 1)) { A.slideT = 0; slideK = -1; } }
     const nm = nameOf(pid);
     setTag(A, nm || '', pid === myId ? '#ffcf3f' : '#fff');
+    const rvis = !(showBatter && (b === 0 || (swingHold && b < 0.3)));
+    // [smooth] 친 타자가 주자로 바뀌는 순간: 화면에서 사라진 타자 자세(팔로스루)에서 뛰는 동작으로 이어서 — 전엔 다른 자세의 주자가 툭 나타남
+    if (rvis && !A.wasVis && batter && batter.p.char && A.p.char && tp - batterHideT < 0.15 && batter.p.root.position.distanceTo(A.p.root.position) < 3) { A.p.root.position.copy(batter.p.root.position); A.p.root.rotation.y = batter.p.root.rotation.y; A.p.char.adoptPose(batter.p.char, 0.4); }
     A.a.runner(dt, { speed: sp, slideK, lead: onBase && (s.ph === 'pitch' || s.ph === 'pitching'), cheer: !!(flags & 2) && !(b > 0 && b < 4), lookW: onBase ? _v.set(0, 1.2, 15) : null }); // [trot] 트롯 중엔 뛰는 동작(전: 느려지면 베이스 사이에서도 만세)
-    A.p.root.visible = !(showBatter && (b === 0 || (swingHold && b < 0.3))); // [motion] swingHold
+    A.p.root.visible = rvis; // [motion] swingHold
+    A.wasVis = rvis;
     A.lastB = b; A.trot = !!(flags & 2); // [trot]
   }
   for (const [k, A] of runners) if (!live.has(k)) {
@@ -1100,6 +1105,7 @@ function updateWorld(dt) {
     let call = null;
     if (U.home && tp - umpCall < 0.9) call = 'strike';
     if (U.callT && tp - U.callT < 1.3) call = U.callKind;
+    if (U.turnY != null) { const r = U.p.root.rotation; let d = U.turnY - r.y; d = Math.atan2(Math.sin(d), Math.cos(d)); r.y += d * Math.min(1, dt * 7); if (Math.abs(d) < 0.01) U.turnY = null; }
     U.a.ump(dt, { call, stand: !U.home, lookW: ballW || _v.set(0, 1.2, 10) });
   }
   for (const C of coaches) C.a.idle(dt);
@@ -1175,7 +1181,7 @@ function updateCelebration(dt) {
     if (e < A.delay) { A.a.idle(dt); continue; }
     if (d > 0.4) {
       const v = Math.min(8.2, d * 3);
-      r.position.x += dx / d * v * dt; r.position.z += dz / d * v * dt; r.rotation.y = Math.atan2(dx, dz);
+      r.position.x += dx / d * v * dt; r.position.z += dz / d * v * dt; { let a = Math.atan2(dx, dz) - r.rotation.y; a = Math.atan2(Math.sin(a), Math.cos(a)); r.rotation.y += a * Math.min(1, dt * 8); }
       A.a.runner(dt, { speed: v, cheer: true });
     } else {
       // 모여서 점프 + 하이파이브
