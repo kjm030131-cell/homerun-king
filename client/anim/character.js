@@ -443,6 +443,12 @@ export class Character {
     for (const s of ['L', 'R']) { const tw = this.ikReq[s] ?? 0; this.ikW[s] += (tw - this.ikW[s]) * k; if (this.ikW[s] > 0.01) any = true; }
     this.lookW += ((this.lookReq ?? 0) - this.lookW) * (1 - Math.exp(-8 * dt));
     if (this.lookW > 0.01) any = true;
+    // [motion+] 웹캠 자세 가중치를 서서히: 인식이 켜지거나 끊길 때 선수 몸이 클립 자세 ↔ 내 자세로 '툭' 바뀌지 않게 (마지막 자세를 들고 0.3초에 걸쳐 놓음)
+    { const PRq = this.poseReq; const tw = PRq ? PRq.w : 0;
+      if (PRq) this._poseLast = { lm: PRq.lm.map((p) => p.slice()), mir: PRq.mir };
+      this.poseW = (this.poseW || 0) + (tw - (this.poseW || 0)) * (1 - Math.exp(-(tw > (this.poseW || 0) ? 9 : 7) * dt));
+      if (this.poseW < 0.01) { this.poseW = 0; if (!PRq) this._poseLast = null; }
+      this.poseReq = this._poseLast && this.poseW > 0 ? { lm: PRq ? PRq.lm : this._poseLast.lm, w: this.poseW, mir: this._poseLast.mir } : null; }
     if (!any && !this.gripReq && !this.bodyReq && !this.poseReq) return;
     // [net] root.updateMatrixWorld(true)(뼈 53개+장비 전체)를 지움 — twoBoneIK·_look 의 getWorldPosition/Quaternion 이 필요한 부모 사슬만 갱신함 (qa 요청: 심판 look 이 상시라 매 프레임 전체 갱신이었음)
     const B = this.bones;
