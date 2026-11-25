@@ -250,6 +250,15 @@ export class Character {
     this.lookReq = null; this.lookW = 0; this.lookT = new THREE.Vector3();
     this.post = POST.map((n) => this.bones[n] || null);
     this.yaw = 0;
+    // [smooth] 관성 블렌딩(inertialization): 동작이 바뀌는 순간 '직전에 화면에 보이던 자세'에서 새 동작으로 뼈마다 부드럽게 넘어감
+    //  · 크로스페이드가 짧거나(0) 진행도가 튀어도(네트워크 보정·반복 진행도) 자세가 순간이동하지 않음
+    //  · 감쇠 (1-x)^3: 새 동작이 바로 움직이기 시작하고, 끝은 속도 0으로 붙음
+    this.bl = [];
+    this.model.traverse((o) => { if (o.isBone) this.bl.push(o); });
+    this.ibLast = this.bl.map(() => new THREE.Quaternion()); this.ibOff = this.bl.map(() => new THREE.Quaternion());
+    this.ibHips = this.bones.Hips || null; this.ibHipsI = this.ibHips ? this.bl.indexOf(this.ibHips) : -1;
+    this.ibLastP = new THREE.Vector3(); this.ibOffP = new THREE.Vector3(); this.ibPOn = false;
+    this.ibT = 1; this.ibDur = 0.2; this.ibReq = 0; this.ibHave = false; this.ibN = -1e9; this.ibYawLast = 0; this.ibYawOff = 0;
     if (colors) this.setUniform(colors, num, name);
     this.play('idle', { fade: 0, from: 0 });
   }
@@ -274,6 +283,8 @@ export class Character {
     const a = L.action;
     const lp = loop ?? e.cfg.loop;
     if (isNew || restart || L.scrub >= 0) {
+      fade = this._outFade(cur, L, fade);
+      this.blend(Math.max(0.16, Math.min(0.32, fade + 0.06)));
       a.setLoop(lp ? THREE.LoopRepeat : THREE.LoopOnce, Infinity); a.clampWhenFinished = !lp;
       if (L.w <= 0.001 || restart) {
         a.reset();
@@ -294,9 +305,11 @@ export class Character {
     let L = this.layers.get(e.name);
     if (!L) { L = { e, action: this.mixer.clipAction(e.clip), w: 0, target: 0, rate: 0, scrub: -1 }; this.layers.set(e.name, L); }
     const a = L.action;
-    if (L.target < 1 || L.scrub < 0) { a.setLoop(THREE.LoopOnce, 1); a.clampWhenFinished = true; a.reset(); a.enabled = true; a.play(); this._fadeTo(L, fade); }
+    const nt = clamp(time, 0, e.clip.duration - 1e-4);
+    if (L.target < 1 || L.scrub < 0) { fade = this._outFade(this.current(), L, fade); this.blend(Math.max(0.16, Math.min(0.32, fade + 0.06))); a.setLoop(THREE.LoopOnce, 1); a.clampWhenFinished = true; a.reset(); a.enabled = true; a.play(); this._fadeTo(L, fade); }
+    else if (nt < L.scrub - 0.04 || nt > L.scrub + 0.4) this.blend(0.22); // [smooth] 진행도가 튀면(뒤로 감기·크게 건너뜀) 자세를 이어 붙임
     a.timeScale = 0; a.paused = false;
-    L.scrub = clamp(time, 0, e.clip.duration - 1e-4);
+    L.scrub = nt;
     a.time = L.scrub;
     return a;
   }
@@ -315,6 +328,21 @@ export class Character {
   }
   // [motion] 지금 재생 중인 클립 시각(초) — 없으면 -1 (한 번 재생 클립이 끝났는지 볼 때)
   clipTime(name) { const e = this.resolve(name); const L = e && this.layers.get(e.name); return L && L.target > 0 ? L.action.time : -1; }
+  // [smooth] 지금 자세에서 dur 초 동안 새 동작으로 이어 붙이기(다음 갱신 때 적용)
+  blend(dur = 0.2) { this.ibReq = Math.max(this.ibReq, dur); }
+  // [smooth] 누운 자세(다이빙·슬라이딩)·큰 동작(세리머니·삼진 반응)에서 빠져나올 땐 페이드를 길게 — 갑자기 벌떡 서지 않게
+  _outFade(cur, L, fade) { if (!cur || cur === L) return fade; const of = cur.e.cfg.outFade || 0; return of > fade && cur.w > 0.5 ? of : fade; }
+  // [smooth] 다른 캐릭터의 지금 자세를 '직전 자세'로 가져와 거기서부터 이어서(타자 → 주자로 바뀌는 순간 등). 루트 방향 차이는 엉덩이 회전에 보정
+  adoptPose(o, dur = 0.35) {
+    if (!o || !o.bl || o.bl.length !== this.bl.length) return;
+    for (let i = 0; i < this.bl.length; i++) this.ibLast[i].copy(o.bl[i].quaternion);
+    this.root.updateWorldMatrix(true, false); o.root.updateWorldMatrix(true, false);
+    const ya = new THREE.Euler().setFromQuaternion(o.root.getWorldQuaternion(_q1), 'YXZ').y + o.yaw;
+    const yb = new THREE.Euler().setFromQuaternion(this.root.getWorldQuaternion(_q2), 'YXZ').y;
+    this.ibYawLast = ya - yb; // facing 보정으로 처리(엉덩이 회전 대신)
+    if (this.ibHips && o.ibHips) { o.ibHips.getWorldPosition(_t); this.ibHips.parent.updateWorldMatrix(true, false); this.ibHips.parent.worldToLocal(this.ibLastP.copy(_t)); }
+    this.ibHave = true; this.ibN = FR.n; this.ibReq = Math.max(this.ibReq, dur); this._adopt = true;
+  }
   _fadeTo(L, fade) {
     for (const o of this.layers.values()) {
       const tgt = o === L ? 1 : 0;
@@ -341,9 +369,11 @@ export class Character {
       if (L.w <= 0 && L.target <= 0) { L.action.stop(); L.action.enabled = false; this.layers.delete(k); continue; }
       sum += L.w;
     }
-    let yaw = 0;
-    for (const L of this.layers.values()) { const w = sum > 0 ? L.w / sum : 0; L.action.setEffectiveWeight(w); yaw += w * (L.e.cfg.yaw || 0) * DEG; if (L.scrub >= 0) L.action.time = L.scrub; }
-    if (Math.abs(yaw - this.yaw) > 1e-4) { this.yaw = yaw; this.facing.rotation.y = yaw; }
+    let yaw = 0, es = 0;
+    // [smooth] 크로스페이드 가중치를 smoothstep 으로 — 선형이면 시작·끝에서 속도가 툭 바뀜
+    for (const L of this.layers.values()) { const x = sum > 0 ? L.w / sum : 0; L._ew = x * x * (3 - 2 * x); es += L._ew; }
+    for (const L of this.layers.values()) { const w = es > 0 ? L._ew / es : 0; L.action.setEffectiveWeight(w); yaw += w * (L.e.cfg.yaw || 0) * DEG; if (L.scrub >= 0) L.action.time = L.scrub; }
+    this.yaw = yaw;
     // 컬링·LOD: 화면 밖은 hiddenUpdate 프레임마다, 멀면 farUpdate 프레임마다 (시간은 모아서 한 번에)
     this.acc += dt;
     let every = 1;
@@ -360,12 +390,52 @@ export class Character {
     if (every > 1 && FR.fk < 1) every = Math.max(1, Math.round(every * FR.fk));
     const run = every <= 1 || ((FR.n + this.phase) % every) === 0 || !this.ran;
     if (run) {
+      const de = this.acc;
       this.mixer.update(this.acc); this.acc = 0; this.ran = true;
+      this._inert(de, every);
       this._post(dt * every);
       this._blob();
     }
     this.ikReq.L = this.ikReq.R = null; this.lookReq = null;
     return run;
+  }
+  _inert(de, every) {
+    const n = this.bl.length, H = this.ibHipsI;
+    // 오래 안 그려졌으면(주자 재사용·화면 밖 오래) 이어 붙일 '직전 자세'가 없음
+    if (!this._adopt && FR.n - this.ibN > every * 3 + 6) this.ibHave = false;
+    this._adopt = false;
+    let req = this.ibReq; this.ibReq = 0;
+    // 자동 감지: 한 갱신 사이 엉덩이·척추가 너무 많이 돌거나 엉덩이가 튀면(순간이동) 이어 붙임
+    if (!req && this.ibHave && de < 0.25) {
+      const lim = 0.55 + de * 6;
+      let jump = H >= 0 && this.bl[H].quaternion.angleTo(this.ibLast[H]) > lim;
+      if (this.ibSpI === undefined) this.ibSpI = this.bones.Spine1 ? this.bl.indexOf(this.bones.Spine1) : -1;
+      const si = this.ibSpI; if (!jump && si >= 0) jump = this.bl[si].quaternion.angleTo(this.ibLast[si]) > lim;
+      if (!jump && this.ibHips) { const d = this.ibHips.position.distanceTo(this.ibLastP) * (this.ibHips.parent ? this.ibHips.parent.getWorldScale(_t).x : 1); jump = d > 0.2 + de * 4 && d < 3; }
+      if (jump) req = 0.2;
+    }
+    if (req && this.ibHave) {
+      for (let i = 0; i < n; i++) { const o = this.ibOff[i].copy(this.ibLast[i]).normalize().multiply(_q1.copy(this.bl[i].quaternion).normalize().invert()).normalize(); if (o.w < 0) o.set(-o.x, -o.y, -o.z, -o.w); } // 짧은 쪽으로
+      if (this.ibHips) {
+        this.ibOffP.subVectors(this.ibLastP, this.ibHips.position);
+        const ws = this.ibHips.parent ? this.ibHips.parent.getWorldScale(_t).x : 1;
+        this.ibPOn = this.ibOffP.length() * ws < 0.7; // 일부러 옮긴 것(1m 넘는 입장 위치 등)은 미끄러지게 하지 않음
+      }
+      let dy = this.ibYawLast - this.yaw; this.ibYawOff = Math.atan2(Math.sin(dy), Math.cos(dy));
+      this.ibT = 0; this.ibDur = req;
+    } else if (this.ibT < 1) this.ibT = Math.min(1, this.ibT + de / this.ibDur);
+    let fy = this.yaw;
+    if (this.ibT < 1) {
+      const x = this.ibT, w = (1 - x) * (1 - x) * (1 - x);
+      for (let i = 0; i < n; i++) this.bl[i].quaternion.premultiply(_q2.identity().slerp(this.ibOff[i], w)).normalize();
+      if (this.ibHips && this.ibPOn) this.ibHips.position.addScaledVector(this.ibOffP, w);
+      fy += this.ibYawOff * w;
+    }
+    if (Math.abs(fy - this.facing.rotation.y) > 1e-5) this.facing.rotation.y = fy;
+    // 이번에 보인 자세(IK 전) 기억
+    for (let i = 0; i < n; i++) this.ibLast[i].copy(this.bl[i].quaternion);
+    if (this.ibHips) this.ibLastP.copy(this.ibHips.position);
+    this.ibYawLast = fy; this.ibHave = true; this.ibN = FR.n;
   }
   _post(dt) {
     const k = 1 - Math.exp(-14 * dt);
@@ -562,7 +632,7 @@ export class Character {
       if (B) { const p = offB + i * 4; _q2.set(B[p], B[p + 1], B[p + 2], B[p + 3]); _q1.slerp(_q2, u); }
       b.quaternion.copy(_q1);
     }
-    this.ran = true; this.acc = 0;
+    this.ran = true; this.acc = 0; this.ibHave = false; this.ibT = 1;
   }
 
   dispose() {

@@ -191,8 +191,8 @@ export class ClipAnimator {
     else if (st === 'run') { if (speed > 6.2 && C.has('sprint')) st = 'sprint'; else if (speed < 0.35) st = base; }
     else st = speed > 0.6 ? 'run' : base;
     // 재생 속도 = 실제 속도/클립 원래 속도. 너무 느리게 돌리면 슬로모션처럼 보여서(조깅도 발 구르는 템포는 빠름) 최소 0.8
-    if (st === 'run' || st === 'sprint') { this.fidOn = false; C.play(st, { fade: 0.22, speed: clamp(speed / (CLIPS[st].speed || 4), 0.8, 1.7), sync: true }); }
-    else { const b = this._idle(st); C.play(b, { fade: b === 'mill' ? 0.5 : 0.35 }); }
+    if (st === 'run' || st === 'sprint') { this.fidOn = false; C.play(st, { fade: this.loco === 'run' || this.loco === 'sprint' ? 0.3 : 0.26, speed: clamp(speed / (CLIPS[st].speed || 4), 0.8, 1.7), sync: true }); }
+    else { const b = this._idle(st); C.play(b, { fade: b === 'mill' ? 0.5 : 0.42 }); }
     this.loco = st;
   }
   // [model] 투수판 맞춤: 루트(sim 투수 위치 = 투수판 가운데)에서 몸을 앞(+z 로컬)으로 BODY.pitchFwd 만큼 — 클립의 축발이 투수판 앞 모서리에 붙게
@@ -246,7 +246,7 @@ export class ClipAnimator {
       if (!this.inPitch) { this.inPitch = true; this.pv = this._pitchVariant(); this.pvAt = D.windup.at; this._cut(); }
       // [net 예측] 내 투구는 누른 순간(서버 windup 이벤트 전) 시작 → 이벤트(주자 정보)가 세트 자세 동안 오면 그때 변주를 다시 고름
       else if (this.pvAt !== D.windup.at && tau < PITCH_TL.lift) { this.pvAt = D.windup.at; this.pv = this._pitchVariant(); }
-      C.scrubPitch(tau, undefined, this.pv); P.ball.visible = tau < PITCH_TL.release;
+      C.scrubPitch(tau, { fade: 0.28 }, this.pv); P.ball.visible = tau < PITCH_TL.release; // [smooth] 대기 자세 → 세트 자세는 세트 구간(0.35초) 안에 부드럽게
     } else {
       this.inPitch = false; this.pk0 = -1;
       // 삼진 잡으면 주먹 불끈(Victory 1.05초~): 이닝 끝내는 삼진은 항상, 아니면 투수 버릇대로
@@ -256,7 +256,7 @@ export class ClipAnimator {
       }
       if (sp > 0.5) { this._cut(); this._loco(sp, 'idle'); }
       else if (this._shotOn()) { /* 세리머니 */ }
-      else { C.scrubPitch(0, { fade: 0.3 }, this.pv || 'pitch'); this.loco = 'idle'; }
+      else this._loco(0, 'idle'); // [smooth] 투구 끝 → 팔로스루에서 천천히 편한 대기 자세로(전: 0.3초 만에 세트 자세로 '휙' 돌아가 굳어 있었음)
       P.ball.visible = false;
       if (c.catchW && sp < 0.5 && !this.shot) C.reach('L', c.catchW, 1);
       if (c.lookW && !this.shot) C.look(c.lookW, 0.6);

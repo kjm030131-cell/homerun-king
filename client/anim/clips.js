@@ -21,47 +21,48 @@ export const FILES = {
 //  kmap    : 게임 진행도 k(0~1+) → 마커 이름. 이 클립을 시간이 아니라 진행도로 '긁어서(scrub)' 쓴다
 //  markers : 클립 안의 시각(초). null 이면 로딩 때 자동 추정(autoMarkers) — 수동 값이 있으면 그걸 씀
 //  fallback: 파일이 없을 때 대신 쓸 클립
+//  outFade : [smooth] 이 동작에서 다른 동작으로 넘어갈 때 최소 페이드(초) — 누운 자세·큰 동작에서 갑자기 벌떡 서지 않게
 export const CLIPS = {
   idle: { loop: true, lockXZ: true },
   ready: { loop: true, lockXZ: true, fallback: 'idle' },
-  run: { loop: true, lockXZ: true, speed: 3.6, fallback: 'idle' },
-  sprint: { loop: true, lockXZ: true, speed: 7.0, fallback: 'run' },
+  run: { smooth: 2, loop: true, lockXZ: true, speed: 3.6, fallback: 'idle' },
+  sprint: { smooth: 2, loop: true, lockXZ: true, speed: 7.0, fallback: 'run' },
   batStance: { loop: true, lockXZ: true, fallback: 'idle' },
   // swing: k 0~0.25 = 준비(로드, 투구 따라 체중 이동), 0.3 = 출발, 0.5 = 컨택, 1 = 끝(anim.js SWING_CONTACT_K 와 같음)
-  swing: { loop: false, lockXZ: false, kmap: [[0, 'start'], [0.25, 'load'], [0.3, 'launch'], [0.5, 'contact'], [1, 'end']], fallback: 'batStance' },
-  powerSwing: { loop: false, lockXZ: false, kmap: [[0, 'start'], [0.25, 'load'], [0.3, 'launch'], [0.5, 'contact'], [1, 'end']], fallback: 'swing' },
+  swing: { outFade: 0.3, loop: false, lockXZ: false, kmap: [[0, 'start'], [0.25, 'load'], [0.3, 'launch'], [0.5, 'contact'], [1, 'end']], fallback: 'batStance' },
+  powerSwing: { outFade: 0.3, loop: false, lockXZ: false, kmap: [[0, 'start'], [0.25, 'load'], [0.3, 'launch'], [0.5, 'contact'], [1, 'end']], fallback: 'swing' },
   // [motion] buntStance: 타격 자세 → 번트 자세로 돌아서는 0.9초 후 마지막 자세 유지(clamp)
-  buntStance: { loop: false, lockXZ: true, fallback: 'batStance' },
+  buntStance: { outFade: 0.3, loop: false, lockXZ: true, fallback: 'batStance' },
   // pitch 는 kmap 대신 timing.js 의 투구 시간표(와인드업 초) ↔ markers 로 맞춘다
-  pitch: { loop: false, lockXZ: false, fallback: 'throw' },
+  pitch: { outFade: 0.4, loop: false, lockXZ: false, fallback: 'throw' },
   // throw: anim.js THROW_RELEASE_K(0.55) 에 놓음
-  throw: { loop: false, lockXZ: false, kmap: [[0, 'start'], [0.55, 'release'], [1, 'end']], fallback: 'idle' },
-  catchHigh: { loop: false, lockXZ: true, kmap: [[0, 'start'], [0.45, 'catch'], [1, 'end']], fallback: 'ready' }, // [motion2] FBX 없으면 procedural.js (catch = 왼손 최고점)
-  catchLow: { loop: false, lockXZ: true, kmap: [[0, 'start'], [0.5, 'catch'], [1, 'end']], hold: true, fallback: 'ready' }, // [motion2] FBX 없으면 procedural.js
+  throw: { outFade: 0.32, loop: false, lockXZ: false, kmap: [[0, 'start'], [0.55, 'release'], [1, 'end']], fallback: 'idle' },
+  catchHigh: { outFade: 0.3, loop: false, lockXZ: true, kmap: [[0, 'start'], [0.45, 'catch'], [1, 'end']], fallback: 'ready' }, // [motion2] FBX 없으면 procedural.js (catch = 왼손 최고점)
+  catchLow: { outFade: 0.3, loop: false, lockXZ: true, kmap: [[0, 'start'], [0.5, 'catch'], [1, 'end']], hold: true, fallback: 'ready' }, // [motion2] FBX 없으면 procedural.js
   // dive/slide: k 1 = 0.55s / 0.6s (main.js 진행도 정의) — 그 뒤는 자연 속도로 이어 감
-  dive: { loop: false, lockXZ: true, kmap: [[0, 'start'], [1, 'land'], [1.8, 'end']], fallback: 'catchLow' },
-  slide: { loop: false, lockXZ: true, kmap: [[0, 'start'], [1, 'land'], [1.6, 'end']], fallback: 'run' },
+  dive: { outFade: 0.85, loop: false, lockXZ: true, kmap: [[0, 'start'], [1, 'land'], [1.8, 'end']], fallback: 'catchLow' },
+  slide: { outFade: 0.75, loop: false, lockXZ: true, kmap: [[0, 'start'], [1, 'land'], [1.6, 'end']], fallback: 'run' },
   catcherSquat: { loop: true, lockXZ: true, fallback: 'ready' },
-  celebrate: { loop: true, lockXZ: true, fallback: 'idle' },
-  disappointed: { loop: false, lockXZ: true, fallback: 'idle' },
-  umpireCall: { loop: false, lockXZ: true, fallback: 'idle' },
+  celebrate: { outFade: 0.5, loop: true, lockXZ: true, fallback: 'idle' },
+  disappointed: { outFade: 0.55, loop: false, lockXZ: true, fallback: 'idle' },
+  umpireCall: { outFade: 0.35, loop: false, lockXZ: true, fallback: 'idle' },
   // (선택) 고정 목록 밖 — 있으면 세이프 판정에 씀
-  umpireSafe: { loop: false, lockXZ: true, fallback: 'idle', optional: true }, // [motion2] FBX 없으면 procedural.js (팔 교차 → 양옆 쫙)
+  umpireSafe: { outFade: 0.35, loop: false, lockXZ: true, fallback: 'idle', optional: true }, // [motion2] FBX 없으면 procedural.js (팔 교차 → 양옆 쫙)
   // [motion] 상황별 변주 클립(전부 선택 — 없으면 fallback 사슬로 기존 클립). 뒤에서 늦게 받음(EARLY 아님) → 시작 로딩·메모리 영향 작음
   //  kind   : 마커 자동 추정 방식(swing·pitch·throw …) — 이름이 달라도 같은 방식으로
   //  anchor : 'end' = 마지막 프레임 엉덩이 수평 위치를 제자리(타석)로 / 'start' = 첫 프레임을 제자리로 (걸어 들어오기·나가기)
   batStepIn: { loop: false, lockXZ: false, anchor: 'end', optional: true, fallback: 'batStance' }, // Step_In: 타석에 들어서며 자리 잡기(0.44m)
   batWalkIn: { loop: false, lockXZ: false, anchor: 'end', optional: true, fallback: 'batStepIn' }, // Walk_In: 1.3m 걸어 들어와 자세
-  batWalkOut: { loop: false, lockXZ: false, anchor: 'start', optional: true, fallback: 'idle' }, // Walk_Out: 삼진 뒤 걸어 나감
+  batWalkOut: { outFade: 0.4, loop: false, lockXZ: false, anchor: 'start', optional: true, fallback: 'idle' }, // Walk_Out: 삼진 뒤 걸어 나감
   batStance2: { loop: true, lockXZ: true, optional: true, fallback: 'batStance' },
   batStance3: { loop: true, lockXZ: true, optional: true, fallback: 'batStance2' },
-  swing2: { loop: false, lockXZ: false, kind: 'swing', kmap: [[0, 'start'], [0.25, 'load'], [0.3, 'launch'], [0.5, 'contact'], [1, 'end']], optional: true, fallback: 'swing' },
-  batStrike: { loop: false, lockXZ: true, optional: true, fallback: 'disappointed' }, // 헛스윙 뒤 반응
-  mill: { loop: false, lockXZ: true, optional: true, fallback: 'idle' }, // 투구 사이 서성임(한 번 재생)
+  swing2: { outFade: 0.3, loop: false, lockXZ: false, kind: 'swing', kmap: [[0, 'start'], [0.25, 'load'], [0.3, 'launch'], [0.5, 'contact'], [1, 'end']], optional: true, fallback: 'swing' },
+  batStrike: { outFade: 0.45, loop: false, lockXZ: true, optional: true, fallback: 'disappointed' }, // 헛스윙 뒤 반응
+  mill: { outFade: 0.5, loop: false, lockXZ: true, optional: true, fallback: 'idle' }, // 투구 사이 서성임(한 번 재생)
   // pitch2 hold: 다리 든 채 버티는 끝(1.12초, 눈으로 고름) — 정점 멈춤(1.25~1.45s)을 이 구간으로 → 스트라이드 배속 3.1→2.35배
-  pitch2: { loop: false, lockXZ: false, kind: 'pitch', markers: { hold: 1.12 }, optional: true, fallback: 'pitch' }, // 세트 포지션 투구
-  catcherThrow: { loop: false, lockXZ: true, kind: 'throw', kmap: [[0, 'start'], [0.55, 'release'], [1, 'end']], optional: true, fallback: 'throw' },
-  catcherPop: { loop: false, lockXZ: true, optional: true, fallback: 'ready' },
+  pitch2: { outFade: 0.4, loop: false, lockXZ: false, kind: 'pitch', markers: { hold: 1.12 }, optional: true, fallback: 'pitch' }, // 세트 포지션 투구
+  catcherThrow: { outFade: 0.4, loop: false, lockXZ: true, kind: 'throw', kmap: [[0, 'start'], [0.55, 'release'], [1, 'end']], optional: true, fallback: 'throw' },
+  catcherPop: { outFade: 0.4, loop: false, lockXZ: true, optional: true, fallback: 'ready' },
 };
 export const CLIP_NAMES = Object.keys(CLIPS).filter((k) => !CLIPS[k].optional);
 // 이게 다 있어야 새 캐릭터로 바꾼다(없으면 옛 몸 유지 — 반쪽짜리 동작으로 게임이 어색해지는 것 방지)
