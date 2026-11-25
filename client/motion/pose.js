@@ -16,7 +16,7 @@ export function createPose(video, onSwing) {
     try {
       const vision = await dynImport(`${CDN}/vision_bundle.mjs`);
       const files = await vision.FilesetResolver.forVisionTasks(`${CDN}/wasm`);
-      const opts = (delegate) => ({ baseOptions: { modelAssetPath: MODEL, delegate }, runningMode: 'VIDEO', numPoses: 1, minPoseDetectionConfidence: 0.5, minPosePresenceConfidence: 0.5, minTrackingConfidence: 0.6 });
+      const opts = (delegate) => ({ baseOptions: { modelAssetPath: MODEL, delegate }, runningMode: 'VIDEO', numPoses: 1, minPoseDetectionConfidence: 0.5, minTrackingConfidence: 0.5 }); // [fix] 기본값으로 되돌림(0.6 이면 추적을 자주 놓쳐 인식이 끊김)
       try { lander = await vision.PoseLandmarker.createFromOptions(files, opts('GPU')); } catch { lander = await vision.PoseLandmarker.createFromOptions(files, opts('CPU')); }
       P.ready = true;
     } catch (e) { P.err = '전신 인식 모델을 못 불러왔어 (인터넷 확인) — 움직임 감지로 대신할게'; console.warn('[pose]', e); }
@@ -34,7 +34,7 @@ export function createPose(video, onSwing) {
     const ts = performance.now(); if (ts - lastTs < gap) return;
     lastTs = ts;
     let r; const d0 = performance.now(); try { r = lander.detectForVideo(video, ts); } catch { return; }
-    detAvg += (performance.now() - d0 - detAvg) * 0.1; gap = Math.max(33, Math.min(66, detAvg * 2.6));
+    detAvg += (performance.now() - d0 - detAvg) * 0.1; gap = Math.max(33, Math.min(50, detAvg * 1.8)); // [fix] 최대 20fps 아래로는 안 내려감
     const w = r && r.worldLandmarks && r.worldLandmarks[0];
     if (!w) { if (ts - P.t > 300) { P.lm = null; for (const f of F) for (const e of f) e.reset(); } return; }
     const dtS = P.t ? Math.min(0.2, (ts - P.t) / 1000) : 0.05;
@@ -42,7 +42,7 @@ export function createPose(video, onSwing) {
       const p = w[i], v = p.visibility ?? 1;
       vis[i] += (v - vis[i]) * (v > vis[i] ? 0.6 : 0.25);
       // 잘 안 보이는 관절(가려짐·화면 밖)은 거의 안 따라감 — 엉뚱한 위치로 튀는 것 방지
-      const tw = v < 0.25 ? 0.04 : Math.min(1, 0.25 + v);
+      const tw = 0.45 + 0.55 * Math.min(1, v); // [fix] 안 보이는 관절도 MediaPipe 추정을 따라감 — 전 버전은 거의 멈춰 둬서(골반이 옛 위치에 남음) 몸통이 뒤로 꺾였음
       F[i][0].filter(p.x, dtS, tw); F[i][1].filter(p.y, dtS, tw); F[i][2].filter(p.z, dtS, tw);
     }
     P.lm = out; P.t = ts;

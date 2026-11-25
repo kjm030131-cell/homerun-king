@@ -508,22 +508,27 @@ export class Character {
     const vis = (i) => (L[i].length > 3 ? L[i][3] : 1);
     // [11-24] 몸 방향 맞춤: 내가 평소 서 있는 방향(골반선, 천천히 따라가는 평균)을 선수 타격 자세 방향에 맞추고, 스윙처럼 빠르게 도는 것만 반영 → 카메라 위치가 달라도 선수가 통째로 돌아가지 않음
     {
-      const hx = _P[23].x - _P[24].x, hz = _P[23].z - _P[24].z, uy = Math.atan2(hx, hz);
+      const hp = Math.min(vis(23), vis(24)) >= 0.55, la = hp ? 23 : 11, ra = hp ? 24 : 12; // [fix] 골반이 안 보이면 어깨선으로 방향
+      const hx = _P[la].x - _P[ra].x, hz = _P[la].z - _P[ra].z, uy = Math.atan2(hx, hz);
       if (this._pyU == null) this._pyU = uy; else { let d = uy - this._pyU; d = Math.atan2(Math.sin(d), Math.cos(d)); this._pyU += d * 0.02; }
       if (B.LeftUpLeg && B.RightUpLeg) { /* 매 프레임 클립 자세의 골반선 (좌/우타 바뀌어도 맞음) */ B.LeftUpLeg.updateWorldMatrix(true, false); B.RightUpLeg.updateWorldMatrix(true, false); B.LeftUpLeg.getWorldPosition(m_p1); B.RightUpLeg.getWorldPosition(m_p0); this._pyC = Math.atan2(m_p1.x - m_p0.x, m_p1.z - m_p0.z); }
       if (this._pyC != null) { const rot = this._pyC - this._pyU; m_qa.setFromAxisAngle(m_UP, rot); for (let i = 0; i < 33; i++) _P[i].applyQuaternion(m_qa); }
     }
+    // [fix] 어깨가 안 보이면 웹캠 자세는 아예 안 씀, 골반이 안 보이면(가까이 서서 상반신만) 골반·몸통·다리는 클립 그대로 — 팔·고개만
+    const shQ = Math.min(vis(11), vis(12)), hpQ = Math.min(vis(23), vis(24));
+    if (shQ < 0.5) return;
+    const torsoOK = hpQ >= 0.55;
     const v = (a, b) => new THREE.Vector3().subVectors(_P[b], _P[a]);
     const mid = (a, b) => new THREE.Vector3().addVectors(_P[a], _P[b]).multiplyScalar(0.5);
     // 엉덩이 방향: 골반 좌우선(오른쪽→왼쪽)을 수평으로 맞춤
-    if (B.Hips && B.LeftUpLeg && B.RightUpLeg) {
+    if (torsoOK && B.Hips && B.LeftUpLeg && B.RightUpLeg) {
       B.RightUpLeg.updateWorldMatrix(true, false); B.LeftUpLeg.updateWorldMatrix(true, false); B.RightUpLeg.getWorldPosition(m_p0); B.LeftUpLeg.getWorldPosition(m_p1);
       const cur = m_cur.subVectors(m_p1, m_p0).setY(0), tg = v(24, 23).setY(0);
       if (cur.lengthSq() > 1e-6 && tg.lengthSq() > 1e-6) { let a = Math.atan2(tg.x, tg.z) - Math.atan2(cur.x, cur.z); a = Math.atan2(Math.sin(a), Math.cos(a)); rotWorld(B.Hips, m_UP, clamp(a, -1.1, 1.1) * w); } // [fix] 골반 최대 63°
     }
     // 몸통: 골반 가운데 → 어깨 가운데
     const torso = new THREE.Vector3().subVectors(mid(11, 12), mid(23, 24));
-    aimBone(B.Spine, B.Neck, torso, w, 0.75);
+    if (torsoOK) aimBone(B.Spine, B.Neck, torso, w, 0.6);
     // 어깨 비틀기(몸통 축 기준): 어깨선 수평 방향
     if (B.Spine2 && B.LeftArm && B.RightArm) {
       B.RightArm.getWorldPosition(m_p0); B.LeftArm.getWorldPosition(m_p1);
@@ -533,7 +538,7 @@ export class Character {
     if (vis(0) > 0.5) aimBone(B.Neck, B.Head, new THREE.Vector3().subVectors(_P[0], mid(11, 12)), w * 0.6, 0.6);
     // 팔·다리
     for (const [bn, tn, a, b] of [['LeftArm', 'LeftForeArm', 11, 13], ['LeftForeArm', 'LeftHand', 13, 15], ['RightArm', 'RightForeArm', 12, 14], ['RightForeArm', 'RightHand', 14, 16], // 팔·다리 모두 잘 보일 때만
-      ['LeftUpLeg', 'LeftLeg', 23, 25], ['LeftLeg', 'LeftFoot', 25, 27], ['RightUpLeg', 'RightLeg', 24, 26], ['RightLeg', 'RightFoot', 26, 28]]) { const vv = Math.min(vis(a), vis(b)), leg = a >= 23, th = leg ? 0.75 : 0.45; if (vv > th) { const d = v(a, b); d.z *= 0.7; /* 깊이는 인식이 제일 부정확 */ aimBone(B[bn], B[tn], d, w * (leg ? 0.55 : 1) * Math.min(1, (vv - th) / 0.2), leg ? 0.9 : 1.6); } } // [11-24] 다리는 잘 보일 때만 절반 세기로 (어색했음) // 안 보이는 관절(화면 밖 다리 등)은 원래 동작
+      ['LeftUpLeg', 'LeftLeg', 23, 25], ['LeftLeg', 'LeftFoot', 25, 27], ['RightUpLeg', 'RightLeg', 24, 26], ['RightLeg', 'RightFoot', 26, 28]]) { const vv = Math.min(vis(a), vis(b)), leg = a >= 23, th = leg ? 0.75 : 0.45; if (leg && !torsoOK) continue; if (vv > th) { const d = v(a, b); d.z *= 0.7; /* 깊이는 인식이 제일 부정확 */ aimBone(B[bn], B[tn], d, w * (leg ? 0.55 : 1) * Math.min(1, (vv - th) / 0.2), leg ? 0.9 : 1.6); } } // [11-24] 다리는 잘 보일 때만 절반 세기로 (어색했음) // 안 보이는 관절(화면 밖 다리 등)은 원래 동작
   }
   _blob() {
     const h = this.bones.Hips; if (!h || !this.blob) return;
