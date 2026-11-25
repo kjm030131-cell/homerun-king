@@ -1426,7 +1426,7 @@ export class Game {
   onSteal(id) {
     const p = this.players.get(id);
     if (!p || p.team !== this.batTeam || this.mode !== 'game') return;
-    if (!(this.phase === 'pitch' || (this.phase === 'pitching' && this.now < this.pitch.t0 - 0.2))) return;
+    if (!(this.phase === 'pitch' || (this.phase === 'pitching' && this.now < this.pitch.t0 - 0.2))) { if (this.phase === 'pitching') this.sendTo(id, { t: 'toast', text: '도루는 투수가 공 놓기 전에 눌러야 해' }); return; } // [keys] 안 먹을 때 이유
     const occ = new Set(this.runners.map((r) => r.b));
     let any = false;
     for (const r of [...this.runners].sort((a, b) => b.b - a.b)) {
@@ -1436,6 +1436,7 @@ export class Game {
       if (this.phase === 'pitching') { r.target = r.b + 1; r.stealT = this.pitch.t0 - 0.95; }
     }
     if (any) this.say('도루 시도!', false);
+    else this.sendTo(id, { t: 'toast', text: this.runners.some((r) => !r.out && r.b >= 1 && r.b <= 3) ? '앞 베이스가 막혀 있어 도루할 수 없어' : '도루할 주자가 없어' }); // [keys]
   }
 
   ctrlFielder(id) { return this.fielders.findIndex((x) => x.ctrl === id); }
@@ -1627,6 +1628,7 @@ export class Game {
       if (el < 0.22) h = Math.min(h, 0.45);
       else if (el < 0.5) h = Math.min(h, f.pos === 'P' ? 0.5 : 0.85);
     }
+    if (b.batted && f.ctrl && this.isHum(f.ctrl)) h *= this.R.humanReach || 1; // [fielding] 사람 조작 수비 포구 범위
     if (b.state === 'thrown') { h = Math.max(h, 1.4); maxY = Math.max(maxY, 2.7); }
     return b.y < maxY && dist2(f.x, f.z, b.x, b.z) < h;
   }
@@ -1918,7 +1920,7 @@ export class Game {
   }
   // 사람 투수: 'pick' 메시지 / CPU 투수: 도루 기미 있으면 가끔
   onPick(id, m) {
-    if (this.mode !== 'game' || this.phase !== 'pitch') return;
+    if (this.mode !== 'game' || this.phase !== 'pitch') { if (id !== 'cpu' && this.mode === 'game' && this.phase === 'pitching') this.sendTo(id, { t: 'toast', text: '견제는 투구 동작 들어가기 전에만 돼' }); return; } // [keys]
     const pi = this.fielders.findIndex((f) => f.pos === 'P');
     if (pi < 0 || (id !== 'cpu' && this.fielders[pi].ctrl !== id)) return;
     let base = m && m.base ? clamp(m.base | 0, 1, 3) : 0;
@@ -2203,7 +2205,7 @@ export class Game {
     return out;
   }
 
-  isHumanActive(f) { return f.ctrl && this.isHum(f.ctrl) && this.now - f.act < 0.6; } // 손 떼면 0.6초 뒤 CPU가 이어서 쫓아감
+  isHumanActive(f) { return f.ctrl && this.isHum(f.ctrl) && this.now - f.act < 0.35; } // 손 떼면 0.35초 뒤 CPU가 이어서 쫓아감 ([fielding] 0.6 → 0.35: 키를 놓으면 바로 도와줌)
 
   // ── 수비 분담 (실제 야구 기본 원칙) ──
   // 좌표: 홈(0,0) 1루(-19.4,19.4) 2루(0,38.8) 3루(19.4,19.4) → x>0 이 좌익수 쪽, x<0 이 우익수 쪽
@@ -2364,7 +2366,8 @@ export class Game {
     if (b.holder < 0 && b.state !== 'thrown' && b.batted !== false) {
       for (let i = 0; i < N; i++) {
         const f = this.fielders[i];
-        if (this.isHumanActive(f) || f.ctrl && this.isHum(f.ctrl) && this.now - f.act < 3) continue;
+        const hum = f.ctrl && this.isHum(f.ctrl); // [fielding] 사람 수비수도 아슬아슬한 타구는 자동 다이빙·점프(수비 보조)
+        if (hum && !this.R.humanAutoDive && (this.isHumanActive(f) || this.now - f.act < 3)) continue;
         if (this.now - f.dv < 2 || P.dived?.[i]) continue;
         const d = dist2(f.x, f.z, b.x, b.z);
         const closing = (b.vx * (f.x - b.x) + b.vz * (f.z - b.z)) > 0;
@@ -2374,11 +2377,11 @@ export class Game {
           const t = ((f.x - b.x) * vx + (f.z - b.z) * vz) / (vl * vl);
           const px = b.x + vx * t, pz = b.z + vz * t;
           const off = dist2(f.x, f.z, px, pz);
-          if (off > 1.1 && off < 2.8 && t < 0.6 && Math.random() < (b.bounced ? 0.6 : 0.3)) { (P.dived ||= {})[i] = true; this.startDive(f, px - f.x, pz - f.z); }
+          if (off > 1.1 && off < 2.8 && t < 0.6 && (hum || Math.random() < (b.bounced ? 0.6 : 0.3))) { (P.dived ||= {})[i] = true; this.startDive(f, px - f.x, pz - f.z); }
           else if (off <= 1.1) (P.dived ||= {})[i] = true;
         }
         // 머리 위 직선타 점프: 항상 뛰는 게 아니라 반응 성공했을 때만 (실제처럼 넘어가는 타구도 나옴)
-        if (d < 1.1 && b.y > 2.4 && b.y < 3.4 && this.now - f.jt > 1 && !P.jumpTried?.[i]) { (P.jumpTried ||= {})[i] = true; if (Math.random() < 0.28) f.jt = this.now; }
+        if (d < 1.1 && b.y > 2.4 && b.y < 3.4 && this.now - f.jt > 1 && !P.jumpTried?.[i]) { (P.jumpTried ||= {})[i] = true; if (hum || Math.random() < 0.28) f.jt = this.now; }
       }
     }
     if (b.holder >= 0) {

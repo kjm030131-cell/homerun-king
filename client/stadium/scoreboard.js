@@ -33,6 +33,12 @@ export function buildScoreboard(world, M, ads) {
   function drawScoreboard(s, extra = {}) {
     const key = JSON.stringify([s && s.ls, s && s.sc, s && s.cnt, s && s.bat && s.bat.name, s && s.hits, s && s.errs, s && s.inn, s && s.half, s && s.tn, extra.big, extra.sub, extra.lp && extra.lp.id, extra.force]);
     if (key === sbKey) return; sbKey = key;
+    // [perf] 1920×600 캔버스 다시 그리기 + 텍스처 올리기(수십 ms)를 프레임 안에서 하지 않고 쉬는 시간에 (최신 값 하나만)
+    pend = [s, extra];
+    if (!pendT) { const ric = typeof requestIdleCallback === 'function' ? requestIdleCallback : (f) => setTimeout(f, 60); pendT = ric(() => { pendT = 0; const [a, b] = pend; pend = null; if (a !== undefined) paint(a, b); }, { timeout: 400 }); }
+  }
+  let pend = null, pendT = 0;
+  function paint(s, extra = {}) {
     const g = sbCanvas.getContext('2d'), W = sbCanvas.width, H = sbCanvas.height;
     g.fillStyle = '#04060a'; g.fillRect(0, 0, W, H);
     g.textBaseline = 'middle';

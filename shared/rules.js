@@ -27,8 +27,10 @@ export const RULES = {
     seqEffect: true, // 같은 구종 연속 → CPU 타자가 익숙해짐 / 완급 조절 → 헛스윙↑ (구종 선택에 의미)
     // ── 수비·주루 ──
     cpuReach: 1.0, // CPU 수비수 포구 범위 배율 (작을수록 안타↑)
-    autoThrowWait: 1.6, // 사람이 공 잡고 가만있으면 CPU가 대신 송구하기까지(초)
-    autoThrowWaitSwitched: 0.9, // 자동 전환으로 받은 공
+    autoThrowWait: 1.1, // 사람이 공 잡고 가만있으면 CPU가 대신 송구하기까지(초) ([fielding] 1.6 → 1.1)
+    autoThrowWaitSwitched: 0.7, // 자동 전환으로 받은 공
+    humanReach: 1.15, // [fielding] 사람 조작 수비수 포구 범위 배율
+    humanAutoDive: true, // [fielding] 사람 수비수도 아슬아슬하면 자동 다이빙·점프
     forceAutoField: false, // true = fieldCtl 을 'auto' 로 고정
     sendHome: -0.05, // 3루 코치 공격성(2아웃 전, 음수일수록 과감) / 2아웃은 -0.3
     mercy: 0, // 콜드게임 점수 차 (0 = 없음)
@@ -56,6 +58,8 @@ export const RULES = {
     cpuReach: 0.9,
     autoThrowWait: 0.9,
     autoThrowWaitSwitched: 0.6,
+    humanReach: 1.3,
+    humanAutoDive: true,
     forceAutoField: true,
     sendHome: -0.25,
     mercy: 10,

@@ -193,10 +193,21 @@ const teamCache = new Map();
 const greet = []; // [trot] 홈런 트롯으로 홈을 밟은 주자: 홈 옆에서 기다렸다가 타자와 하이파이브 ({A, t0, i})
 const runnerPool = new Map(); // [qa] 주자 재사용 (poolKey → 배우 목록)
 function parkRunner(A) { scene.remove(A.p.root); if (A.poolKey) (runnerPool.get(A.poolKey) || runnerPool.set(A.poolKey, []).get(A.poolKey)).push(A); }
-function takeRunner(pk) { const l = runnerPool.get(pk); const A = l && l.pop(); if (!A || (usingNewCharacter() && !A.p.char)) return null; A.init = false; A.slideT = 0; A.wasVis = false; A.p.root.visible = true; scene.add(A.p.root); return A; }
+// [perf] 같은 모습이 없으면 같은 팀의 아무 주자나 가져와 등번호만 바꿔 씀 — 안타마다 새 배우(스켈레톤 복제·재질·데칼)를 만들던 20ms 멈칫 제거
+function takeRunner(pk, o) {
+  let l = runnerPool.get(pk), A = l && l.pop();
+  if (!A && o) { for (const [k, L] of runnerPool) if (k.startsWith(o.team + '|') && L.length) { A = L.pop(); if (A.p.char) { A.p.look.num = o.num; A.p.char.setUniform(A.p.look.u, o.num, A.p.look.name); } break; } }
+  if (!A || (usingNewCharacter() && !A.p.char)) return null; A.init = false; A.slideT = 0; A.wasVis = false; A.p.root.visible = true; scene.add(A.p.root); return A; }
+// [perf] 공격 팀이 정해지면 쉬는 시간(requestIdleCallback)에 주자 4명을 미리 만들어 둠
+function prewarmRunners(team) {
+  if (!usingNewCharacter() || prewarmRunners[team]) return; prewarmRunners[team] = 1;
+  let n = 0; const ric = window.requestIdleCallback || ((f) => setTimeout(() => f({ timeRemaining: () => 8 }), 120));
+  const one = () => { if (n >= 5 || !usingNewCharacter()) return; const o = { team, num: 91 + n, role: 'runner', seed: 900 + n }; const A = mkActor(o); A.poolKey = `${o.team}|${o.num}|${o.seed}`; parkRunner(A); n++; ric(one, { timeout: 2000 }); };
+  ric(one, { timeout: 2000 });
+}
 const cachedTeam = (k) => { const c = teamCache.get(k); return c && (!usingNewCharacter() || c.every((A) => A.p.char)) ? c : null; }; // 늦게 온 새 몸으로 못 바뀐 옛 몸 캐시는 버림
 function clearActors() {
-  teamCache.clear(); runnerPool.clear();
+  teamCache.clear(); runnerPool.clear(); prewarmRunners.home = prewarmRunners.away = 0; for (const k in prewarmRunners) prewarmRunners[k] = 0;
   for (const A of fielders) scene.remove(A.p.root);
   fielders = []; fieldTeamBuilt = null;
   if (batter) scene.remove(batter.p.root); batter = null; batTeamBuilt = null;
@@ -259,7 +270,7 @@ function buildTeams(s) {
       batter = mkActor({ team: bt, num: 24, role: 'batter', seed: 99 });
       for (const [x, z] of [[-24, 21], [24, 21]]) { const C = mkActor({ team: bt, num: 70 + coaches.length, role: 'fielder', seed: x }); C.p.glove.visible = false; C.p.root.position.set(x, 0, z); C.p.root.rotation.y = Math.atan2(-x, -z + 10); coaches.push(C); }
     }
-    batTeamBuilt = bt;
+    batTeamBuilt = bt; prewarmRunners(bt); if (/^(home|away)$/.test(bt)) prewarmRunners(bt === "home" ? "away" : "home"); // [perf] 양 팀 다
   }
 }
 
@@ -627,6 +638,7 @@ addEventListener('keydown', (e) => {
   if (role.batter && S.mode === 'game' && (S.ph === 'pitch' || S.ph === 'pitching') && /^[1-3]$/.test(k)) { const g = ['FB', 'BRK', 'OFF'][+k - 1]; net.send({ t: 'guess', g: S.gs === g ? null : g }); }
   if (role.pitcher && e.code === 'Space' && !camRig.peek) pitchClick(); // [cam] 주자 보기(X) 중엔 조준 안 함
   if (role.pitcher && S.ph === 'pitch' && k === 'q') { net.send({ t: 'pick' }); gauge = null; }
+  else if (role.pitcher && S.ph === 'pitching' && k === 'q' && S.mode === 'game') feedback('견제는 투구 동작 들어가기 전에만 돼', '#9fd0ff'); // [keys]
   // 수비
   if (S.ph === 'live' && role.fi >= 0) {
     const tmap = { '1': 1, '2': 2, '3': 3, '4': 4, 'f': 0, 'r': 5 };
@@ -651,7 +663,7 @@ addEventListener('keydown', (e) => {
     if ((S.ph === 'pitch' || S.ph === 'pitching') && k === 'r') { net.send({ t: 'steal' }); }
   }
 });
-let throwCharge = null, pendThrow = null;
+let throwCharge = null, pendThrow = null, assistTgt = null; // [fielding]
 const throwPow = () => (throwCharge ? clamp((nowP() - throwCharge.t0) / 0.7, 0, 1) : 0);
 // [net] 송구: 서버가 받아들일 조건이면 누른 순간 팔 동작 시작(전엔 왕복 뒤 시작 — 그동안 공이 먼저 날아가기도). 공은 서버가 놓는 순간 그대로
 function sendThrow(base, p) {
@@ -836,11 +848,14 @@ function updateControl(dt) {
     const mag = Math.min(1, Math.hypot(fw, rt));
     let spd = (keys.shift ? SPRINT_SPEED : FIELD_SPEED) * mag;
     // [11-23] 포구 보조: 공 낙구 지점(주황 원) 8m 안에서 대충 그쪽(±70°)으로 가면 방향을 끌어주고, 다 오면 지나치지 않게 멈춤
-    if (landRing.visible && cfg.assist !== 0) {
-      const tx = landRing.position.x - ctl.x, tz = landRing.position.z - ctl.z, d = Math.hypot(tx, tz);
-      if (d < 8 && d > 0.05) {
+    // [fielding] 수비 보조 강화: 뜬공 낙구 지점·땅볼 차단 지점(가이드 목표) 둘 다, 25m 안에서 대충 그쪽(±85°)으로만 가도 방향을 끌어주고,
+    //  멀면 자동 질주, 다 오면 지나치지 않게 멈춤 — 방향키 감각이 화면 시점과 달라도 공 쪽으로 감
+    const at = assistTgt && tp0 - assistTgt.t < 0.25 ? assistTgt : landRing.visible ? { x: landRing.position.x, z: landRing.position.z } : null;
+    if (at && cfg.assist !== 0 && S.ph === 'live') {
+      const tx = at.x - ctl.x, tz = at.z - ctl.z, d = Math.hypot(tx, tz);
+      if (d < 25 && d > 0.05) {
         const ux = tx / d, uz = tz / d, dot = ux * mx + uz * mz;
-        if (dot > 0.35) { const w = 0.55 * clamp((8 - d) / 6, 0, 1); let nx = mx + (ux - mx) * w, nz = mz + (uz - mz) * w; const nl = Math.hypot(nx, nz) || 1; mx = nx / nl; mz = nz / nl; if (d < 1.2) spd *= clamp(d / 1.2, 0.15, 1); }
+        if (dot > 0.08) { const w = clamp(0.45 + dot * 0.35 + (25 - d) / 60, 0, 0.92); let nx = mx + (ux - mx) * w, nz = mz + (uz - mz) * w; const nl = Math.hypot(nx, nz) || 1; mx = nx / nl; mz = nz / nl; if (d > 3.5) spd = Math.max(spd, SPRINT_SPEED * mag); if (d < 1.2) spd *= clamp(d / 1.2, 0.15, 1); }
       }
     }
     ctl.x += mx * spd * dt; ctl.z += mz * spd * dt;
@@ -1006,6 +1021,7 @@ function updateWorld(dt) {
     const knees = (pos === 'LF' || pos === 'CF' || pos === 'RF') && (s.ph === 'pitch' || (s.ph === 'pitching' && s.p && t < s.p.t0 - 0.9));
     A.a.fielder(dt, { speed: sp, ready, knees, splitK, hasBall: hasBall(i), throwK, diveK, jumpK, ballW, reachW, ground, groundK, highK, reachWeight: 1 });
   });
+  PF('w.fld');
   // 타자
   // [motion] 맞힌 순간(phase → live) 타자가 바로 주자로 바뀌어 스윙이 컨택 프레임에서 끊기던 것 → 팔로스루(0.34초)까지 타자를 보여 주고 홈의 주자는 그동안 숨김
   const swingHold = !pitchPhase && s.ph === 'live' && s.p && s.p.res === 'hit' && s.p.swingAt != null && t - s.p.swingAt < 0.34 && !replay.active;
@@ -1015,10 +1031,10 @@ function updateWorld(dt) {
     { const v = showBatter && !(camMode === 'bat' && false); if (batter.p.root.visible && !v) batterHideT = tp; batter.p.root.visible = v; } // [smooth] batterHideT: 타자 → 주자 자세 이어 붙이기
     if (showBatter) {
       const bh = s.bat && s.bat.h < 0 ? -1 : 1; // [lefty] 좌타자: 1루 쪽(-x)에서 반대 방향 + 거울 클립·배트·헬멧 (카메라는 타자 x 부호로 자동 미러)
-      if (batter.p.setHand) batter.p.setHand(bh); else batter.p.root.scale.x = bh; // 옛 몸은 통째 거울
+      PF('w.b0'); if (batter.p.setHand) batter.p.setHand(bh); else batter.p.root.scale.x = bh; // 옛 몸은 통째 거울
       place(batter, 0.95 * bh, 0.05, -Math.PI / 2 * bh, dt, 100);
       const nm = nameOf(s.bat && s.bat.id);
-      setTag(batter, nm && s.bat.id !== myId ? nm : '', '#ffffff');
+      PF('w.bHand'); setTag(batter, nm && s.bat.id !== myId ? nm : '', '#ffffff'); PF('w.bTag');
       let swingAt = null, contactL = null, loadK = 0;
       if (s.p && s.ph !== 'pitch') {
         // [anim 11-23] 준비 동작이 투구 비행 내내 이어짐(예전엔 0.4초 만에 끝나고 0.6초 동안 굳어 있었음):
@@ -1042,8 +1058,8 @@ function updateWorld(dt) {
       if (contactL && batter.tr && swingInfo[s.p.id]) batter.tr = swingTrack(contactL);
       const bunt = !!s.bs || (role.batter && buntOn);
       const aimY = s.p && s.ph === 'pitching' && t > s.p.t0 ? s.p.ty - 0.8 : role.batter ? (aimPoint() || [0, 0.8])[1] - 0.8 : 0;
-      batter.a.batter(dt, { swingK, loadK, bunt, track: batter.tr, aimY, lookW: _v.set(0, 1.6, 18), intro: !!(intro && camMode === 'intro'), who: s.bat && (s.bat.id || s.bat.name), batOff: role.batter && motion && motion.active() ? motion.batOff() : null, batQ: role.batter && motion && motion.active() ? motion.batQ() : null, pose: role.batter && motion && motion.active() ? motion.poseNow() : null, poseMir: !!(motion && motion.mirror) });
-      batter.p.bat.visible = true;
+      PF('w.bPre'); batter.a.batter(dt, { swingK, loadK, bunt, track: batter.tr, aimY, lookW: _v.set(0, 1.6, 18), intro: !!(intro && camMode === 'intro'), who: s.bat && (s.bat.id || s.bat.name), batOff: role.batter && motion && motion.active() ? motion.batOff() : null, batQ: role.batter && motion && motion.active() ? motion.batQ() : null, pose: role.batter && motion && motion.active() ? motion.poseNow() : null, poseMir: !!(motion && motion.mirror) });
+      PF('w.bAnim'); batter.p.bat.visible = true;
       // 스윙 잔상 + 바람 가르는 소리
       if (!bunt && swingK >= 0.3 && swingK <= 0.78) {
         batter.p.root.updateMatrixWorld(true);
@@ -1053,6 +1069,7 @@ function updateWorld(dt) {
       if (swingK < 0) batter.swSfx = false;
     }
   }
+  PF('w.bat');
   // 주자
   const live = new Set();
   for (const r of s.rn || []) {
@@ -1063,7 +1080,7 @@ function updateWorld(dt) {
     if (!A) {
       // [qa] 주자는 출루마다 새로 만들고 버리기만 해서(dispose 없음) 경기 내내 지오메트리·텍스처·스켈레톤이 쌓였음 → 같은 모습(팀·번호·seed)끼리 재사용
       const o = { team: batTeamBuilt || 'away', num: (name.charCodeAt(name.length - 1) % 60) + 1, role: 'runner', seed: name.length * 7 + (pid ? pid.length : 0) }, pk = `${o.team}|${o.num}|${o.seed}`;
-      A = takeRunner(pk) || mkActor(o); A.poolKey = pk; runners.set(key, A);
+      PF('w.r0'); A = takeRunner(pk, o); A = A || mkActor(o); if (!A.poolKey) A.poolKey = pk; runners.set(key, A); PF('w.rNew');
     }
     let x = x0, z = z0;
     if (IP) { const q = IP.rn(key); if (q) { x = q[0]; z = q[1]; } } // [net]
@@ -1089,8 +1106,8 @@ function updateWorld(dt) {
     const rvis = !(showBatter && (b === 0 || (swingHold && b < 0.3)));
     // [smooth] 친 타자가 주자로 바뀌는 순간: 화면에서 사라진 타자 자세(팔로스루)에서 뛰는 동작으로 이어서 — 전엔 다른 자세의 주자가 툭 나타남
     if (rvis && !A.wasVis && batter && batter.p.char && A.p.char && tp - batterHideT < 0.15 && batter.p.root.position.distanceTo(A.p.root.position) < 3) { A.p.root.position.copy(batter.p.root.position); A.p.root.rotation.y = batter.p.root.rotation.y; A.p.char.adoptPose(batter.p.char, 0.4); }
-    A.a.runner(dt, { speed: sp, slideK, lead: onBase && (s.ph === 'pitch' || s.ph === 'pitching'), cheer: !!(flags & 2) && !(b > 0 && b < 4), lookW: onBase ? _v.set(0, 1.2, 15) : null }); // [trot] 트롯 중엔 뛰는 동작(전: 느려지면 베이스 사이에서도 만세)
-    A.p.root.visible = rvis; // [motion] swingHold
+    PF('w.r1'); A.a.runner(dt, { speed: sp, slideK, lead: onBase && (s.ph === 'pitch' || s.ph === 'pitching'), cheer: !!(flags & 2) && !(b > 0 && b < 4), lookW: onBase ? _v.set(0, 1.2, 15) : null }); // [trot] 트롯 중엔 뛰는 동작(전: 느려지면 베이스 사이에서도 만세)
+    PF('w.rAnim'); A.p.root.visible = rvis; // [motion] swingHold
     A.wasVis = rvis;
     A.lastB = b; A.trot = !!(flags & 2); // [trot]
   }
@@ -1100,6 +1117,7 @@ function updateWorld(dt) {
   }
   updateGreet(s, tp, dt);
   updateLeavers(tp, dt);
+  PF('w.run');
   // 심판/코치
   for (const U of umps) {
     let call = null;
@@ -1110,7 +1128,9 @@ function updateWorld(dt) {
   }
   for (const C of coaches) C.a.idle(dt);
   updateCelebration(dt);
+  PF('w.ump');
   updateBall(dt, t, role, pitchPhase);
+  PF('w.ball');
 }
 // [trot] 홈런 뒤 홈 옆 하이파이브: 먼저 들어온 주자들은 1루 쪽 홈 뒤에 줄 서서 3루 쪽(들어오는 타자)을 보고 만세,
 //        마지막 주자(타자)가 들어오면 타자 쪽으로 돌아서 차례로 오른손을 맞댐(손 IK). 결과 시간이 끝나면(다음 타석) 치움
@@ -1378,6 +1398,7 @@ function updateBall(dt, t, role, pitchPhase) {
           if (cut) { tx = cut[0]; tz = cut[1]; tLeft = cut[2] - tp; cutRing.visible = true; cutRing.position.set(tx, 0.07, tz); cutRing.scale.setScalar(1 + 0.1 * Math.sin(tp * 10)); }
         }
         if (tx != null) {
+          assistTgt = { x: tx, z: tz, t: tp }; // [fielding] 수비 보조 목표
           const dx = tx - me.x, dz = tz - me.z, dd = Math.hypot(dx, dz), need = dd / SPRINT_SPEED;
           const col = dd < 1.6 || need <= tLeft ? '#4fd18b' : need <= tLeft + 0.45 ? '#ffd23a' : '#ff6b5a';
           if (dd > 1.2) { guide.visible = true; guide.position.set(me.x, 0.06, me.z); guide.rotation.y = Math.atan2(dx, dz); guide.scale.set(0.22, 1, dd); guide.material.color.set(col); }
@@ -1578,7 +1599,13 @@ function frame(now, manual) {
   if (!manual) requestAnimationFrame(frame);
   try { frameBody(now, manual); } catch (e) { if (frameErrs++ < 20) console.error('[frame]', e); if (manual) throw e; }
 }
+const RNOW = performance.now.bind(performance); // 가상 시계(qa)가 performance.now 를 덮어써도 실제 시간
+const PF = (k) => { const P = window.__prof; if (!P) return; const t = RNOW(); P.cur[k] = (P.cur[k] || 0) + t - P.t; P.t = t; }; // [perf] window.__prof = { t, cur, top } 로 켜면 프레임 구간별 시간
 function frameBody(now, manual) {
+  const PR = window.__prof; if (PR) { PR.t = RNOW(); PR.t0 = PR.t; PR.cur = {}; }
+  try { frameBody2(now, manual); } finally { if (PR) { const tot = RNOW() - PR.t0; if (tot > (PR.th || 25)) { PR.top.push([Math.round(tot), S && S.ph, Object.entries(PR.cur).filter((e) => e[1] > 3).map((e) => e[0] + ':' + Math.round(e[1])).join(' ')]); PR.top.sort((a, b) => b[0] - a[0]); PR.top.length = Math.min(PR.top.length, 15); } } }
+}
+function frameBody2(now, manual) {
   if (window.__vclock) now = performance.now(); // 테스트용 가상 시계
   const dt = Math.min(0.05, (now - lastT) / 1000); lastT = now;
   const time = now / 1000;
@@ -1595,7 +1622,7 @@ function frameBody(now, manual) {
   if (motion) motion.update(); // [motion]
   const inGame = S && S.fl && S.fl.length && (screen === 'game' || screen === 'over');
   if (inGame) {
-    updateControl(dt);
+    updateControl(dt); PF('ctl');
     replay.tick(nowP());
     // 다음 투구가 시작되면(와인드업) 리플레이는 바로 끝냄 → 타자가 공을 놓치지 않게
     if ((replay.active || replay.pending) && S.ph === 'pitching' && S.p && simNow() > S.p.t0 - WINDUP + 0.05) { replay.stop(); replay.pending = null; }
@@ -1605,8 +1632,8 @@ function frameBody(now, manual) {
       blob.visible = landRing.visible = guide.visible = cutRing.visible = relayRing.visible = pci.visible = zoneGroup.visible = aimMark.visible = crossMark.visible = false;
       blob.visible = ballMesh.visible; blob.position.set(ballMesh.position.x, 0.06, ballMesh.position.z);
     } else {
-      updateWorld(dt);
-      replay.record(nowP(), allPlayers(), ballMesh);
+      updateWorld(dt); PF('world');
+      replay.record(nowP(), allPlayers(), ballMesh); PF('rec');
     }
   } else {
     ballMesh.visible = blob.visible = landRing.visible = guide.visible = cutRing.visible = relayRing.visible = pci.visible = zoneGroup.visible = aimMark.visible = crossMark.visible = false;
@@ -1616,10 +1643,10 @@ function frameBody(now, manual) {
   updateCalls();
   updateTracer();
   if (S && S.fl) { const rr = getRole(); updateMyRing(rr); updateBaseTags(rr); }
-  updateCamera(dt, time);
+  PF('misc'); updateCamera(dt, time); PF('cam');
   if (updateAbsReview()) zoneGroup.visible = false; // [ABS] 판독 중엔 카메라·공을 판독 화면으로 덮어씀
-  updateHUD();
-  if (frameN % 2 === 0) drawMinimap();
+  updateHUD(); PF('hud');
+  if (frameN % 2 === 0) drawMinimap(); PF('mini');
   excite = Math.max(0, excite - dt * 0.18);
   stadium.update(time, inGame ? excite : 0.15);
   // 전광판
@@ -1628,10 +1655,10 @@ function frameBody(now, manual) {
     const big = bigBoard && nowP() - bigBoard.t < 6 ? bigBoard : null;
     stadium.drawScoreboard(S, big ? { big: big.big, sub: big.sub } : { lp });
   }
-  fx.update(dt, camera);
+  PF('stad'); fx.update(dt, camera); PF('fx');
   if (window.__noRender) return; // 테스트용
-  syncAllSkins(camera);
-  look.render(); // [stadium]
+  syncAllSkins(camera); PF('skin');
+  look.render(); PF('render'); // [stadium]
 }
 window.__frame = (t) => frame(t, true);
 requestAnimationFrame(frame);

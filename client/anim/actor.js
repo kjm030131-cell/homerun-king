@@ -14,7 +14,7 @@ import { loadLib, getLib } from './loader.js';
 import { CLIPS, FIT, BODY } from './clips.js';
 import { PITCH_TL, tauFromPitchK } from './timing.js';
 import { D, now, since, mood, rnd, hash } from './director.js'; // [motion]
-import { mirrorName } from './procedural.js'; // [lefty]
+import { mirrorName, MIRROR_CLIPS } from './procedural.js'; // [lefty]
 
 const clamp = (v, a, b) => Math.max(a, Math.min(b, v));
 const _v = new THREE.Vector3(), _w = new THREE.Vector3();
@@ -406,6 +406,10 @@ function startLoading() {
   loadLib().then((lib) => {
     if (lib.incomplete && lib.incomplete.length) throw new Error('필수 클립 없음: ' + lib.incomplete.join(', ') + ' (?animlab 에서는 있는 클립을 볼 수 있음)');
     console.info('[anim] 새 캐릭터 사용 — 클립', lib.clips.size, '개'); upgradeAll();
+    // [perf] 좌타 거울 클립을 쉬는 시간에 미리 만듦 — 좌타자가 처음 나올 때(투구 직전) 클립마다 수십 ms 멈칫하던 것
+    { const list = MIRROR_CLIPS.slice(), ric = typeof requestIdleCallback === 'function' ? requestIdleCallback : (f) => setTimeout(f, 200);
+      const next = () => { const n = list.shift(); if (!n) return; try { if (lib.clips.has(n)) mirrorName(lib, CLIPS, n); } catch (e) { /* 없으면 처음 쓸 때 */ } ric(next, { timeout: 3000 }); };
+      ric(next, { timeout: 3000 }); }
   })
     .catch((e) => { if (e.message !== 'no-model') console.warn('[anim] 새 캐릭터 못 씀 → 옛 몸 유지:', e.message); failed = true; legacy.clear(); });
   if (/[?&]animlab\b/.test(qs())) import('./lab.js').then((m) => m.openLab()).catch((e) => console.warn('[anim] lab', e));
