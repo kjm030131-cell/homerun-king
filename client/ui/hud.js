@@ -246,6 +246,7 @@ export function hudFrame(c, role, f) {
     title = f.bunt ? '번트' : '타격';
     keysL = f.bunt ? [['클릭', '번트 대기'], ['마우스 좌우', '방향'], ['B', '강공 전환']]
       : [['마우스', 'PCI 커서'], ['좌클릭', '정타'], ['우클릭 · F', '강타(잘 뜸)'], ['공이 커서 위쪽', '뜬공 · 아래쪽은 땅볼'], ...(dy && dy.pr ? [['1~6', `구종 고정${dy.pp && dy.pp !== 'MIX' && PITCHES[dy.pp] ? '(' + PITCHES[dy.pp].name + ')' : ''}`], ['0', '섞어서']] : derby ? [] : [['B', '번트']]), ['V', '시점']];
+    if (runnersOn && s.mode === 'game' && !f.bunt) keysL.push(['R', '도루']); // [keys] 타석에서도 도루 지시 가능(전엔 안내가 없어 안 되는 줄 앎)
     tip = f.bunt ? '' : '타이밍이 먼저. 커서 테두리가 초록일 때 스윙하면 커서가 조금 빗나가도 맞아';
   } else if (role.pitcher && s.ph === 'pitch') {
     title = '투구'; keysL = [['1~6', '구종'], ['마우스', '코스'], ['클릭', '게이지 시작'], ['클릭', '초록에서 투구']];

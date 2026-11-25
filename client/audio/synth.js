@@ -183,16 +183,18 @@ function vox(v, { t = 0, dur = 0.4, f0 = [[0, 180]], vw = [[0, 'a']], gain = 0.5
   const env = a.createGain();
   env.gain.setValueAtTime(0, t0); env.gain.linearRampToValueAtTime(gain, t0 + 0.025);
   env.gain.setValueAtTime(gain, t0 + dur * 0.7); env.gain.exponentialRampToValueAtTime(0.0001, t0 + dur);
+  const kids = [vib, vg, env];
   [1, 0.55, 0.28].forEach((fg, k) => {
-    const bp = a.createBiquadFilter(); bp.type = 'bandpass';
+    const bp = a.createBiquadFilter(); kids.push(bp); bp.type = 'bandpass';
     bp.frequency.setValueAtTime(VOW[vw[0][1]][k], t0);
     for (const [tt, w] of vw.slice(1)) bp.frequency.linearRampToValueAtTime(VOW[w][k], t0 + tt);
     bp.Q.value = VOW[vw[0][1]][k] / (70 + k * 40);
-    const g = a.createGain(); g.gain.value = fg * 2.2;
+    const g = a.createGain(); g.gain.value = fg * 2.2; kids.push(g);
     src.connect(bp).connect(g).connect(env);
   });
   env.connect(v.in);
   src.start(t0); vib.start(t0); src.stop(t0 + dur + 0.05); vib.stop(t0 + dur + 0.05);
+  src.onended = () => { try { src.disconnect(); for (const n of kids) n.disconnect(); } catch { } }; // [perf]
 }
 // kind: strike / strike3 / out / safe   pos: 판정 위치(누심이면 베이스)
 export function ump(kind, d = {}) {

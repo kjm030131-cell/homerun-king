@@ -210,6 +210,7 @@ export function nz(v, { buf = 'white', t = 0, dur = 0.1, type = 'bandpass', f = 
   s.connect(fl).connect(g).connect(v.in);
   const off = Math.random() * Math.max(0, b.duration - dur - hold - 0.1);
   s.start(t0, off); s.stop(t0 + att + hold + dur + 0.05);
+  s.onended = () => { try { s.disconnect(); fl.disconnect(); g.disconnect(); } catch { } }; // [perf] 끝나면 끊음 — 소리마다 노드가 쌓여 오래 하면 렉
 }
 // 오실레이터 한 방 (sine/triangle/square/sawtooth), f2 로 피치 미끄러짐
 export function osc(v, { type = 'sine', f = 440, f2 = 0, t = 0, dur = 0.2, gain = 0.3, att = 0.003, hold = 0, detune = 0 } = {}) {
@@ -221,6 +222,7 @@ export function osc(v, { type = 'sine', f = 440, f2 = 0, t = 0, dur = 0.2, gain 
   g.gain.exponentialRampToValueAtTime(0.0001, t0 + att + hold + dur);
   if (f2) o.frequency.exponentialRampToValueAtTime(Math.max(10, f2), t0 + att + hold + dur);
   o.connect(g).connect(v.in); o.start(t0); o.stop(t0 + att + hold + dur + 0.05);
+  o.onended = () => { try { o.disconnect(); g.disconnect(); } catch { } }; // [perf]
 }
 // 나무 배트 공명: 감쇠하는 사인 부분음 묶음
 export function modal(v, parts, t = 0) { for (const [f, dur, gain] of parts) osc(v, { f, dur, gain, t, att: 0.0008 }); }
@@ -233,5 +235,6 @@ export function buf(v, b, { t = 0, rate = 1, gain = 1, dur = 0, lp = 0 } = {}) {
   if (lp) { const f = a.createBiquadFilter(); f.type = 'lowpass'; f.frequency.value = lp; n.connect(f); n = f; }
   n.connect(g).connect(v.in);
   s.start(v.t + t);
+  s.onended = () => { try { s.disconnect(); if (n !== s) n.disconnect(); g.disconnect(); } catch { } }; // [perf]
   if (dur) { g.gain.setValueAtTime(gain, v.t + t + Math.max(0, dur - 0.08)); g.gain.linearRampToValueAtTime(0, v.t + t + dur); s.stop(v.t + t + dur + 0.02); }
 }
