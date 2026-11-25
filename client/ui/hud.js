@@ -177,7 +177,7 @@ export function hudFrame(c, role, f) {
     const cl = s.cl2; if (cl && myT) setText('chalLeft', `챌린지 ${cl[myT === 'away' ? 0 : 1]}`); }
   // ── 이하 값이 바뀔 때만 ──
   const dy = s.dy, bat = s.bat || {};
-  const key = `${s.sc}|${s.inn}|${s.half}|${s.cnt}|${s.occ}|${bat.id}|${bat.name}|${bat.n}|${s.bt}|${role.pos}|${role.batter}|${role.pitcher}|${s.ph}|${role.holding}|${role.offense}|${role.fi}|${s.tn}|${s.sta}|${s.pc}|${dy ? [dy.sw, dy.xh, dy.idx, dy.outs, dy.pp, dy.list[dy.idx]?.[2]] : ''}|${c.nPlayers}|${s.mode}|${f.bunt}|${s.ch}|${s.cv}|${s.rl}|${f.landChase}|${s.fc}|${c.rules}|${s.cl}`;
+  const key = `${s.sc}|${s.inn}|${s.half}|${s.cnt}|${s.ch2 ? s.ch2[1] + ':' + s.ch2[4] : ''}|${s.occ}|${bat.id}|${bat.name}|${bat.n}|${s.bt}|${role.pos}|${role.batter}|${role.pitcher}|${s.ph}|${role.holding}|${role.offense}|${role.fi}|${s.tn}|${s.sta}|${s.pc}|${dy ? [dy.sw, dy.xh, dy.idx, dy.outs, dy.pp, dy.list[dy.idx]?.[2]] : ''}|${c.nPlayers}|${s.mode}|${f.bunt}|${s.ch}|${s.cv}|${s.rl}|${f.landChase}|${s.fc}|${c.rules}|${s.cl}`;
   if (key === slowKey) return;
   slowKey = key;
   paintClubs(s.cl);
@@ -188,7 +188,7 @@ export function hudFrame(c, role, f) {
   setText('half', s.half === 0 ? '초' : '말'); cls('bugInn', 'bot', s.half !== 0);
   setText('innN', s.inn);
   ['d1', 'd2', 'd3'].forEach((id, i) => cls(id, 'on', s.occ && s.occ[i]));
-  setDots('bug', s.cnt);
+  setDots('bug', cntShown(s)); // [fix] 챌린지 창(3.2초) 동안에도 주심 콜을 바로 카운트에 (번복되면 서버 값으로 돌아감)
   setText('bugRules', c.rules === 'casual' ? '캐주얼' : '리얼'); cls('bugRules', 'casual', c.rules === 'casual');
   // [physics] 바람: 화면 위 = 중견수 쪽, 왼쪽 = 좌익수 쪽(+x). 외야로 불면 뜬공이 더 뻗음
   const wd = s.wd || [0, 0], wsp = Math.hypot(wd[0], wd[1]);
@@ -268,6 +268,10 @@ export function hudFrame(c, role, f) {
   cls('hint', 'mini', hmini);
   setHTML('hint', (title ? `<b class="ht">${title}</b>` : '') + (hmini ? '<span class="hk hmore"><span class="kbd">H</span>조작법</span>' : '') + keysL.map(([k, l]) => `<span class="hk"><span class="kbd">${k}</span>${l}</span>`).join('') + (tip ? `<span class="tip">${tip}</span>` : ''));
   show('hint', !!(title || keysL.length || tip));
+}
+function cntShown(s) {
+  const c = s.cnt, ch = s.ch2; if (!c || !ch || ch[4]) return c;
+  return ch[1] ? [c[0], Math.min(2, c[1] + 1), c[2]] : [Math.min(3, c[0] + 1), c[1], c[2]];
 }
 function setDots(root, cnt) {
   const r = $(root), k = String(cnt);
