@@ -31,7 +31,19 @@ export function createUI(ctx) {
 
   bindSegs();
   // 버튼 클릭 소리는 사운드 파트가 bus 'ui:click'으로 받음 (UI는 sfx를 직접 부르지 않음)
-  document.addEventListener('click', (e) => { if (e.target.closest && e.target.closest('button')) bus.emit('ui:click', {}); }, true);
+  // [sound 11-25] 버튼 종류별 소리: 뒤로·닫기·나가기 = ui:back, 선택지(.seg) = ui:toggle, 나머지 = ui:click. 마우스 올림 = ui:hover
+  const BACK_RE = /뒤로|닫기|취소|나가기|그만|돌아가기|로비로|✕|×/;
+  document.addEventListener('click', (e) => {
+    const b = e.target.closest && e.target.closest('button'); if (!b || b.disabled) return;
+    if (b.closest('.seg')) bus.emit('ui:toggle', {});
+    else if (b.dataset.sfx === 'back' || b.classList.contains('close') || b.classList.contains('back') || BACK_RE.test((b.textContent || '').trim().slice(0, 8))) bus.emit('ui:back', {});
+    else bus.emit('ui:click', {});
+  }, true);
+  let hovEl = null;
+  document.addEventListener('pointerover', (e) => {
+    const b = e.target.closest && e.target.closest('button, .card, [data-hover]'); if (b === hovEl) return; hovEl = b;
+    if (b && !b.disabled && e.pointerType === 'mouse') bus.emit('ui:hover', {});
+  }, true);
   initChat((text) => send({ t: 'chat', text }));
   bindSettings({ applyQuality: ctx.applyQuality, setVolume: ctx.setVolume, stopReplay: ctx.stopReplay, stopSpeech });
   bindRoom({ lobby: () => ctx.lobby, myId: () => ctx.myId, send });
