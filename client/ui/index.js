@@ -141,6 +141,7 @@ export function createUI(ctx) {
   function paintSoloClubs() {
     for (const [k, id] of [['me', 'oClubMe'], ['op', 'oClubOp']]) { const b = $(id); b.querySelector('img').src = emblemURL(soloClub[k], 72); b.querySelector('span').textContent = clubOf(soloClub[k]).name; }
   }
+  window.addEventListener('logos', () => { try { paintSoloClubs(); } catch {} }); // [logo]
   document.querySelectorAll('[data-solo]').forEach((b) => (b.onclick = () => openClubPicker({ solo: b.dataset.solo })));
   // [ui] 지난번 혼자 하기 설정 기억 (규칙은 모드 선택 화면 값을 따름)
   const oMode = (m) => { $('oInnLbl').textContent = m === 'derby' ? '아웃 수 (×3)' : '이닝'; show('oInnWrap', m !== 'practice'); };

@@ -1,5 +1,6 @@
 // player.js — 사람 비율 야구선수 모델 + 관절 리그 + 2관절 IK
 import * as THREE from 'three';
+import { logoOf, drawContain } from './emblem.js'; // [logo] 모자 로고: 직접 넣은 이미지가 있으면 그걸로
 
 const V = (x = 0, y = 0, z = 0) => new THREE.Vector3(x, y, z);
 const clamp = (v, a, b) => Math.max(a, Math.min(b, v));
@@ -60,10 +61,11 @@ function jerseyTex(u, num, name) {
 
 const logoCache = new Map();
 function logoTex(k, fg, stroke) {
-  const key = k + fg + stroke;
+  const im = logoOf(k), key = k + fg + stroke + (im ? ':img' : '');
   if (logoCache.has(key)) return logoCache.get(key);
-  const c = document.createElement('canvas'); c.width = c.height = 64;
+  const c = document.createElement('canvas'); c.width = c.height = im ? 128 : 64;
   const g = c.getContext('2d');
+  if (im) { drawContain(g, im, 4, 4, 120, 120); const t = new THREE.CanvasTexture(c); t.colorSpace = THREE.SRGBColorSpace; t.anisotropy = 4; logoCache.set(key, t); return t; }
   g.font = `700 italic ${k.length > 2 ? 30 : k.length > 1 ? 40 : 54}px Oswald, "Arial Narrow", Impact, sans-serif`; g.textAlign = 'center'; g.textBaseline = 'middle';
   g.lineWidth = 6; g.strokeStyle = stroke; g.strokeText(k, 32, 35); g.fillStyle = fg; g.fillText(k, 32, 35);
   const t = new THREE.CanvasTexture(c); t.colorSpace = THREE.SRGBColorSpace; t.anisotropy = 4;
