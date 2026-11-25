@@ -70,9 +70,11 @@ export function createPose(video, onSwing) {
     prev = { x: hx, y: hy, z: hz, t: ts };
   }
   // 지금 시각의 자세: 마지막 감지(20~30fps) 뒤 흐른 시간만큼 속도로 앞당김(최대 60ms, 점점 약하게) → 화면(60fps)에서 계단처럼 끊기지 않음
+  const cl = (d) => (d > 0.04 ? 0.04 : d < -0.04 ? -0.04 : d);
   function sample() {
     const age = Math.min(0.06, Math.max(0, (performance.now() - P.t) / 1000)), k = age * (1 - age / 0.12);
-    for (let i = 0; i < 33; i++) { const f = F[i], o = out[i]; o[0] = f[0].x + f[0].dx * k; o[1] = f[1].x + f[1].dx * k; o[2] = f[2].x + f[2].dx * k * 0.5; o[3] = vis[i]; }
+    // [fix] 예측은 걸러진 위치의 속도로, 잘 보이는 관절만, 최대 4cm — 전엔 가려진 관절의 원본 튐(수 m/s)까지 앞당겨 팔다리가 기괴하게 꺾였음
+    for (let i = 0; i < 33; i++) { const f = F[i], o = out[i], kv = k * Math.max(0, Math.min(1, (vis[i] - 0.5) / 0.3)); o[0] = f[0].x + cl(f[0].v * kv); o[1] = f[1].x + cl(f[1].v * kv); o[2] = f[2].x + cl(f[2].v * kv * 0.5); o[3] = vis[i]; }
     return out;
   }
   P.start = () => { if (on) return; on = true; raf = requestAnimationFrame(frame); };

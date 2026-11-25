@@ -239,7 +239,10 @@ export function createMotion(api) {
   // [위 방식] 3D 회전이 오면 쿼터니언 그대로 [x,y,z,w] (프레임마다 부드럽게 따라감)
   const bq = [0, 0, 0, 1];
   M.batQ = () => {
-    const q = M.oriQ; if (!q || performance.now() - M.oriT > 250) return null;
+    let q = M.oriQ; if (!q || performance.now() - M.oriT > 250) return null;
+    // [fix] 배트 축(핸드폰 세로축 y) 둘레 비틀림은 빼고 기울기만 — 나침반(alpha) 드리프트로 시간이 지날수록 배트·손목이 꼬이던 것
+    { const tl = Math.hypot(q[1], q[3]) || 1, tw = [0, q[1] / tl, 0, q[3] / tl]; const iv = [-tw[0], -tw[1], -tw[2], tw[3]];
+      q = [q[3] * iv[0] + q[0] * iv[3] + q[1] * iv[2] - q[2] * iv[1], q[3] * iv[1] - q[0] * iv[2] + q[1] * iv[3] + q[2] * iv[0], q[3] * iv[2] + q[0] * iv[1] - q[1] * iv[0] + q[2] * iv[3], q[3] * iv[3] - q[0] * iv[0] - q[1] * iv[1] - q[2] * iv[2]]; }
     // 기준 자세에서 많이 돌아간 상태(스윙 뒤 팔로스루 등)면 몸 연동을 서서히 끄고 기본 자세로 — 60°부터 줄여 100°면 0
     const ang = 2 * Math.acos(Math.min(1, Math.abs(q[3]))), fade = Math.max(0, Math.min(1, (1.75 - ang) / 0.7));
     if (fade <= 0.01 || performance.now() < (M.curFreeze || 0)) { bq[0] = bq[1] = bq[2] = 0; bq[3] = 1; return null; }
