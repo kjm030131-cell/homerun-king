@@ -8,6 +8,7 @@ import { drawQR } from './qr.js';
 import { createPadLink, newPadCode } from './link.js';
 import { createWebcam } from './webcam.js';
 import { createPose } from './pose.js';
+import { OneEuro } from './filter.js'; // [motion+]
 import { bus } from '../core/bus.js';
 
 const TYPES_KO = { FB: '포심', TS: '투심', SL: '슬라이더', CB: '커브', CH: '체인지업', SP: '스플리터', BP: '빈볼' };
@@ -244,7 +245,7 @@ export function createMotion(api) {
     if (fade <= 0.01 || performance.now() < (M.curFreeze || 0)) { bq[0] = bq[1] = bq[2] = 0; bq[3] = 1; return null; }
     let d = bq[0] * q[0] + bq[1] * q[1] + bq[2] * q[2] + bq[3] * q[3]; const sg = d < 0 ? -1 : 1;
     const tq = fade < 1 ? [q[0] * sg * fade, q[1] * sg * fade, q[2] * sg * fade, 1 - (1 - Math.abs(q[3])) * fade] : [q[0] * sg, q[1] * sg, q[2] * sg, q[3] * sg];
-    for (let i = 0; i < 4; i++) bq[i] += (tq[i] - bq[i]) * 0.55;
+    { const n0 = performance.now(), dt = Math.min(0.1, (n0 - (M.bqT || n0 - 16)) / 1000); M.bqT = n0; const ang2 = Math.acos(Math.min(1, Math.abs(bq[0] * tq[0] + bq[1] * tq[1] + bq[2] * tq[2] + bq[3] * tq[3]))) * 2, cut = 3 + ang2 * 14, k = 1 - Math.exp(-2 * Math.PI * cut * dt); for (let i = 0; i < 4; i++) bq[i] += (tq[i] - bq[i]) * k; } // [motion+] 프레임률과 무관하게: 작게 흔들리면 걸러내고 크게 돌리면 바로 따라감
     const n = Math.hypot(bq[0], bq[1], bq[2], bq[3]) || 1; for (let i = 0; i < 4; i++) bq[i] /= n;
     // 배트는 손에 쥔 채 25°까지만 따라감 (크게 돌리면 배트를 안 쥔 것처럼 보였음)
     const a = 2 * Math.acos(Math.min(1, Math.abs(bq[3]))), MAX = 0.44;
@@ -252,12 +253,12 @@ export function createMotion(api) {
     return bq;
   };
   // [11-24] 핸드폰 조준 커서: 타석 자세 기준 좌우 기울기 → 좌우, 앞뒤 기울기 → 높낮이 (22°면 존 끝)
-  M.cur = null; M.curHist = [];
+  M.cur = null; M.curHist = []; const curF = [new OneEuro(1.6, 3.5), new OneEuro(1.6, 3.5)];
   M.updateCursor = () => {
     const S = api.S(); if (!M.curRaw || performance.now() - M.oriT > 300 || (M.cam && M.cam.on && M.pose && M.pose.ready)) { M.cur = null; return null; }
     const zn = (S && S.zn) || [-0.236, 0.236, 0.46, 1.06], cx = (zn[0] + zn[1]) / 2, cy = (zn[2] + zn[3]) / 2, hw = (zn[1] - zn[0]) / 2, hh = (zn[3] - zn[2]) / 2;
     const tx = cx + clamp(M.curRaw[0] / 22, -1.7, 1.7) * hw, ty = cy + clamp(M.curRaw[1] / 22, -1.7, 1.7) * hh;
-    if (!M.cur) M.cur = [tx, ty]; else { M.cur[0] += (tx - M.cur[0]) * 0.35; M.cur[1] += (ty - M.cur[1]) * 0.35; }
+    { const n0 = performance.now(), dt = Math.min(0.1, (n0 - (M.curT || n0 - 16)) / 1000); M.curT = n0; if (!M.cur) { M.cur = [tx, ty]; curF[0].reset(); curF[1].reset(); } M.cur[0] = curF[0].filter(tx, dt); M.cur[1] = curF[1].filter(ty, dt); } // [motion+] One-Euro: 조준점 손떨림 제거, 빠르게 옮기면 지연 없이
     const n = performance.now(); M.curHist.push([n, M.cur[0], M.cur[1]]); while (M.curHist.length > 90) M.curHist.shift();
     return M.cur;
   };
@@ -265,7 +266,8 @@ export function createMotion(api) {
   M.poseNow = () => (M.pose && M.pose.ready && M.cam && M.cam.on ? M.pose.now() : null);
   M.batOff = () => {
     if (!M.ori || performance.now() - M.oriT > 250) return null;
-    bo[0] += (M.ori[0] * Math.PI / 180 - bo[0]) * 0.5; // 핸드폰 윗부분 들면 배트도 세워짐(스크린샷으로 방향 확인) bo[1] += (M.ori[1] * Math.PI / 180 - bo[1]) * 0.5;
+    bo[0] += (M.ori[0] * Math.PI / 180 - bo[0]) * 0.5; // 핸드폰 윗부분 들면 배트도 세워짐(스크린샷으로 방향 확인)
+    bo[1] += (M.ori[1] * Math.PI / 180 - bo[1]) * 0.5; // [motion+] 전엔 이 줄이 주석에 묻혀 좌우 기울기가 안 먹었음
     return bo;
   };
   M.paint = paint;

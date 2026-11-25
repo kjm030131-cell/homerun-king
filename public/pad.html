@@ -212,7 +212,7 @@ h1{font-size:26px;font-weight:900;line-height:1.2}
   function pmMark(pk) { const u = $('pmPk'); u.style.display = 'block'; u.style.left = pmPos(pk) + '%'; }
   function rate(e) { const r = e.rotationRate; if (!r) return 0; return Math.hypot(r.alpha || 0, r.beta || 0, r.gamma || 0); }
   function onMotion(e) {
-    const r = rate(e), now = performance.now();
+    const r = rate(e), pn = performance.now(), now = e.timeStamp && Math.abs(e.timeStamp - pn) < 500 ? e.timeStamp : pn; // [motion+] 센서가 잰 시각(이벤트 처리 지연 빼기)
     if (r > 0) { hasMotion = true; lastMotionT = now; }
     if (cal && cal.step === 2) { detect(r, now, 300, 300, (b) => calSwing(b)); return; }
     if (st === 'bat') {
@@ -235,13 +235,17 @@ h1{font-size:26px;font-weight:900;line-height:1.2}
     } else burst = null;
   }
   // 각속도가 문턱을 넘으면 시작 → 꼭짓점 기록 → 반 아래로 떨어지면 끝 (꼭짓점 시각 = 맞는/놓는 순간)
+  // [motion+] 꼭짓점 시각을 앞뒤 표본으로 포물선 보정 (센서 주기 16ms 보다 정확하게 '맞는 순간')
+  let lastS = null;
+  function peakT(t0, v0, t1, v1, t2, v2) { const d0 = t1 - t0, d1 = t2 - t1; if (!(d0 > 0 && d1 > 0) || d0 > 60 || d1 > 60) return t1; const a = ((v2 - v1) / d1 - (v1 - v0) / d0) / (d0 + d1); if (!(a < 0)) return t1; const b = (v1 - v0) / d0 - a * (t1 + t0); return Math.max(t1 - d0 / 2, Math.min(t1 + d1 / 2, -b / (2 * a))); }
   function detect(r, now, th, maxMs, done) {
     if (now < cool) return;
     // [11-23] 정점을 지나자마자(정점의 82% 아래로 2번 연속) 바로 보냄 — 예전엔 45% 아래까지 기다려 0.1~0.2초 늦게 휘둘러졌음
-    if (!burst) { if (r > th) burst = { t0: now, pk: r, at: now, down: 0, el: ori.b }; return; }
-    if (r > burst.pk) { burst.pk = r; burst.at = now; burst.down = 0; burst.el = ori.b; }
-    else if (r < burst.pk * 0.82) burst.down++;
-    if (burst.down >= 2 || now - burst.t0 > maxMs) { const b = burst; burst = null; if (b.pk > th * 1.2) { cool = now + 750; done(b); } } // 약한 흔들림이면 쿨다운 없이 다음 스윙 바로 받음
+    const pv = lastS; lastS = [now, r];
+    if (!burst) { if (r > th) burst = { t0: now, pk: r, at: now, down: 0, el: ori.b, pre: pv, post: null }; return; }
+    if (r > burst.pk) { burst.pk = r; burst.at = now; burst.down = 0; burst.el = ori.b; burst.pre = pv; burst.post = null; }
+    else { if (!burst.post) burst.post = [now, r]; if (r < burst.pk * 0.82) burst.down++; }
+    if (burst.down >= 2 || now - burst.t0 > maxMs) { const b = burst; burst = null; if (b.pre && b.post) b.at = peakT(b.pre[0], b.pre[1], b.at, b.pk, b.post[0], b.post[1]); if (b.pk > th * 1.2) { cool = now + 750; done(b); } } // 약한 흔들림이면 쿨다운 없이 다음 스윙 바로 받음
   }
   const ARC = 276.5;
   function paintMeter(r) { const k = Math.min(1, r / 2000); $('arc').style.strokeDashoffset = String(ARC * (1 - k)); $('arc').style.stroke = r >= thr()[1] ? '#ff6b6b' : r >= thr()[0] ? '#ffcf3f' : '#56657a'; $('spd').textContent = Math.round(r); }
