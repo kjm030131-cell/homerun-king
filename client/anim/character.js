@@ -133,12 +133,12 @@ const m_d = new THREE.Vector3(), m_d0 = new THREE.Vector3(), m_ax = new THREE.Ve
 // 뼈를 월드 축 기준으로 돌림 (부모 기준으로 바꿔서 로컬 회전 앞에 곱함)
 function rotWorld(bone, axisW, ang) { bone.parent.updateWorldMatrix(true, false); bone.parent.getWorldQuaternion(m_qa); m_ax.copy(axisW).applyQuaternion(m_qa.invert()).normalize(); bone.quaternion.premultiply(m_qb.setFromAxisAngle(m_ax, ang)); bone.updateWorldMatrix(false, false); }
 // 뼈 → 끝점(tip) 방향을 월드 방향 dir 로 맞춤 (w: 섞는 정도)
-function aimBone(bone, tip, dir, w = 1) {
+function aimBone(bone, tip, dir, w = 1, maxA = Math.PI) { // [fix] maxA: 클립 자세에서 최대 이만큼만 돌림(인식이 튀어도 관절이 기괴하게 안 꺾임)
   if (!bone || !tip || w <= 0.01) return;
   tip.updateWorldMatrix(true, false); bone.getWorldPosition(m_p0); tip.getWorldPosition(m_p1); // [perf] 부모 사슬만
   m_cur.subVectors(m_p1, m_p0); if (m_cur.lengthSq() < 1e-8 || dir.lengthSq() < 1e-8) return;
   m_cur.normalize(); m_tgt.copy(dir).normalize();
-  m_qd.setFromUnitVectors(m_cur, m_tgt); if (w < 1) m_qd.slerp(m_qb.identity(), 1 - w);
+  m_qd.setFromUnitVectors(m_cur, m_tgt); { const a = Math.acos(Math.max(-1, Math.min(1, m_cur.dot(m_tgt)))); if (a > maxA) w *= maxA / a; } if (w < 1) m_qd.slerp(m_qb.identity(), 1 - w);
   bone.parent.getWorldQuaternion(m_qa); bone.getWorldQuaternion(m_q0w);
   m_q0w.premultiply(m_qd); bone.quaternion.copy(m_qa.invert().multiply(m_q0w)); bone.updateWorldMatrix(false, false);
 }
@@ -519,21 +519,21 @@ export class Character {
     if (B.Hips && B.LeftUpLeg && B.RightUpLeg) {
       B.RightUpLeg.updateWorldMatrix(true, false); B.LeftUpLeg.updateWorldMatrix(true, false); B.RightUpLeg.getWorldPosition(m_p0); B.LeftUpLeg.getWorldPosition(m_p1);
       const cur = m_cur.subVectors(m_p1, m_p0).setY(0), tg = v(24, 23).setY(0);
-      if (cur.lengthSq() > 1e-6 && tg.lengthSq() > 1e-6) { let a = Math.atan2(tg.x, tg.z) - Math.atan2(cur.x, cur.z); a = Math.atan2(Math.sin(a), Math.cos(a)); rotWorld(B.Hips, m_UP, a * w); }
+      if (cur.lengthSq() > 1e-6 && tg.lengthSq() > 1e-6) { let a = Math.atan2(tg.x, tg.z) - Math.atan2(cur.x, cur.z); a = Math.atan2(Math.sin(a), Math.cos(a)); rotWorld(B.Hips, m_UP, clamp(a, -1.1, 1.1) * w); } // [fix] 골반 최대 63°
     }
     // 몸통: 골반 가운데 → 어깨 가운데
     const torso = new THREE.Vector3().subVectors(mid(11, 12), mid(23, 24));
-    aimBone(B.Spine, B.Neck, torso, w);
+    aimBone(B.Spine, B.Neck, torso, w, 0.75);
     // 어깨 비틀기(몸통 축 기준): 어깨선 수평 방향
     if (B.Spine2 && B.LeftArm && B.RightArm) {
       B.RightArm.getWorldPosition(m_p0); B.LeftArm.getWorldPosition(m_p1);
       const cur = m_cur.subVectors(m_p1, m_p0).setY(0), tg = v(12, 11).setY(0);
-      if (cur.lengthSq() > 1e-6 && tg.lengthSq() > 1e-6) { let a = Math.atan2(tg.x, tg.z) - Math.atan2(cur.x, cur.z); a = Math.atan2(Math.sin(a), Math.cos(a)); rotWorld(B.Spine2, m_UP, a * w); }
+      if (cur.lengthSq() > 1e-6 && tg.lengthSq() > 1e-6) { let a = Math.atan2(tg.x, tg.z) - Math.atan2(cur.x, cur.z); a = Math.atan2(Math.sin(a), Math.cos(a)); rotWorld(B.Spine2, m_UP, clamp(a, -0.8, 0.8) * w); } // [fix] 어깨 비틀기 최대 46°
     }
-    if (vis(0) > 0.5) aimBone(B.Neck, B.Head, new THREE.Vector3().subVectors(_P[0], mid(11, 12)), w * 0.6);
+    if (vis(0) > 0.5) aimBone(B.Neck, B.Head, new THREE.Vector3().subVectors(_P[0], mid(11, 12)), w * 0.6, 0.6);
     // 팔·다리
     for (const [bn, tn, a, b] of [['LeftArm', 'LeftForeArm', 11, 13], ['LeftForeArm', 'LeftHand', 13, 15], ['RightArm', 'RightForeArm', 12, 14], ['RightForeArm', 'RightHand', 14, 16], // 팔·다리 모두 잘 보일 때만
-      ['LeftUpLeg', 'LeftLeg', 23, 25], ['LeftLeg', 'LeftFoot', 25, 27], ['RightUpLeg', 'RightLeg', 24, 26], ['RightLeg', 'RightFoot', 26, 28]]) { const vv = Math.min(vis(a), vis(b)), leg = a >= 23, th = leg ? 0.75 : 0.45; if (vv > th) aimBone(B[bn], B[tn], v(a, b), w * (leg ? 0.55 : 1) * Math.min(1, (vv - th) / 0.2)); } // [11-24] 다리는 잘 보일 때만 절반 세기로 (어색했음) // 안 보이는 관절(화면 밖 다리 등)은 원래 동작
+      ['LeftUpLeg', 'LeftLeg', 23, 25], ['LeftLeg', 'LeftFoot', 25, 27], ['RightUpLeg', 'RightLeg', 24, 26], ['RightLeg', 'RightFoot', 26, 28]]) { const vv = Math.min(vis(a), vis(b)), leg = a >= 23, th = leg ? 0.75 : 0.45; if (vv > th) { const d = v(a, b); d.z *= 0.7; /* 깊이는 인식이 제일 부정확 */ aimBone(B[bn], B[tn], d, w * (leg ? 0.55 : 1) * Math.min(1, (vv - th) / 0.2), leg ? 0.9 : 1.6); } } // [11-24] 다리는 잘 보일 때만 절반 세기로 (어색했음) // 안 보이는 관절(화면 밖 다리 등)은 원래 동작
   }
   _blob() {
     const h = this.bones.Hips; if (!h || !this.blob) return;

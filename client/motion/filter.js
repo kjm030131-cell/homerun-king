@@ -3,15 +3,18 @@
 //  dCut: 속도 추정용 차단 주파수. 값과 함께 걸러진 속도(dx, 단위/초)도 줌 → 프레임 사이 예측(외삽)에 씀
 const alpha = (cut, dt) => { const r = 2 * Math.PI * cut * dt; return r / (r + 1); };
 export class OneEuro {
-  constructor(minCut = 1.2, beta = 0.6, dCut = 1.5) { this.minCut = minCut; this.beta = beta; this.dCut = dCut; this.x = null; this.dx = 0; }
-  reset() { this.x = null; this.dx = 0; }
+  constructor(minCut = 1.2, beta = 0.6, dCut = 1.5) { this.minCut = minCut; this.beta = beta; this.dCut = dCut; this.x = null; this.dx = 0; this.v = 0; }
+  reset() { this.x = null; this.dx = 0; this.v = 0; }
   // w: 이번 값의 믿음(0~1, 관절이 안 보이면 낮게 → 덜 따라감)
   filter(v, dt, w = 1) {
-    if (this.x === null || !(dt > 0)) { this.x = v; this.dx = 0; return v; }
+    if (this.x === null || !(dt > 0)) { this.x = v; this.dx = 0; this.v = 0; return v; }
     const d = (v - this.x) / dt;
     this.dx += (d - this.dx) * alpha(this.dCut, dt);
     const cut = this.minCut + this.beta * Math.abs(this.dx);
+    const x0 = this.x;
     this.x += (v - this.x) * alpha(cut, dt) * w;
+    // v: 걸러진 '출력'의 속도 — 예측(외삽)은 이걸로 (dx 는 원본 값의 속도라 가려진 관절이 튀면 같이 튐)
+    this.v += ((this.x - x0) / dt - this.v) * alpha(this.dCut * 2, dt);
     return this.x;
   }
 }
