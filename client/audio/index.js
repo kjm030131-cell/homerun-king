@@ -45,7 +45,7 @@ export function initAudio() {
   if (inited) return; inited = true;
   installUnlock();
   loadSamples();
-  whenReady((a) => setTimeout(() => { S.warmBat(a); crowd.start(); }, 0)); // [sound] 타격음 파형 미리 + 관중 목소리 조금씩
+  whenReady((a) => setTimeout(() => { S.warmBat(a); S.warmUI(a); crowd.start(); }, 0)); // [sound] 타격음 파형 미리 + 관중 목소리 조금씩
   caster = new Caster((text, pri, who) => bus.emit('caster:line', { text, pri, who }), (k) => crowd.setDuck(k));
 
   // ── 투구 ──
@@ -136,12 +136,13 @@ export function initAudio() {
 
   // ── UI ──
   on('ui:click', () => S.ui.click());
+  on('ui:back', () => S.ui.back()); on('ui:hover', () => S.ui.hover()); on('ui:toggle', () => S.ui.toggle()); // [sound 11-25] 콘솔식 UI 소리
   on('ui:perfect', () => S.ui.perfect());
   on('ui:tick', (d) => S.ui.tick(d.p));
   on('ui:walkup', (d) => { if (d.me) S.music.walkup(); });
   bus.on('ui:me', (d) => { myId = d && d.id; });
   on('batterUp', (d) => { if (d.id && d.id === myId) S.music.walkup(); }); // 내 타석 오르간
-  bus.on('ui:screen', (d) => { const n = d && (d.name || d.screen); const g = n === 'game' || n === 'over'; crowd.setScene(!!g); if (!g && caster) caster.stop(); });
+  bus.on('ui:screen', (d) => { const n = d && (d.name || d.screen); const g = n === 'game' || n === 'over'; if (!g && E.ctx && E.ctx.state === 'running') S.ui.screen(); crowd.setScene(!!g); if (!g && caster) caster.stop(); });
   bus.on('ui:volume', (d) => { if (!d) return; for (const k of ['master', 'sfx', 'crowd', 'cast']) if (d[k] != null) setVol(k, d[k] * 100, false); });
   bus.on('ui:msg', (d) => { if (caster && d) caster.msg(d.text, d.s); }); // 자막은 소리가 막혀 있어도 나오게
   window.__audio = { E, stats, sampleInfo, crowd, SLOTS, expectOf, rules: () => rules };

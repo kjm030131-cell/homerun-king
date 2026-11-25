@@ -219,16 +219,33 @@ export function ump(kind, d = {}) {
 }
 
 // ═════════════ 음악·연출 ═════════════
-function organ(notes, step, gain = 0.05, t0 = 0) {
-  const v = voice({ prio: 4, dur: notes.length * step + 0.6, wet: 0.5, dist: 50, gain: 1 });
-  if (!v) return;
+// [sound 11-25] 구장 오르간: 사각파 '삑삑'(8비트 느낌) → 드로바 오르간(16'·8'·4'·2⅔'·2' 사인 배음) + 회전 스피커 떨림 + 건반 클릭
+const ORG = new Map();
+function organBuf(a, notes, step) {
+  const key = notes.join(',') + '|' + step; if (ORG.has(key)) return ORG.get(key);
+  const sr = a.sampleRate, n = ((notes.length * step + 0.5) * sr) | 0, b = a.createBuffer(1, n, sr), d = b.getChannelData(0);
+  const BARS = [[0.5, 0.55], [1, 1], [2, 0.7], [3, 0.4], [4, 0.3], [6, 0.12]]; // 배음비, 세기
   notes.forEach((f, i) => {
     if (!f) return;
-    const t = t0 + i * step, d = step * 0.92;
-    osc(v, { type: 'square', f, dur: d, hold: d * 0.5, gain, t });
-    osc(v, { type: 'sine', f: f * 2, dur: d, hold: d * 0.5, gain: gain * 0.9, t, detune: 4 });
-    osc(v, { type: 'triangle', f: f / 2, dur: d, hold: d * 0.5, gain: gain * 0.8, t });
+    const s0 = (i * step * sr) | 0, len = (step * 0.94 * sr) | 0, A = sr * 0.008, R = sr * 0.06;
+    for (const [m, g] of BARS) {
+      const w = 2 * Math.PI * f * m / sr; let ph = Math.random() * 6;
+      for (let j = 0; j < len + R && s0 + j < n; j++) {
+        const env = (j < A ? j / A : 1) * (j > len ? Math.exp(-(j - len) / (R * 0.35)) : 1);
+        const t = (s0 + j) / sr, lfo = Math.sin(2 * Math.PI * 6.2 * t); // 회전 스피커(레슬리)
+        ph += w * (1 + 0.0025 * lfo); d[s0 + j] += Math.sin(ph) * g * env * (0.85 + 0.15 * lfo);
+      }
+    }
+    for (let j = 0; j < sr * 0.004; j++) d[s0 + j] += (Math.random() - 0.5) * 0.6 * (1 - j / (sr * 0.004)); // 건반 클릭
   });
+  let pk = 0; for (let i = 0; i < n; i++) { d[i] = Math.tanh(d[i] * 0.45); pk = Math.max(pk, Math.abs(d[i])); }
+  for (let i = 0; i < n; i++) d[i] *= 0.8 / (pk || 1);
+  ORG.set(key, b); return b;
+}
+function organ(notes, step, gain = 0.05, t0 = 0) {
+  const v = voice({ prio: 4, dur: notes.length * step + 0.8, wet: 0.5, dist: 50, gain: 1 });
+  if (!v) return;
+  buf(v, organBuf(v.a, notes, step), { t: t0, gain: gain * 6 });
 }
 export function organSample(name, fallback) {
   const v = voice({ prio: 4, dur: 5, wet: 0.45, dist: 50 });
@@ -248,9 +265,103 @@ export function firework(delay = 0) {
   nz(v, { buf: 'brown', type: 'lowpass', f: 260, dur: 0.9, gain: 0.9 });
   for (let i = 0; i < 14; i++) nz(v, { type: 'highpass', f: 4000, dur: 0.015, t: rnd(0.15, 0.9), gain: 0.25 });
 }
+// ── [sound 11-25] UI 효과음: 콘솔(PS5급) 메뉴 소리처럼 묵직하고 둥글게 ──
+// 예전: 삼각파·사각파 '삑' 하나 → 얇은 8비트. 이제 소리마다 ① 짧은 저음 몸통(무게) ② 부드러운 '톡' 공명(나무·플라스틱 질감)
+// ③ 아주 작은 고역 공기감(반짝임) ④ 짧은 꼬리 를 겹쳐 파형으로 미리 만들고, 고역을 둥글게 깎아 귀가 안 아프게 한다.
+const UIB = new Map();
+function uiRender(a, sec, fn, { lp = 9000, drive = 1.4, peak = 0.8 } = {}) {
+  const sr = a.sampleRate, n = (sr * sec) | 0, b = a.createBuffer(1, n, sr), d = b.getChannelData(0);
+  const W = E.noise.getChannelData(0), o = (Math.random() * (W.length - n - 10)) | 0;
+  fn(d, sr, (i) => W[o + i]);
+  // 둥글게: 2단 저역통과 + 살짝 포화 + 정규화 + 끝 페이드
+  const k = Math.exp(-2 * Math.PI * lp / sr); let y1 = 0, y2 = 0, pk = 0;
+  for (let i = 0; i < n; i++) { y1 = y1 * k + d[i] * (1 - k); y2 = y2 * k + y1 * (1 - k); d[i] = Math.tanh(y2 * drive); pk = Math.max(pk, Math.abs(d[i])); }
+  const g = peak / (pk || 1), fo = Math.min(n, sr * 0.01) | 0;
+  for (let i = 0; i < n; i++) d[i] *= g * (i > n - fo ? (n - i) / fo : 1);
+  return b;
+}
+// 소리 재료: 감쇠 사인(음높이 미끄러짐 가능) / 감쇠 대역 잡음
+function tone(d, sr, { f, f2 = f, t = 0, att = 0.002, dec = 0.05, g = 1, glide = 0.04 }) {
+  const s = (t * sr) | 0, A = Math.max(1, att * sr), D = dec * sr; let ph = 0;
+  for (let i = 0; i + s < d.length; i++) {
+    const tt = i / sr, ff = f2 + (f - f2) * Math.exp(-tt / glide); ph += 2 * Math.PI * ff / sr;
+    const env = (i < A ? i / A : 1) * Math.exp(-Math.max(0, i - A) / D); if (env < 1e-4 && i > A) break;
+    d[s + i] += Math.sin(ph) * env * g;
+  }
+}
+function band(d, sr, W, { f, q = 1, t = 0, att = 0.001, dec = 0.02, g = 1, f2 = f, sweep = 0.3 }) {
+  const s = (t * sr) | 0, A = Math.max(1, att * sr), D = dec * sr; let b1 = 0, b2 = 0;
+  for (let i = 0; i + s < d.length; i++) {
+    const ff = f2 + (f - f2) * Math.exp(-(i / sr) / sweep), r = Math.exp(-Math.PI * ff / q / sr), c = 2 * r * Math.cos(2 * Math.PI * ff / sr);
+    const y = W(i) * (1 - r) + c * b1 - r * r * b2; b2 = b1; b1 = y;
+    const env = (i < A ? i / A : 1) * Math.exp(-Math.max(0, i - A) / D); if (env < 1e-4 && i > A) break;
+    d[s + i] += y * env * g * 4;
+  }
+}
+const UI_DEF = {
+  // 확인/클릭: 묵직한 '톡' — 저음 몸통 170→115Hz + 중역 공명 + 살짝 공기
+  select: [0.22, (d, sr, W) => {
+    tone(d, sr, { f: 170, f2: 115, dec: 0.055, g: 1.0, glide: 0.03 });
+    tone(d, sr, { f: 560, dec: 0.022, g: 0.45, att: 0.0015 }); tone(d, sr, { f: 1180, dec: 0.012, g: 0.22, att: 0.001 });
+    band(d, sr, W, { f: 2600, q: 0.8, dec: 0.004, g: 0.35 });
+    band(d, sr, W, { f: 5200, q: 1.5, att: 0.006, dec: 0.045, g: 0.06, t: 0.004 });
+  }, { lp: 8000, drive: 1.6 }],
+  // 뒤로/취소: 한 음 낮고 살짝 내려가는 '톡'
+  back: [0.22, (d, sr, W) => {
+    tone(d, sr, { f: 150, f2: 92, dec: 0.06, g: 1.0, glide: 0.035 });
+    tone(d, sr, { f: 430, f2: 380, dec: 0.025, g: 0.45 }); tone(d, sr, { f: 900, dec: 0.012, g: 0.18 });
+    band(d, sr, W, { f: 2000, q: 0.8, dec: 0.004, g: 0.3 });
+  }, { lp: 6500, drive: 1.5 }],
+  // 커서 이동(마우스 올림): 아주 짧고 가벼운 틱 — 반복해도 거슬리지 않게
+  hover: [0.08, (d, sr, W) => {
+    tone(d, sr, { f: 820, f2: 700, dec: 0.012, g: 0.5, glide: 0.01 }); tone(d, sr, { f: 210, dec: 0.018, g: 0.35 });
+    band(d, sr, W, { f: 3800, q: 1.2, dec: 0.003, g: 0.15 });
+  }, { lp: 7000, drive: 1.2, peak: 0.45 }],
+  // 토글/선택지 바꾸기: 두 번 '톡톡' (두 번째가 살짝 높게)
+  toggle: [0.2, (d, sr, W) => {
+    tone(d, sr, { f: 160, f2: 120, dec: 0.035, g: 0.8 }); tone(d, sr, { f: 640, dec: 0.016, g: 0.35 }); band(d, sr, W, { f: 2600, q: 0.8, dec: 0.003, g: 0.25 });
+    tone(d, sr, { f: 190, f2: 140, dec: 0.04, g: 0.85, t: 0.045 }); tone(d, sr, { f: 760, dec: 0.018, g: 0.38, t: 0.045 }); band(d, sr, W, { f: 3000, q: 0.8, dec: 0.003, g: 0.25, t: 0.045 });
+  }, { lp: 8000, drive: 1.5 }],
+  // 화면 전환: 부드러운 '슈욱' 바람 + 낮은 울림 + 착지 '둥'
+  screen: [0.75, (d, sr, W) => {
+    const n = (sr * 0.55) | 0; let b1 = 0, b2 = 0;
+    for (let i = 0; i < n; i++) {
+      const t = i / sr, x = t / 0.55, ff = 260 + 1700 * Math.sin(Math.PI * Math.min(1, x * 1.1)) ** 1.5, r = Math.exp(-Math.PI * ff / 0.9 / sr), c = 2 * r * Math.cos(2 * Math.PI * ff / sr);
+      const y = W(i) * (1 - r) + c * b1 - r * r * b2; b2 = b1; b1 = y; d[i] += y * Math.sin(Math.PI * x) ** 2 * 1.6;
+    }
+    tone(d, sr, { f: 70, att: 0.18, dec: 0.25, g: 0.45 });
+    tone(d, sr, { f: 120, f2: 80, dec: 0.08, g: 0.7, t: 0.42 }); tone(d, sr, { f: 480, dec: 0.02, g: 0.2, t: 0.42 });
+  }, { lp: 6000, drive: 1.3, peak: 0.6 }],
+  // 퍼펙트(투구 게이지·판정 성공): 맑은 종 두 음(E6·B6, 비정수 배음) + 받침 저음 — 장난감 '띠링' 대신 고급스런 '팅~'
+  perfect: [1.1, (d, sr) => {
+    tone(d, sr, { f: 330, f2: 330, dec: 0.09, g: 0.5, att: 0.003 });
+    for (const [f0, t, g] of [[1318.5, 0, 0.6], [1975.5, 0.075, 0.5]]) for (const [m, dk, gg] of [[1, 0.55, 1], [2.76, 0.22, 0.32], [5.4, 0.09, 0.12], [0.5, 0.3, 0.25]]) tone(d, sr, { f: f0 * m, t, dec: dk, g: g * gg, att: 0.004 });
+  }, { lp: 9500, drive: 1.1, peak: 0.7 }],
+  // 게이지 눈금: 작은 나무 '똑'
+  tick: [0.05, (d, sr, W) => { tone(d, sr, { f: 1500, dec: 0.006, g: 0.6, att: 0.0008 }); tone(d, sr, { f: 760, dec: 0.01, g: 0.4 }); band(d, sr, W, { f: 3000, q: 1, dec: 0.002, g: 0.1 }); }, { lp: 6000, drive: 1.1, peak: 0.4 }],
+  // 타자용 '온다' 신호: 짧은 유리 '퐁'
+  cue: [0.25, (d, sr) => { tone(d, sr, { f: 1250, dec: 0.08, g: 0.6, att: 0.002 }); tone(d, sr, { f: 1250 * 2.4, dec: 0.03, g: 0.18 }); tone(d, sr, { f: 300, dec: 0.03, g: 0.3 }); }, { lp: 8000, drive: 1.1, peak: 0.5 }],
+};
+function uiBuf(a, k) {
+  let l = UIB.get(k);
+  if (!l) { const [sec, fn, o] = UI_DEF[k]; l = [0, 1].map(() => uiRender(a, sec, (d, sr, W) => fn(d, sr, W), o)); UIB.set(k, l); }
+  return l[(Math.random() * l.length) | 0];
+}
+export function warmUI(a) { if (!E.noise) return; for (const k in UI_DEF) uiBuf(a, k); }
+function uiPlay(k, { prio = 3, gain = 1, rate = 1, wet = 0.06, gap = 0.035, sg = 1 } = {}) {
+  const v = voice({ prio, dur: Math.max(UI_DEF[k][0], 0.5) + 0.1, wet, key: 'ui_' + k, gap, gain });
+  if (!v) return;
+  // 실제 녹음 효과음 우선(약간 낮춰 재생해 무게감). sg = 샘플 음량 보정
+  if (trySample(v, 'ui_' + k, { rate: rate * (0.93 + Math.random() * 0.03), gain: sg })) return;
+  buf(v, uiBuf(v.a, k), { rate: rate * (0.985 + Math.random() * 0.03) });
+}
 export const ui = {
-  click() { osc(voice({ prio: 3, dur: 0.15, wet: 0, key: 'ui', gap: 0.04 }), { type: 'triangle', f: 880, dur: 0.06, gain: 0.12 }); },
-  perfect() { const v = voice({ prio: 4, dur: 0.4, wet: 0.1, key: 'perfect', gap: 0.2 }); osc(v, { type: 'triangle', f: 1046, dur: 0.12, gain: 0.15 }); osc(v, { type: 'triangle', f: 1568, dur: 0.18, gain: 0.12, t: 0.06 }); },
-  tick(p = 0.5) { osc(voice({ prio: 1, dur: 0.06, wet: 0, key: 'tick', gap: 0.03 }), { type: 'square', f: 300 + 500 * p, dur: 0.03, gain: 0.03 }); },
-  cue() { osc(voice({ prio: 3, dur: 0.1, wet: 0, key: 'cue', gap: 0.3 }), { f: 1400, dur: 0.04, gain: 0.06 }); },
+  click: () => uiPlay('select', { gain: 0.85 }),
+  back: () => uiPlay('back', { gain: 0.85 }),
+  hover: () => uiPlay('hover', { prio: 1, gain: 0.5, gap: 0.05, sg: 0.55 }),
+  toggle: () => uiPlay('toggle', { gain: 0.8 }),
+  screen: () => uiPlay('screen', { prio: 2, gain: 0.55, wet: 0.12, gap: 0.3 }),
+  perfect: () => uiPlay('perfect', { prio: 4, gain: 0.7, wet: 0.18, gap: 0.2 }),
+  tick: (p = 0.5) => uiPlay('tick', { prio: 1, gain: 0.45, rate: 0.85 + 0.4 * p, gap: 0.03, sg: 0.6 }),
+  cue: () => uiPlay('cue', { gain: 0.6, gap: 0.3 }),
 };
