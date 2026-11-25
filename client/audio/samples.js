@@ -13,6 +13,8 @@ export const SLOTS = [
   ['crowd_bed', 12, true], ['crowd_roar', 8, true], ['crowd_applause', 8, true],
   ['crowd_hr', 7], ['crowd_cheer', 3], ['crowd_groan', 2.5], ['crowd_ooh', 2], ['crowd_chant', 4],
   ['organ_walkup', 3], ['organ_charge', 3], ['organ_inning', 4], ['firework', 2.5],
+  // [sound 11-25] UI: 실제 녹음 효과음(Kenney Interface Sounds, CC0 — public/assets/sfx/CREDITS.md). 없으면 합성음
+  ['ui_select', 0.2], ['ui_back', 0.12], ['ui_hover', 0.06], ['ui_toggle', 0.25], ['ui_screen', 0.45], ['ui_perfect', 0.35], ['ui_tick', 0.12], ['ui_cue', 0.2],
 ];
 const NAMES = new Set(SLOTS.map((s) => s[0]));
 const bank = new Map(); // 이름 → AudioBuffer[]

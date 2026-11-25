@@ -348,19 +348,20 @@ function uiBuf(a, k) {
   return l[(Math.random() * l.length) | 0];
 }
 export function warmUI(a) { if (!E.noise) return; for (const k in UI_DEF) uiBuf(a, k); }
-function uiPlay(k, { prio = 3, gain = 1, rate = 1, wet = 0.06, gap = 0.035 } = {}) {
-  const v = voice({ prio, dur: UI_DEF[k][0] + 0.1, wet, key: 'ui_' + k, gap, gain });
+function uiPlay(k, { prio = 3, gain = 1, rate = 1, wet = 0.06, gap = 0.035, sg = 1 } = {}) {
+  const v = voice({ prio, dur: Math.max(UI_DEF[k][0], 0.5) + 0.1, wet, key: 'ui_' + k, gap, gain });
   if (!v) return;
-  if (trySample(v, 'ui_' + k, { rate })) return;
+  // 실제 녹음 효과음 우선(약간 낮춰 재생해 무게감). sg = 샘플 음량 보정
+  if (trySample(v, 'ui_' + k, { rate: rate * (0.93 + Math.random() * 0.03), gain: sg })) return;
   buf(v, uiBuf(v.a, k), { rate: rate * (0.985 + Math.random() * 0.03) });
 }
 export const ui = {
   click: () => uiPlay('select', { gain: 0.85 }),
   back: () => uiPlay('back', { gain: 0.85 }),
-  hover: () => uiPlay('hover', { prio: 1, gain: 0.5, gap: 0.05 }),
+  hover: () => uiPlay('hover', { prio: 1, gain: 0.5, gap: 0.05, sg: 0.55 }),
   toggle: () => uiPlay('toggle', { gain: 0.8 }),
   screen: () => uiPlay('screen', { prio: 2, gain: 0.55, wet: 0.12, gap: 0.3 }),
   perfect: () => uiPlay('perfect', { prio: 4, gain: 0.7, wet: 0.18, gap: 0.2 }),
-  tick: (p = 0.5) => uiPlay('tick', { prio: 1, gain: 0.45, rate: 0.85 + 0.4 * p, gap: 0.03 }),
+  tick: (p = 0.5) => uiPlay('tick', { prio: 1, gain: 0.45, rate: 0.85 + 0.4 * p, gap: 0.03, sg: 0.6 }),
   cue: () => uiPlay('cue', { gain: 0.6, gap: 0.3 }),
 };
