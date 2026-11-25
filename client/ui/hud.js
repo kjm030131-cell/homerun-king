@@ -33,6 +33,7 @@ export function myDuty(s, role) {
 
 // ── 구단 → 스코어버그 엠블럼·띠 색 ──
 let clubsKey = '';
+if (typeof window !== 'undefined') window.addEventListener('logos', () => { const k = clubsKey; clubsKey = ''; if (k) paintClubs(k.split(',').map(Number)); }); // [logo] 로고 이미지가 늦게 로드되면 다시 그림
 export function paintClubs(cl) {
   if (!cl) return; const k = cl.join(','); if (k === clubsKey) return; clubsKey = k;
   $('bEmA').src = emblemURL(cl[0], 48); $('bEmH').src = emblemURL(cl[1], 48);

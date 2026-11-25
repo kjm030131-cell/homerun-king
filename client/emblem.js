@@ -2,6 +2,19 @@
 import { CLUBS, clubOf } from '../shared/clubs.js';
 export { CLUBS, clubOf };
 const cache = new Map();
+// [logo] 직접 넣는 로고 이미지 슬롯: public/logos/<약칭>.png (예: LG.png, SSG.png). 없으면 기존 방패 배지
+const logos = new Map(); // k → HTMLImageElement (로드 성공한 것만)
+export const logoOf = (k) => logos.get(k) || null;
+if (typeof Image !== 'undefined' && typeof location !== 'undefined') {
+  for (const C of CLUBS) {
+    const im = new Image();
+    im.onload = () => { logos.set(C.k, im); cache.clear(); try { window.dispatchEvent(new CustomEvent('logos', { detail: C.k })); } catch {} };
+    im.onerror = () => {};
+    im.src = `/logos/${encodeURIComponent(C.k)}.png`;
+  }
+}
+// 이미지를 정사각형 캔버스 안에 비율 유지해서 넣기
+export function drawContain(g, im, x, y, w, h) { const r = Math.min(w / im.naturalWidth, h / im.naturalHeight), dw = im.naturalWidth * r, dh = im.naturalHeight * r; g.drawImage(im, x + (w - dw) / 2, y + (h - dh) / 2, dw, dh); }
 function shade(hex, k) {
   const n = parseInt(hex.slice(1), 16); let r = n >> 16, g = (n >> 8) & 255, b = n & 255;
   const f = (v) => Math.max(0, Math.min(255, Math.round(k < 0 ? v * (1 + k) : v + (255 - v) * k)));
@@ -12,6 +25,8 @@ export function emblemCanvas(i, size = 128) {
   if (cache.has(key)) return cache.get(key);
   const C = clubOf(i), c = document.createElement('canvas'); c.width = c.height = size;
   const g = c.getContext('2d'), s = size / 128;
+  const im = logos.get(C.k);
+  if (im) { drawContain(g, im, 0, 0, size, size); cache.set(key, c); return c; }
   g.scale(s, s);
   // 방패
   const shield = () => { g.beginPath(); g.moveTo(64, 6); g.bezierCurveTo(88, 16, 104, 16, 116, 14); g.lineTo(116, 62); g.bezierCurveTo(116, 94, 92, 112, 64, 124); g.bezierCurveTo(36, 112, 12, 94, 12, 62); g.lineTo(12, 14); g.bezierCurveTo(24, 16, 40, 16, 64, 6); g.closePath(); };

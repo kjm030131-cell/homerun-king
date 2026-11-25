@@ -10,3 +10,7 @@ public/assets/sfx/index.json
 __pycache__/
 tools/qa/.out/
 public/assets/models/player.lod.bin
+
+# [logo] 직접 넣는 구단 로고는 레포에 올리지 않음
+public/logos/*
+!public/logos/README.md
