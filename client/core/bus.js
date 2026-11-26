@@ -3,5 +3,5 @@
 const subs = new Map();
 export const bus = {
   on(type, fn) { (subs.get(type) || subs.set(type, new Set()).get(type)).add(fn); return () => subs.get(type)?.delete(fn); },
-  emit(type, data) { for (const fn of subs.get(type) || []) try { fn(data); } catch (e) { console.error('[bus]', type, e); } for (const fn of subs.get('*') || []) try { fn(type, data); } catch (e) { console.error('[bus]', e); } },
+  emit(type, data) { const P = typeof window !== 'undefined' && window.__prof && window.__RNOW; for (const fn of subs.get(type) || []) try { const t = P ? window.__RNOW() : 0; fn(data); if (P) { const d = window.__RNOW() - t; if (d > 6) window.__prof.top.push([Math.round(d), 'h:' + type, String(fn).slice(0, 60)]); } } catch (e) { console.error('[bus]', type, e); } for (const fn of subs.get('*') || []) try { fn(type, data); } catch (e) { console.error('[bus]', e); } },
 };

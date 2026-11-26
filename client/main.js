@@ -371,7 +371,7 @@ function handleMsg(m) {
     case 'chat': addChat(m.name, m.text, m.team); break;
     case 'kicked': toTitle(); ui.showErr('방장이 내보냈어'); break;
     case 'toast': toast(m.text); break;
-    case 's': if (!(m = SM.merge(m))) break; onSnap(m); if (m.ev) for (const x of m.ev) bus.emit(x.e, x); break; // [gameplay] 게임 이벤트 연결 지점 (docs/rebuild/events.md)
+    case 's': { if (!(m = SM.merge(m))) break; const P = window.__prof, T = P ? RNOW() : 0; onSnap(m); if (P) { const d = RNOW() - T; if (d > 8) P.top.push([Math.round(d), 'onSnap', m.ph]); } if (m.ev) for (const x of m.ev) { const t1 = P ? RNOW() : 0; bus.emit(x.e, x); if (P) { const d = RNOW() - t1; if (d > 8) P.top.push([Math.round(d), 'ev:' + x.e, m.ph]); } } break; } // [gameplay] 게임 이벤트 연결 지점 (docs/rebuild/events.md)
   }
 }
 
@@ -687,7 +687,7 @@ addEventListener('keydown', (e) => {
     if ((S.ph === 'pitch' || S.ph === 'pitching') && k === 'r') { net.send({ t: 'steal' }); }
   }
 });
-let throwCharge = null, pendThrow = null, assistTgt = null; // [fielding]
+let throwCharge = null, pendThrow = null, assistTgt = null, fldTipShown = false; // [fielding]
 const throwPow = () => (throwCharge ? clamp((nowP() - throwCharge.t0) / 0.7, 0, 1) : 0);
 // [net] 송구: 서버가 받아들일 조건이면 누른 순간 팔 동작 시작(전엔 왕복 뒤 시작 — 그동안 공이 먼저 날아가기도). 공은 서버가 놓는 순간 그대로
 function sendThrow(base, p) {
@@ -852,6 +852,8 @@ function updateControl(dt) {
   const prePitch = S && S.ph === 'pitch' && role.fi >= 0 && role.pos !== 'P' && role.pos !== 'C';
   if (!S || (S.ph !== 'live' && !prePitch) || role.fi < 0 || screen !== 'game') { ctl.active = false; return; }
   const f = S.fl[role.fi];
+  // [ui] 첫 수비 안내(한 번만): 타구가 처음 내 쪽으로 왔을 때
+  if (S.ph === 'live' && !S.mo && !fldTipShown && store.get('fldTip') !== '1') { fldTipShown = true; store.set('fldTip', '1'); toast(TOUCH ? '수비: 왼쪽 스틱으로 공 쪽으로 · 잡으면 송구 버튼(추천 베이스)' : '수비: 방향키로 공 쪽만 눌러도 따라가요 · 잡으면 Space = 추천 송구 · 1/2/3 = 그 루로 · 4 = 홈 · R = 중계'); }
   if (ctl.idx !== role.fi) {
     if (ctl.idx >= 0 && S.ph === 'live') feedback(`▶ ${POS_KO[role.pos] || ''} 조작`, '#ffd23a');
     // [qa 11-19] 조작 선수가 바뀌면 누르고 있던 방향키는 무시(한 번 떼야 움직임): 송구 후 받는 선수로 넘어갔을 때 W 를 계속 누르고 있어서 베이스에서 벗어나 공을 놓치던 것
@@ -1627,7 +1629,7 @@ function frame(now, manual) {
   if (!manual) requestAnimationFrame(frame);
   try { frameBody(now, manual); } catch (e) { if (frameErrs++ < 20) console.error('[frame]', e); if (manual) throw e; }
 }
-const RNOW = performance.now.bind(performance); // 가상 시계(qa)가 performance.now 를 덮어써도 실제 시간
+const RNOW = (window.__RNOW = performance.now.bind(performance)); // 가상 시계(qa)가 performance.now 를 덮어써도 실제 시간
 const PF = (k) => { const P = window.__prof; if (!P) return; const t = RNOW(); P.cur[k] = (P.cur[k] || 0) + t - P.t; P.t = t; }; // [perf] window.__prof = { t, cur, top } 로 켜면 프레임 구간별 시간
 function frameBody(now, manual) {
   const PR = window.__prof; if (PR) { PR.t = RNOW(); PR.t0 = PR.t; PR.cur = {}; }

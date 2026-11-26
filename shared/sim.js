@@ -41,10 +41,10 @@ export function netH(ad) {
   return 8.5 + (3.6 - 8.5) * t * t * (3 - 2 * t);
 }
 
-// 잠실: 좌우 100m, 좌우중간 약 120m, 중앙 125m
+// 잠실: 좌우 100m, 좌우중간 120m(22.5°), 중앙 125m — 지수 0.644 면 22.5° 에서 정확히 120m (0.8 은 118.9m)
 export function fenceR(phi) {
   const a = Math.min(Math.abs(phi), FOUL);
-  return 100 + 25 * Math.pow(Math.max(0, Math.cos(2 * a)), 0.8);
+  return 100 + 25 * Math.pow(Math.max(0, Math.cos(2 * a)), 0.644);
 }
 // 그라운드 바깥 경계(관중석 시작선)
 export function standR(phi) {
