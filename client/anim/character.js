@@ -400,6 +400,8 @@ export class Character {
     return run;
   }
   _inert(de, every) {
+    // [fix] 관성 블렌딩은 끔(window.__ib = 1 로만 켬): 특정 전환에서 몸이 뒤집히고 꺾이는 버그(헛스윙·삼진 반응 등) — 크로스페이드(smoothstep)만으로 이어 붙임
+    if (typeof window === 'undefined' || !window.__ib) { this.ibReq = 0; this.ibT = 1; if (Math.abs(this.yaw - this.facing.rotation.y) > 1e-5) this.facing.rotation.y = this.yaw; return; }
     const n = this.bl.length, H = this.ibHipsI;
     // 오래 안 그려졌으면(주자 재사용·화면 밖 오래) 이어 붙일 '직전 자세'가 없음
     if (!this._adopt && FR.n - this.ibN > every * 3 + 6) this.ibHave = false;
