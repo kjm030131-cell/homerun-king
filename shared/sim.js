@@ -1711,12 +1711,19 @@ export class Game {
     if (this.mode === 'game') this.stat().pa--; // [bugs] 파울은 타석이 안 끝남 — startPlay 가 올린 타석 수를 되돌림 (전엔 파울 타구마다 타석 +1 → 타율이 낮게 나옴)
     this.ev('foul', { pid: this.pitch ? this.pitch.id : 0, kind: this.ball && this.ball.bunt ? 'bunt' : 'ball', s: Math.min(2, this.strikes + 1), x: this.ball ? r2(this.ball.x) : 0, z: this.ball ? r2(this.ball.z) : 0 });
     this.say(this.ball && this.ball.bunt ? '번트 파울' : '파울', false);
-    this.runners = this.runnersBefore.map((r) => ({ ...r, steal: false, b: r.start ?? r.b, target: r.start ?? r.target }));
+    // [rules] 파울: 주자는 원래 베이스로 '걸어서' 돌아감(전엔 그 자리에서 베이스로 순간이동), 1루로 뛰던 타자도 타석으로 돌아감
+    const now0 = new Map(this.runners.map((r) => [r.rid, r]));
+    let far = 0;
+    const back = this.runnersBefore.map((r) => { const cur = now0.get(r.rid), st = r.start ?? r.b, b = cur && !cur.out && !cur.scored ? Math.max(st, Math.min(st + 1, cur.b)) : st; far = Math.max(far, (b - st) * BASE_D); return { ...r, steal: false, slide: 0, b: b > st + 0.01 ? b : st, target: st, foulRet: b > st + 0.01 }; });
+    const bat = this.runners.find((r) => r.batter && !r.out);
+    if (bat && bat.b > 0.02) { back.push({ ...bat, b: Math.min(1, bat.b), target: 0, foulRet: true, ghostBack: true, steal: false, slide: 0 }); far = Math.max(far, Math.min(1, bat.b) * BASE_D); }
+    this.runners = back;
+    this.foulBackDur = far;
     if (this.strikes < 2) this.strikes++;
     else if (this.ball && this.ball.bunt) { this.ball.ghost = true; this.play = null; this.strikes = 3; this.outs++; this.ev('strikeCall', { pid: this.pitch ? this.pitch.id : 0, swinging: 1, looking: 0, b: this.balls, s: 3, k: 1, bunt: 1 }); this.ev('out', { kind: 'k', call: 'out', k: 0, x: 0, z: 0, bunt: 1, outs: this.outs, bid: this.batter.id || null, name: this.batter.name }); const bs = this.stat(); bs.k++; bs.pa++; this.stamina().k++; this.say('스리번트 파울 · 삼진'); return this.endPA(1.8); }
     this.ball.ghost = true;
     this.play = null;
-    this.pause(1.4, 'pitch');
+    this.pause(Math.min(3.6, Math.max(1.4, (this.foulBackDur || 0) / 6.2 + 0.5)), 'pitch'); // [rules] 다 돌아올 시간(조깅 6.2m/s)
   }
 
   homeRun() {
@@ -1908,6 +1915,11 @@ export class Game {
           const r = Math.hypot(b.x, b.z), phi = Math.atan2(b.x, b.z);
           if ((r > fenceR(phi) + 1 && b.y < 7) || (Math.abs(phi) > FOUL && r * Math.sin(Math.abs(phi) - FOUL) > 22 && b.y < 4) || b.z < -18 || (b.vy === 0 && Math.hypot(b.vx, b.vz) < 0.2)) b.state = 'dead';
         }
+        // [rules] 파울 뒤 귀루(조깅): 다 오면 멈춤, 타석으로 돌아가던 타자는 홈에 닿으면 사라짐(타석 화면의 타자로)
+        if (this.runners.some((r) => r.foulRet)) {
+          for (const r of this.runners) if (r.foulRet) { const v = 6.2 / BASE_D; r.b = Math.max(r.target, r.b - v * dt); if (r.b <= r.target + 1e-4) { r.b = r.target; r.foulRet = false; } }
+          this.runners = this.runners.filter((r) => !(r.ghostBack && !r.foulRet));
+        }
         // 홈런 트롯
         for (const r of this.runners) if (r.trot && !r.scored) { r.b = Math.min(4, r.b + (r.tv || TROT_SPEED) / BASE_D * dt); if (r.b >= 4) r.scored = true; }
         this.walkBack(dt);
@@ -1996,6 +2008,7 @@ export class Game {
   }
 
   afterResult() {
+    if (this.runners.some((r) => r.foulRet || r.ghostBack)) { this.runners = this.runners.filter((r) => !r.ghostBack); for (const r of this.runners) if (r.foulRet) { r.b = r.target; r.foulRet = false; } } // [rules] 못 다 온 귀루는 다음 투구 전에 정리
     if (this.walkoff) { this.say('끝내기!!'); this.gameOver(); return; }
     const a = this.after;
     if (a === 'pitch') this.enterPitch();
@@ -2489,6 +2502,19 @@ export class Game {
       }
     }
     if (!best || best.mode === 'wait') return;
+    // [rules] 1루로 던지기 전에 앞 주자 견제: 포스 아닌 2·3루 주자가 베이스에서 몇 걸음 나와 있으면 내야수가 한 번 쳐다봐서 묶어 둠 → 주자는 귀루, 그다음 1루 송구
+    if (best.k === 1 && !P.looked && i < 6 && best.mode === 'throw') {
+      const chk = this.alive().filter((r) => !r.batter && !r.forced && !r.trot && (r.start ?? 0) >= 2 && r.target > (r.start ?? 0) && r.b - (r.start ?? 0) < 0.45 && !(r.pid && this.isHum(r.pid) && this.now < r.manual));
+      if (chk.length) {
+        P.looked = true;
+        const r = chk.sort((a, c) => c.start - a.start)[0], bs = BASES[r.start % 4];
+        f.ry = Math.atan2(bs[0] - f.x, bs[1] - f.z);
+        for (const q of chk) { q.target = q.start; q.heldUntil = this.now + 0.6; }
+        P.nextAI = this.now + 0.35; // 쳐다보는 시간
+        this.ev('look', { i, k: r.start });
+        return;
+      }
+    }
     if (best.mode === 'run') P.holderGoal = [best.base[0], best.base[1]];
     else if (!this.throwRelay(i, best.k)) this.throwTo(i, best.base[0], best.base[1]);
   }
@@ -2559,7 +2585,7 @@ export class Game {
       const nk = r.target + 1;
       const blocked = ahead && (ahead.target <= nk || ahead.b < nk - 0.05);
       const approaching = r.b >= r.target - 0.35;
-      if (approaching && !blocked && !r.mustReturn && !(flyPending && this.outs < 2)) {
+      if (approaching && !blocked && !r.mustReturn && !(flyPending && this.outs < 2) && this.now >= (r.heldUntil || 0)) {
         const tRun = (nk - r.b) * BASE_D / Math.max(RUN_SPEED, (r.v || 0) * BASE_D); // 달리는 중이면 현재 속도 기준
         const tDef = this.defTime(nk);
         if (tDef > tRun + (r.target === 3 ? (this.outs === 2 ? -0.3 : this.R.sendHome) : 0.3)) /* 3루 코치: 홈은 접전이어도 돌림(2아웃이면 더 과감) */ { r.target = nk; r.forced = false; continue; }

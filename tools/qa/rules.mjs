@@ -225,7 +225,7 @@ function pitchCheck(g, flag) {
 // 플레이 끝: 남은 주자는 베이스 위, 겹치지 않음
 function settleCheck(g, flag) {
   if (g.mode !== 'game' || g.phase === 'over' || g.outs >= 3) return;
-  const al = g.alive().filter((r) => !r.trot), seen = new Set();
+  const al = g.alive().filter((r) => !r.trot && !r.foulRet && !r.ghostBack), seen = new Set(); // [rules] 파울 뒤 귀루 중인 주자는 다음 투구 전(afterResult)에 베이스로
   for (const r of al) {
     if (!isInt(r.b) || r.b < 1 || r.b > 3) flag('플레이 끝났는데 주자가 베이스 밖', `b=${r.b} target=${r.target}`);
     if (seen.has(r.b)) flag('플레이 끝 한 베이스에 주자 둘', `${r.b}루`);
