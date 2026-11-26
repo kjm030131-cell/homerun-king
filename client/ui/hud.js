@@ -32,6 +32,7 @@ export function myDuty(s, role) {
 }
 
 // ── 구단 → 스코어버그 엠블럼·띠 색 ──
+const COLO = { ICN: '서울', NRT: '도쿄', HND: '도쿄', KIX: '오사카', FUK: '후쿠오카', HKG: '홍콩', TPE: '타이베이', SIN: '싱가포르', SYD: '시드니', BOM: '뭄바이', LAX: 'LA', SJC: '산호세', SEA: '시애틀', ORD: '시카고', IAD: '워싱턴', EWR: '뉴욕', AMS: '암스테르담', FRA: '프랑크푸르트', LHR: '런던' }; // [net] 서버 위치
 let clubsKey = '';
 if (typeof window !== 'undefined') window.addEventListener('logos', () => { const k = clubsKey; clubsKey = ''; if (k) paintClubs(k.split(',').map(Number)); }); // [logo] 로고 이미지가 늦게 로드되면 다시 그림
 export function paintClubs(cl) {
@@ -144,7 +145,7 @@ export function hudFrame(c, role, f) {
     const fc = (v) => (v >= 50 ? 'ok' : v >= 35 ? 'mid' : 'bad'), pc = (ms) => (ms < 80 ? 'ok' : ms < 160 ? 'mid' : 'bad');
     let h = cfg.fps && f.fps ? `<span class="${fc(f.fps)}">${f.fps}<small>fps</small></span>` : '';
     if (!c.local) {
-      h += `<span class="${pc(f.rtt)}">${f.rtt}<small>ms 내 핑</small></span>` + (f.jit > 0.05 ? '<span class="bad">연결 불안정</span>' : '');
+      h += `<span class="${pc(f.rtt)}">${f.rtt}<small>ms 내 핑${f.colo ? ' · 서버 ' + esc(COLO[f.colo] || f.colo) : ''}</small></span>` + (f.jit > 0.05 ? '<span class="bad">연결 불안정</span>' : '');
       const others = (f.pgList || []).filter((x) => x[0] !== c.myName);
       if (others.length) h += '<div>' + others.map((x) => `<span class="${pc(x[1])}">${esc(x[0])} ${x[1]}</span>`).join('') + '</div>';
     }

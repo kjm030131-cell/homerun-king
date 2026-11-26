@@ -362,11 +362,12 @@ function connectWS(code, name, pw = '') {
     if (ws.readyState === 1 && now - lastMsgAt > 6000) { try { ws.close(); } catch { } ws.onclose({ code: 1006 }); }
   }, 1000);
 }
-let rtt = 0, pgList = null, pingDrawT = 0, curFps = 0;
+let rtt = 0, pgList = null, pingDrawT = 0, curFps = 0, srvColo = ''; const rttHist = [];
 function handleMsg(m) {
   switch (m.t) {
     case 'welcome': myId = m.id; bus.emit('ui:me', { id: myId }); /* [audio] */ myToken = m.token; if (m.code) sessionStorage.setItem('hr_tok_' + m.code, m.token); break;
-    case 'pong': rtt = Math.round(performance.now() - m.c); net && net.send({ t: 'rtt', ms: rtt }); break;
+    case 'pong': { const v = performance.now() - m.c; rttHist.push(v); if (rttHist.length > 6) rttHist.shift(); const so = [...rttHist].sort((a, b) => a - b); rtt = Math.round(so[(so.length - 1) >> 1]); net && net.send({ t: 'rtt', ms: rtt }); break; } // [net] 최근 6번 중앙값(한 번 튄 값에 흔들리지 않게)
+    case 'srv': srvColo = m.colo || ''; break;
     case 'lobby': lobby = m; ui.renderLobby(); break;
     case 'chat': addChat(m.name, m.text, m.team); break;
     case 'kicked': toTitle(); ui.showErr('방장이 내보냈어'); break;
@@ -1589,7 +1590,7 @@ function updateHUD() {
     camMode, gauge: g, pitchType, bunt: !!(buntOn || s.bs), swingMode: mode, aimOn: !!(a && role.batter && camMode !== 'intro'),
     throwPow: tbarPow, landChase: landRing.visible && s.ch === role.fi,
     ballDist: ballL && ballL.h < 0 ? Math.hypot(ballPos.x, ballPos.z) : null,
-    fps: curFps, rtt, pgList, jit: NI.jit,
+    fps: curFps, rtt, pgList, jit: NI.jit, colo: srvColo,
   });
 }
 // 미니맵

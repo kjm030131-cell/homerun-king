@@ -17,20 +17,21 @@ export default {
     let m = p.match(/^\/api\/room\/([A-Za-z0-9]{4})$/);
     if (m) {
       const code = m[1].toUpperCase();
-      return env.ROOMS.get(env.ROOMS.idFromName(code), { locationHint: 'apac' }).fetch(new Request('https://room/info', { headers: { 'x-room': code } }));
+      // [net] 위치 힌트(apac) 없이: 방은 처음 만든 사람(한국) 가까운 데이터센터에 생김 — apac 힌트는 싱가포르 등 먼 곳에 잡힐 수 있었음
+      return env.ROOMS.get(env.ROOMS.idFromName(code)).fetch(new Request('https://room/info', { headers: { 'x-room': code } }));
     }
     // [motion] 핸드폰 컨트롤러 ↔ PC 중계 (방 코드와 따로, 6자리)
     m = p.match(/^\/ws\/pad\/([A-Za-z0-9]{6})$/);
     if (m) {
       if (req.headers.get('Upgrade') !== 'websocket') return new Response('websocket only', { status: 426 });
-      return env.PADS.get(env.PADS.idFromName(m[1].toUpperCase()), { locationHint: 'apac' }).fetch(req);
+      return env.PADS.get(env.PADS.idFromName(m[1].toUpperCase())).fetch(req);
     }
     m = p.match(/^\/ws\/([A-Za-z0-9]{4})$/);
     if (m) {
       if (req.headers.get('Upgrade') !== 'websocket') return new Response('websocket only', { status: 426 });
       const code = m[1].toUpperCase();
       const h = new Headers(req.headers); h.set('x-room', code);
-      return env.ROOMS.get(env.ROOMS.idFromName(code), { locationHint: 'apac' }).fetch(new Request(req.url, { headers: h }));
+      return env.ROOMS.get(env.ROOMS.idFromName(code)).fetch(new Request(req.url, { headers: h }));
     }
     return env.ASSETS.fetch(req);
   },
@@ -156,6 +157,7 @@ export class Room {
       if (typeof e.data !== 'string' || e.data.length > 4000) return;
       let m; try { m = JSON.parse(e.data); } catch { return; }
       if (this.socks.get(id) !== server) return;
+      if (m.t === 'ping') { try { server.send(JSON.stringify({ t: 'pong', c: m.c })); } catch { } return; } // [net] 핑은 게임 처리 거치지 않고 바로
       try { this.game.handle(id, m); } catch (err) { console.error('handle', err); }
     });
     const bye = () => {
@@ -168,6 +170,9 @@ export class Room {
     server.addEventListener('error', bye);
     this.startLoop();
     this.report(true);
+    // [net] 이 방 서버가 실제로 있는 Cloudflare 데이터센터(공항 코드) — 핑이 왜 높은지 보이게
+    if (this.colo) { try { server.send(JSON.stringify({ t: 'srv', colo: this.colo })); } catch { } }
+    else if (!this.coloP) this.coloP = fetch('https://cloudflare.com/cdn-cgi/trace').then((r) => r.text()).then((t) => { const m = /colo=(\w+)/.exec(t); this.colo = m ? m[1] : '?'; const msg = JSON.stringify({ t: 'srv', colo: this.colo }); for (const ws of this.socks.values()) try { ws.send(msg); } catch { } }).catch(() => { this.coloP = null; });
     return new Response(null, { status: 101, webSocket: client });
   }
 
