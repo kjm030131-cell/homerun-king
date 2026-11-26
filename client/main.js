@@ -420,6 +420,7 @@ const ui = createUI({
 $('bReconnect').onclick = () => { if (roomCode) { wsRetry = 0; connectWS(roomCode, myName); } };
 // ═════════════ 스냅샷 ═════════════
 const seen = { msg: -1, hr: -1, te: -1, ce: -1, we: -1, pitch: -1, lp: -1 };
+const hitHold = { on: false, p: new THREE.Vector3(), rel: -9 }; // [perf] 히트스톱 화면 공
 let ballL = null, lastBallSt = '', hitStopUntil = 0, excite = 0, hrCine = 0, hrCineStart = 0;
 let shake = 0, lastHolder = -1, camPunch = 0, lastContactT = 0;
 const replay = new Replay();
@@ -1378,11 +1379,15 @@ function updateBall(dt, t, role, pitchPhase) {
     if (ballL.h >= 0) {
       vis = false; // 수비수 손 안의 공(모델)이 보임
       const A = fielders[ballL.h]; if (A) A.p.ball.getWorldPosition(ballPos);
-    } else if (tp < hitStopUntil) { ballL.tb = t; vis = true; } // 히트스톱: 공 잠깐 멈춤(시각도 같이 멈춤 → 끝나고 따라잡지 않음) [net]
-    else {
+    } else if (tp < hitStopUntil) { // 히트스톱: 화면의 공만 잠깐 멈춤 — [perf] 공 계산은 계속 진행(전엔 시각까지 멈춰 화면 공이 최대 2m 뒤처지다 스냅샷에 끌려가며 순간이동)
+      if (!hitHold.on) { hitHold.on = true; hitHold.p.copy(ballPos); }
+      stepBall(ballL, t, integrate); ballPos.copy(hitHold.p); hitHold.rel = tp; vis = true;
+    } else {
+      if (hitHold.on) { hitHold.on = false; hitHold.rel = tp; }
       // [net] 화면 공 시각(tb) → 지금(t)까지 적분 (프레임 dt 대신: 스냅샷 합류와 같은 시계라 앞서 갔다 끌려오기 없음)
       stepBall(ballL, t, integrate, (ev) => { if (ev.landed && ev.impact > 2.5) { bus.emit('cue:bounce', { impact: ev.impact, surf: ev.surf, x: ballL.x, z: ballL.z }); /* [audio] */ if (ev.surf === 'dirt' && ev.impact > 3) fx.dustPuff(ballL.x, ballL.z, 0.8, 0.8); } });
       ballPos.set(ballL.x, ballL.y, ballL.z);
+      { const k = (tp - hitHold.rel) / 0.12; if (k < 1 && k >= 0) ballPos.lerpVectors(hitHold.p, ballPos, k * k * (3 - 2 * k)); } // [perf] 멈췄던 자리에서 0.12초에 실제 위치로 이어 붙임
       ballLook.spinVec(ballL.sx, ballL.sy, ballL.sz); // [pitch]
       fx.trailPush(ballPos, ballL.state === 'thrown' ? '#9fd0ff' : '#ffe6b0');
       vis = true;
