@@ -60,7 +60,7 @@ export function initAudio() {
     if (!d.contact) { S.whiff(); return; }
     if (d.pid != null) seenContact.set(d.pid, now());
     const kind = S.bat(d, { casual: rules === 'casual' });
-    if (kind !== 'tip' && kind !== 'bunt') crowd.rise(expectOf(d));
+    if (kind !== 'tip' && kind !== 'bunt') setTimeout(() => crowd.rise(expectOf(d)), 0); // [perf] 관중 반응은 다음 작업으로(타격 프레임 가볍게)
   });
   on('contact', (d) => {
     const t = now();
@@ -120,7 +120,7 @@ export function initAudio() {
     const t = now(); if (t - lastHr < 3) return; lastHr = t;
     crowd.explode(!!d.walkoff);
     S.music.charge();
-    for (let i = 0; i < 6; i++) S.firework(0.9 + i * 0.35);
+    for (let i = 0; i < 6; i++) setTimeout(() => S.firework(0.05), (0.85 + i * 0.35) * 1000); // [perf] 폭죽 6발의 소리 노드(100여 개)를 한 프레임에 다 만들던 것(40ms) → 터질 때마다
   });
   on('score', (d) => {
     if (now() - lastHr < 4) return; // 홈런 득점은 이미 터짐

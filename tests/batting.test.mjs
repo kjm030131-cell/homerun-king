@@ -90,10 +90,10 @@ test('보통 사람 흉내: 리얼 타율 .24~.33 · 삼진율 16~27% (11-23 난
   assert.ok(r.avg > 0.24 && r.avg < 0.33, `리얼 타율 ${r.avg.toFixed(3)}`);
   assert.ok(r.k > 0.16 && r.k < 0.27, `리얼 삼진율 ${(r.k * 100).toFixed(1)}%`);
 });
-test('보통 사람 흉내: 캐주얼 타율 .31~.45 (11-23 난이도 조정 후)', () => {
+test('보통 사람 흉내: 캐주얼 타율 .31~.46 (11-23 난이도 조정 후, 11-26 좌우중간 120m)', () => {
   const r = withSeed(22, () => human('casual', 18, 3));
   console.log(`# 캐주얼 보통 흉내: 타율 ${r.avg.toFixed(3)} 삼진 ${(r.k * 100).toFixed(1)}%`);
-  assert.ok(r.avg > 0.31 && r.avg < 0.45, `캐주얼 타율 ${r.avg.toFixed(3)}`);
+  assert.ok(r.avg > 0.31 && r.avg < 0.46, `캐주얼 타율 ${r.avg.toFixed(3)}`);
 });
 
 test('지면 재질이 새 경기장 그림과 같음 (내야 흙 = 29m 원 ∩ 파울라인 바깥 1.8m)', () => {
