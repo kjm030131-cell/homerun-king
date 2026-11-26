@@ -775,7 +775,8 @@ export class Game {
     this.pause(2.4, 'pitch');
   }
   mkFielder(pos, ctrl) {
-    return { pos, x: HOME_SPOT[pos][0], z: HOME_SPOT[pos][1], ry: pos === 'C' ? 0 : Math.atan2(-HOME_SPOT[pos][0], -HOME_SPOT[pos][1]), ctrl, act: -99, mv: 0, jt: -99, dv: -99, dvx: 0, dvz: 0, fum: -99, lastMvT: 0 };
+    return { pos, x: HOME_SPOT[pos][0], z: HOME_SPOT[pos][1], ry: pos === 'C' ? 0 : Math.atan2(-HOME_SPOT[pos][0], -HOME_SPOT[pos][1]), ctrl, act: -99, mv: 0, jt: -99, dv: -99, dvx: 0, dvz: 0, fum: -99, lastMvT: 0,
+      tr: { react: rand(-0.07, 0.1), spd: rand(0.95, 1.05), acc: rand(0.85, 1.15), drift: rand(1.5, 4), curve: Math.random() < 0.5 ? -1 : 1 } }; // [ai] 선수마다 반응·발·가속·버릇이 조금씩 다름
   }
 
   nextBatter() {
@@ -899,7 +900,16 @@ export class Game {
       if (IN[pos]) return IN[pos];
     }
     if (on(1)) { const DP = { '2B': [-9.5, 36.5], SS: [9, 37] }; if (DP[pos]) return DP[pos]; }
-    return hs;
+    return this.shade(pos, hs);
+  }
+  // [ai] 타자마다 수비 위치를 조금씩: 당겨치는 쪽으로 이동(우타 → 3루·좌익수 쪽, 좌타 → 1루·우익수 쪽) + 타자별 깊이·좌우 흔들림
+  shade(pos, hs) {
+    if (pos === 'P' || pos === 'C' || !this.batter) return hs;
+    const B = this.batter, h = B.h === -1 ? -1 : 1; // handOf: 1 우타 -1 좌타 (x+ = 좌익수 쪽)
+    if (B._sh == null) { B._sh = rand(-1, 1); B._dp = rand(-1, 1); }
+    const of = POS.indexOf(pos) >= 6, side = (of ? 2.4 : 1.1) * h + B._sh * (of ? 1.8 : 0.8), depth = B._dp * (of ? 3 : 1);
+    const r = Math.hypot(hs[0], hs[1]) || 1;
+    return [hs[0] + side, hs[1] + hs[1] / r * depth];
   }
   // [11-23] soft: 멀리 있는 수비수는 순간이동시키지 않고 투구 대기 동안 걸어서 돌아오게(walkBack) — 예전엔 결과 화면(1~2초)이 끝나면 외야수가 제자리로 '뿅'
   resetFielders(soft = false) {
@@ -2253,7 +2263,12 @@ export class Game {
       cov[2] = take(K, 'P');
       // 투수: 앞선 주자가 홈을 노리면 홈 뒤, 아니면 3루 뒤 백업
       const pi = I('P');
-      if (!used.has(pi)) { const lead = Math.max(0, ...this.alive().map((r) => r.target)); backup.push([pi, lead >= 4 || this.alive().some((r) => r.b >= 2) ? [6, -9] : [26, 12]]); used.add(pi); }
+      // [ai] 주자가 없으면(타자 주자뿐) 백업 갈 곳이 없음 → 마운드 근처에서 지켜봄(전엔 외야 타구마다 3루 뒤로 뛰어감) · 홈런성 타구도 그냥 봄
+      if (!used.has(pi)) {
+        const al = this.alive(), lead = Math.max(0, ...al.map((r) => r.target)), others = al.some((r) => r.b >= 1 || r.target >= 2);
+        const hrBall = b.state === 'air' && b.y > 6 && rad > 70 && Math.hypot(b.vx, b.vz) > 18;
+        if (others && !hrBall) { backup.push([pi, lead >= 4 || al.some((r) => r.b >= 2) ? [6, -9] : [26, 12]]); used.add(pi); }
+      }
       // 나머지 외야수: 쫓는 외야수 뒤(홈에서 본 바깥쪽 5m)를 백업
       for (const p of ['LF', 'CF', 'RF']) {
         const i = I(p); if (used.has(i)) continue;
@@ -2355,9 +2370,11 @@ export class Game {
       for (const [ci, g] of R.backup) if (!goals[ci]) goals[ci] = g;
       for (let i = 0; i < N; i++) {
         if (goals[i] || i === b.holder) continue;
-        const f = this.fielders[i], hs = HOME_SPOT[f.pos];
-        if (f.pos === 'P') goals[i] = [MOUND[0], MOUND[1]];
-        else goals[i] = hs;
+        const f = this.fielders[i], hs = f.pos === 'P' ? MOUND : this.standSpot(f), tr = f.tr || { drift: 2.5 };
+        // [ai] 맡은 일이 없으면 제자리에 굳어 있지 않고 공 쪽으로 몇 걸음(사람마다 1.5~4m) 따라가며 지켜봄
+        const bx = b.holder >= 0 ? this.fielders[b.holder].x : b.x, bz = b.holder >= 0 ? this.fielders[b.holder].z : b.z;
+        const dx = bx - hs[0], dz = bz - hs[1], dd = Math.hypot(dx, dz) || 1, k = Math.min(tr.drift, dd * 0.12) * (f.pos === 'C' ? 0.3 : 1);
+        goals[i] = [hs[0] + dx / dd * k, hs[1] + dz / dd * k];
       }
       P.goals = goals;
       this.autoSwitch();
@@ -2405,12 +2422,16 @@ export class Game {
       }
       if (this.isHumanActive(f)) continue;
       if (this.now - f.dv < 1.2) { f.mv = 0; continue; }
-      if (P.kind !== 'steal' && P.kind !== 'pick' && react < (i >= 6 ? this.D.react + 0.2 : this.D.react)) continue;
-      const g = i === b.holder ? (P.holderGoal || null) : P.goals && P.goals[i];
+      const tr = f.tr || { react: 0, spd: 1, acc: 1, curve: 1 };
+      if (P.kind !== 'steal' && P.kind !== 'pick' && react < (i >= 6 ? this.D.react + 0.2 : this.D.react) + tr.react) continue;
+      let g = i === b.holder ? (P.holderGoal || null) : P.goals && P.goals[i];
       if (!g) { f.mv = 0; continue; }
+      // [ai] 외야수가 뜬공을 멀리서 쫓을 땐 직선 대신 살짝 둥글게(공 뒤로 돌아 들어가며 잡는 실제 동선) — 선수마다 도는 쪽이 다름
+      if (i === P.chaser && i >= 6 && b.state === 'air') { const gd = Math.hypot(g[0] - f.x, g[1] - f.z); if (gd > 6) { const gr = Math.hypot(g[0], g[1]) || 1, back = Math.min(2.5, gd * 0.12), px = -(g[1] - f.z) / gd, pz = (g[0] - f.x) / gd, side = Math.min(2.2, gd * 0.1) * tr.curve; g = [g[0] + g[0] / gr * back + px * side, g[1] + g[1] / gr * back + pz * side]; } }
       const dx = g[0] - f.x, dz = g[1] - f.z, d = Math.hypot(dx, dz);
-      const top = (i === P.chaser ? FIELD_SPEED : FIELD_SPEED * 0.9) * (d > 8 ? 1.06 : 1);
-      f.v = Math.min(top, (f.v || 0) + (i >= 6 ? 5.5 : 10) * dt); // 첫발 가속: 내야수는 빠른 첫발, 외야수는 최고 속도까지 ~1.1초
+      const idle = i !== P.chaser && P.goals && P.goals[i] && !Object.values(P.roles?.cov || {}).includes(i) && !(P.roles?.backup || []).some((q) => q[0] === i) && P.roles?.relay?.ci !== i;
+      const top = (idle ? 2.2 : (i === P.chaser ? FIELD_SPEED : FIELD_SPEED * 0.9) * (d > 8 ? 1.06 : 1)) * tr.spd; // 할 일 없는 선수는 걸음
+      f.v = Math.min(top, (f.v || 0) + (i >= 6 ? 5.5 : 10) * tr.acc * dt); // 첫발 가속: 내야수는 빠른 첫발, 외야수는 최고 속도까지 ~1.1초
       const spd = Math.min(f.v, d > 0.12 ? top : 0) || f.v;
       if (d > 0.12) {
         const st = Math.min(d, spd * dt);
