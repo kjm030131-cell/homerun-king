@@ -207,7 +207,7 @@ function prewarmRunners(team) {
 }
 const cachedTeam = (k) => { const c = teamCache.get(k); return c && (!usingNewCharacter() || c.every((A) => A.p.char)) ? c : null; }; // 늦게 온 새 몸으로 못 바뀐 옛 몸 캐시는 버림
 function clearActors() {
-  teamCache.clear(); runnerPool.clear(); prewarmRunners.home = prewarmRunners.away = 0; for (const k in prewarmRunners) prewarmRunners[k] = 0;
+  teamCache.clear(); runnerPool.clear(); prebuildTeam.home = prebuildTeam.away = 0; prewarmRunners.home = prewarmRunners.away = 0; for (const k in prewarmRunners) prewarmRunners[k] = 0;
   for (const A of fielders) scene.remove(A.p.root);
   fielders = []; fieldTeamBuilt = null;
   if (batter) scene.remove(batter.p.root); batter = null; batTeamBuilt = null;
@@ -230,9 +230,32 @@ const DUGOUT_XZ = (team) => [(team === 'home' ? 1 : -1) * 23.5, 16];
 const SWAP_RUN = { v: 6.8, maxD: 24, leaveT: 5 };
 const leavers = []; // 나가는 수비 {A, t0, dx, dz}
 const tp0 = () => nowP();
-function buildTeams(s) {
+function prebuildTeam(team, bTeam, posList) { // team: 다음 이닝 수비 팀, bTeam: 다음 이닝 공격 팀
+  if (!usingNewCharacter() || prebuildTeam[team]) return;
+  const kf = 'f' + team + posList.join(''), kb = 'b' + bTeam;
+  if (teamCache.has(kf) && teamCache.has(kb)) return;
+  prebuildTeam[team] = 1;
+  const nums = { P: 18, C: 22, '1B': 25, '2B': 4, '3B': 13, SS: 6, LF: 7, CF: 8, RF: 9 };
+  const ric = window.requestIdleCallback || ((f) => setTimeout(() => f({ timeRemaining: () => 8 }), 120));
+  const jobs = posList.map((p, i) => () => { const A = mkActor({ team, num: nums[p], role: p === 'C' ? 'catcher' : 'fielder', seed: i + (team === 'home' ? 0 : 50) }); A.pos = p; scene.remove(A.p.root); return A; });
+  const out = [];
+  const step = () => {
+    if (teamCache.has(kf) || !usingNewCharacter()) return; // 그새 진짜로 만들어졌으면 그만
+    if (out.length < jobs.length) { out.push(jobs[out.length]()); ric(step, { timeout: 2500 }); return; }
+    teamCache.set(kf, out);
+    if (!teamCache.has(kb)) {
+      const B = mkActor({ team: bTeam, num: 24, role: 'batter', seed: 99 }); scene.remove(B.p.root); const cs = [B];
+      for (const [x, z] of [[-24, 21], [24, 21]]) { const C = mkActor({ team: bTeam, num: 70 + cs.length - 1, role: 'fielder', seed: x }); C.p.glove.visible = false; C.p.root.position.set(x, 0, z); C.p.root.rotation.y = Math.atan2(-x, -z + 10); scene.remove(C.p.root); cs.push(C); }
+      teamCache.set(kb, cs);
+    }
+  };
+  ric(step, { timeout: 2500 });
+}
+function buildTeams(s) { const T0 = RNOW(); try { buildTeams2(s); } finally { const d = RNOW() - T0; if (d > 5 && window.__prof) window.__prof.top.push([Math.round(d), 'buildTeams', s.half + ' cache f:' + [...teamCache.keys()].join(',')]); } }
+function buildTeams2(s) {
   const ft = s.half === 0 ? 'home' : 'away', bt = s.half === 0 ? 'away' : 'home';
   const key = ft + s.fl.map((f) => f[0]).join('');
+  if (fieldTeamBuilt && batTeamBuilt) { prebuildTeam(bt, ft, s.fl.map((f) => f[0])); prewarmRunners('home'); prewarmRunners('away'); } // [perf] 새 몸이 늦게 로드돼도(첫 빌드 땐 아직 없음) 준비되는 대로 미리 만듦
   if (fieldTeamBuilt !== key) {
     // [motion2] 이닝 교대: 공수 바뀌는 순간(결과 대기 중)이면 나가는 수비는 자기 덕아웃 쪽으로 뛰어 들어가고, 들어오는 수비는 덕아웃 쪽에서 뛰어나옴
     //   화면 연출만 — sim 위치·시간은 그대로(첫 투구 시각 안 바뀜 = 템포 그대로)
