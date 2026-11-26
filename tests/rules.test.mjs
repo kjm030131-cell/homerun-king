@@ -45,7 +45,7 @@ test('파울 판정 전에 홈을 밟은 3루 주자 득점은 파울이면 취�
   until(g, () => g.phase !== 'live');
   assert.ok(scored >= 1, '주자가 파울 확정 전에 홈을 밟는 상황이어야 함');
   assert.equal(g.score[0], 0, '파울이면 득점 없음');
-  assert.equal(g.runners.filter((r) => !r.out && !r.scored).map((r) => r.b).join(), '3', '주자는 3루로 복귀');
+  assert.equal(g.runners.filter((r) => !r.out && !r.scored && !r.ghostBack).map((r) => r.target).join(), '3', '주자는 3루로 복귀(걸어서 돌아가는 중일 수 있음)');
 }));
 
 test('2아웃 뜬공 포구(3아웃): 포구 전에 들어온 주자 득점은 무효', () => {
