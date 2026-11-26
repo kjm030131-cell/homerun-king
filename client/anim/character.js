@@ -383,7 +383,9 @@ export class Character {
       const inView = FR.frustum.intersectsSphere(_sph);
       const far = !window.__noLod && _sph.center.distanceToSquared(FR.cam) > BODY.lodDist * BODY.lodDist; // __noLod: qa 클로즈업
       if (this.lo) { this.lo.visible = far; this.hi.visible = !far; }
-      every = !inView ? BODY.hiddenUpdate : far ? BODY.farUpdate : 1;
+      // [smooth] 멀어도 움직이는(뛰는·걷는) 선수는 매 프레임 — 몸은 60Hz 로 이동하는데 동작만 30Hz 라 뚝뚝 끊겨 보였음(TV 시점 수비수 대부분이 22m 밖)
+      const px = _sph.center.x, pz = _sph.center.z, moving = this._lpx !== undefined && (Math.abs(px - this._lpx) + Math.abs(pz - this._lpz)) > 0.004; this._lpx = px; this._lpz = pz;
+      every = !inView ? BODY.hiddenUpdate : far && !moving ? BODY.farUpdate : 1;
     }
     // [net] 'N 프레임마다'는 fps 가 30 근처로 떨어지면(맥북 에어) 먼 선수 동작이 15Hz·화면 밖이 5Hz 로 뚝뚝 끊겼음 →
     //       fps 에 맞춰 N 을 줄임(60fps 에선 전과 같음, 30fps 면 먼 선수 매 프레임·화면 밖 3프레임마다 = 둘 다 같은 초당 횟수)
